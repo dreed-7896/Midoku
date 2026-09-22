@@ -35,13 +35,18 @@ struct CollectionTests {
     }
     @Test func editingSurvivesRefreshAndResetKeepsComposition() throws {
         var (state, id) = try mixed()
-        try state.editEntry(id) { $0.titleOverride = "My edition"; $0.descriptionOverride = ""; $0.slots[0].variants[0].edits.title = "Custom name" }
+        try state.editEntry(id) {
+            $0.titleOverride = "My edition"; $0.descriptionOverride = ""; $0.artistOverride = "My artist"
+            $0.slots[0].variants[0].edits.title = "Custom name"
+        }
         try state.refresh(details: details(), connectionID: a, records: records([20, 22, 23]), language: nil)
         let edited = try #require(state.entry(id))
         #expect(state.title(edited) == "My edition")
         #expect(state.description(edited).isEmpty)
+        #expect(edited.artistOverride == "My artist")
         #expect(edited.slots.first?.preferred?.edits.title == "Custom name")
         try state.resetDetails(id)
+        #expect(state.entry(id)?.artistOverride == nil)
         #expect(state.entry(id)?.links.count == 2)
         #expect(state.entry(id)?.slots.count == 4)
     }
