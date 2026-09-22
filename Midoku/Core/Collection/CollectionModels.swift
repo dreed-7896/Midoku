@@ -291,6 +291,35 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         }
     }
 
+    func suggestedNextChapterNumber(entryID: UUID) throws -> Decimal {
+        guard let entry = entry(entryID) else { throw MCLibraryFailure.missing }
+        let numbers = entry.slots.compactMap(\.preferred).compactMap { variant -> Decimal? in
+            if let value = Self.numberedTitle(from: chapterDisplayTitle(variant))?.number { return value }
+            return number(variant).flatMap(Self.numeric)
+        }
+        return (numbers.max() ?? 0) + 1
+    }
+
+    func suggestedChapterName(entryID: UUID) throws -> String {
+        guard let entry = entry(entryID) else { throw MCLibraryFailure.missing }
+        let template = entry.slots.compactMap(\.preferred).compactMap { variant in
+            Self.numberedTitle(from: chapterDisplayTitle(variant))
+        }.max { $0.number < $1.number }
+        let prefix = template?.prefix ?? "Chapter "
+        return "\(prefix)\(Self.numberString(try suggestedNextChapterNumber(entryID: entryID)))"
+    }
+
+    static func numberedTitle(from title: String) -> (prefix: String, number: Decimal)? {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = title.range(of: #"[+-]?[0-9]+(?:\.[0-9]+)?$"#, options: .regularExpression),
+              let number = numeric(String(title[range])) else { return nil }
+        return (String(title[..<range.lowerBound]), number)
+    }
+
+    static func numberString(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue
+    }
+
     mutating func removeSlots(entryID: UUID, slotIDs: Set<UUID>) throws {
         try editEntry(entryID) { entry in
             entry.exclusions.formUnion(entry.slots.filter { slotIDs.contains($0.id) }.flatMap(\.variants).map(\.chapterID))
