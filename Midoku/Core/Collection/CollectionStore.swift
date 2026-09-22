@@ -174,7 +174,8 @@ final class MCCollectionStore {
 
     @discardableResult
     func add(_ manga: AidokuRunner.Manga, chapters: [AidokuRunner.Chapter], categories: Set<UUID> = [], status: MCPersonalStatus = .planned, follow: Bool = true,
-             title: String? = nil, description: String? = nil, author: String? = nil, cover: MCLibraryCover? = nil) throws -> UUID {
+             title: String? = nil, description: String? = nil, author: String? = nil, artist: String? = nil,
+             cover: MCLibraryCover? = nil) throws -> UUID {
         if let existing = entryID(for: manga) { return existing }
         let name = SourceStore.shared.source(for: manga.sourceKey)?.name ?? manga.sourceKey
         var result = UUID()
@@ -189,6 +190,7 @@ final class MCCollectionStore {
             entry.titleOverride = title
             entry.descriptionOverride = description
             entry.authorOverride = author
+            entry.artistOverride = artist
             if let cover { state.library.covers.append(cover); entry.coverID = cover.id }
             entry.links = [MCEntrySourceLink(listingID: listingID, followsNewChapters: follow, needsInitialImport: chapters.isEmpty && manga.chapters == nil)]
             entry.slots = state.library.chapters.filter { $0.identity.listing == listing.identity && $0.available }
@@ -233,27 +235,6 @@ final class MCCollectionStore {
 
     func suggestedChapterName(for entryID: UUID) -> String {
         (try? library.suggestedChapterName(entryID: entryID)) ?? "Chapter 1"
-    }
-
-    func addExistingChapters(_ chapterIDs: [UUID], to entryID: UUID) throws {
-        try change { state in
-            guard state.library.entry(entryID) != nil else { throw MCLibraryFailure.missing }
-            var nextNumber = try state.library.suggestedNextChapterNumber(entryID: entryID)
-            let suggestedName = try state.library.suggestedChapterName(entryID: entryID)
-            let prefix = MCLibraryState.numberedTitle(from: suggestedName)?.prefix ?? "Chapter "
-            let usesStandardChapterName = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "chapter"
-            for chapterID in chapterIDs {
-                guard state.library.chapter(chapterID) != nil else { throw MCLibraryFailure.missing }
-                guard state.library.entry(entryID)?.slots.flatMap(\.variants).contains(where: { $0.chapterID == chapterID }) != true else { continue }
-                let number = MCLibraryState.numberString(nextNumber)
-                let edits = MCChapterEdits(title: usesStandardChapterName ? nil : "\(prefix)\(number)", number: number)
-                try state.library.addChapter(
-                    entryID: entryID,
-                    variant: MCChapterVariant(chapterID: chapterID, edits: edits)
-                )
-                nextNumber += 1
-            }
-        }
     }
 
     @discardableResult

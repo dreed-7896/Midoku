@@ -62,6 +62,7 @@ nonisolated struct MCPersonalEntry: Codable, Identifiable, Sendable {
     var titleOverride: String?
     var descriptionOverride: String?
     var authorOverride: String?
+    var artistOverride: String?
     var coverID: UUID?
     var hidesCover = false
     var primaryListingID: UUID?
@@ -198,9 +199,9 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     mutating func resetDetails(_ id: UUID) throws {
         try editEntry(id) { entry in
             if entry.primaryListingID != nil {
-                entry.titleOverride = nil; entry.descriptionOverride = nil; entry.authorOverride = nil
+                entry.titleOverride = nil; entry.descriptionOverride = nil; entry.authorOverride = nil; entry.artistOverride = nil
             } else {
-                entry.descriptionOverride = nil; entry.authorOverride = nil
+                entry.descriptionOverride = nil; entry.authorOverride = nil; entry.artistOverride = nil
             }
             entry.coverID = nil; entry.hidesCover = false
         }

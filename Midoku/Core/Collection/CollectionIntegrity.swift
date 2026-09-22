@@ -36,6 +36,7 @@ nonisolated extension MCLibraryState {
         for entry in entries {
             guard !title(entry).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title(entry).count <= 1000,
                   description(entry).count <= 100_000, (entry.authorOverride?.count ?? 0) <= 4000,
+                  (entry.artistOverride?.count ?? 0) <= 4000,
                   entry.categoryIDs.isSubset(of: categories), entry.exclusions.isSubset(of: chapterIDs),
                   entry.coverID == nil || coverIDs.contains(entry.coverID ?? UUID()),
                   entry.primaryListingID == nil || entry.links.contains(where: { $0.listingID == entry.primaryListingID }),
