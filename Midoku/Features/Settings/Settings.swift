@@ -48,6 +48,14 @@ enum Settings {
                 value: .toggle(.init(subtitle: NSLocalizedString("INCOGNITO_MODE_TEXT")))
             ),
             .init(
+                key: AppSettings.general.openingTab.key,
+                title: "Opening tab",
+                value: .select(.init(
+                    values: GeneralSettings.OpeningTab.allCases.map(\.rawValue),
+                    titles: GeneralSettings.OpeningTab.allCases.map(\.title)
+                ))
+            ),
+            .init(
                 key: AppSettings.general.appLock.key,
                 title: "App Lock",
                 notification: AppSettings.general.appLock.key,

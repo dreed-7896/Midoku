@@ -197,6 +197,10 @@ struct MCCollectionRootView: View {
         }
     }
 
+    private var activeGroupPage: String? {
+        grouping == .none ? nil : (groupPage ?? groupPages.first?.id)
+    }
+
     private func namedGroupPages(
         prefix: String,
         emptyTitle: String,
@@ -223,13 +227,16 @@ struct MCCollectionRootView: View {
                 if grouping != .none { groupTabs }
                 if selecting { selectionActions }
                 GeometryReader { geometry in
-                    TabView(selection: $groupPage) {
-                        collectionPage(groupPage: nil, size: geometry.size).tag(Optional<String>.none)
-                        ForEach(groupPages) { page in
-                            collectionPage(groupPage: page.id, size: geometry.size).tag(Optional(page.id))
+                    if grouping == .none || groupPages.isEmpty {
+                        collectionPage(groupPage: nil, size: geometry.size)
+                    } else {
+                        TabView(selection: $groupPage) {
+                            ForEach(groupPages) { page in
+                                collectionPage(groupPage: page.id, size: geometry.size).tag(Optional(page.id))
+                            }
                         }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
             }
             .background(Color(uiColor: .systemBackground))
@@ -280,13 +287,19 @@ struct MCCollectionRootView: View {
             .sheet(isPresented: $showImport) { MCImportCollectionView() }
             .mcErrors(store)
             .navigationDestination(for: UUID.self) { MCEntryView(entryID: $0) }
-            .onChange(of: grouping) { _, _ in groupPage = nil }
+            .onChange(of: grouping) { _, value in
+                groupPage = value == .none ? nil : groupPages.first?.id
+            }
             .onChange(of: groupPages.map(\.id)) { _, values in
-                if let groupPage, !values.contains(groupPage) { self.groupPage = nil }
+                guard grouping != .none else { groupPage = nil; return }
+                if groupPage.map(values.contains) != true { groupPage = values.first }
             }
             .onChange(of: availableTags) { _, values in tags.formIntersection(values) }
             .onChange(of: availableSources.map(\.id)) { _, values in sources.formIntersection(values) }
             .onChange(of: store.library.entries.map(\.id)) { _, ids in selected.formIntersection(ids) }
+            .onAppear {
+                if grouping != .none, groupPage == nil { groupPage = groupPages.first?.id }
+            }
             .task {
                 #if DEBUG
                 let args = ProcessInfo.processInfo.arguments
@@ -308,14 +321,13 @@ struct MCCollectionRootView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 24) {
-                    groupButton("All", count: store.library.entries.count, id: nil)
                     ForEach(groupPages) { page in
                         groupButton(page.title, count: page.entryIDs.count, id: page.id)
                     }
                 }.padding(.horizontal)
             }
             .onChange(of: groupPage) { _, value in
-                withAnimation { proxy.scrollTo(value ?? "all", anchor: .center) }
+                if let value { withAnimation { proxy.scrollTo(value, anchor: .center) } }
             }
         }.fixedSize(horizontal: false, vertical: true)
         .overlay(alignment: .bottom) { Divider() }
@@ -324,7 +336,7 @@ struct MCCollectionRootView: View {
     private var selectionActions: some View {
         HStack {
             Button(selected.isEmpty ? "Select all" : "Deselect all") {
-                if selected.isEmpty { selected = Set(entries(in: groupPage).map(\.id)) } else { selected.removeAll() }
+                if selected.isEmpty { selected = Set(entries(in: activeGroupPage).map(\.id)) } else { selected.removeAll() }
             }
             Spacer()
             Text("\(selected.count) selected").font(.subheadline).foregroundStyle(.secondary)
@@ -358,23 +370,23 @@ struct MCCollectionRootView: View {
         }
     }
 
-    private func groupButton(_ name: String, count: Int, id: String?) -> some View {
+    private func groupButton(_ name: String, count: Int, id: String) -> some View {
         Button { withAnimation { groupPage = id } } label: {
             HStack(spacing: 6) {
-                Text(name).font(.subheadline.weight(groupPage == id ? .semibold : .medium))
+                Text(name).font(.subheadline.weight(activeGroupPage == id ? .semibold : .medium))
                 Text("\(count)")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(groupPage == id ? Color.accentColor : .secondary)
+                    .foregroundStyle(activeGroupPage == id ? Color.accentColor : .secondary)
                     .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color(uiColor: groupPage == id ? UIColor.tertiarySystemFill : UIColor.secondarySystemFill), in: Capsule())
+                    .background(Color(uiColor: activeGroupPage == id ? UIColor.tertiarySystemFill : UIColor.secondarySystemFill), in: Capsule())
             }
-            .foregroundStyle(groupPage == id ? Color.accentColor : .secondary)
+            .foregroundStyle(activeGroupPage == id ? Color.accentColor : .secondary)
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) {
-                if groupPage == id { Capsule().fill(Color.accentColor).frame(height: 3) }
+                if activeGroupPage == id { Capsule().fill(Color.accentColor).frame(height: 3) }
             }
-        }.buttonStyle(.plain).id(id ?? "all")
-        .accessibilityAddTraits(groupPage == id ? .isSelected : [])
+        }.buttonStyle(.plain).id(id)
+        .accessibilityAddTraits(activeGroupPage == id ? .isSelected : [])
     }
 
     private func entryButton(_ entry: MCPersonalEntry) -> some View {

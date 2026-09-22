@@ -192,6 +192,8 @@ class TabBarController: UITabBarController {
             ]
         }
 
+        applyOpeningTab()
+
         let updateCount = AppSettings.browse.updateCount.get()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--history-preview") { selectedIndex = 2 }
@@ -425,13 +427,46 @@ private extension TabBarController {
 
 extension TabBarController {
     func search(for query: String) {
-        searchNavigationController?.popToRootViewController(animated: false)
-        searchController.search(for: query)
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Defer the tab change until the originating SwiftUI gesture has finished.
+            await Task.yield()
+            if #available(iOS 26.0, *) {
+                self.selectedTab = self.tabs.last
+            } else {
+                self.selectedViewController = self.searchNavigationController
+            }
+            await Task.yield()
+            self.searchNavigationController?.popToRootViewController(animated: false)
+            self.searchController.search(for: query)
+        }
+    }
 
+    private func applyOpeningTab() {
+        let openingTab = AppSettings.general.openingTab.get()
         if #available(iOS 26.0, *) {
-            selectedTab = tabs.last
+            switch openingTab {
+            case .search:
+                selectedTab = tabs.last
+            case .library:
+                selectedTab = tabs.first { $0.identifier == "0" }
+            case .browse:
+                selectedTab = tabs.first { $0.identifier == "1" }
+            case .history:
+                selectedTab = tabs.first { $0.identifier == "2" }
+            case .settings:
+                selectedTab = tabs.first { $0.identifier == "3" }
+            }
         } else {
-            selectedViewController = searchNavigationController
+            selectedIndex = switch openingTab {
+            case .library: 0
+            case .browse: 1
+            case .history: 2
+            case .search: 3
+            case .settings: 4
+            }
         }
     }
 

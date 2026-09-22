@@ -54,6 +54,35 @@ struct CollectionTests {
         #expect(state.entry(id)?.exclusions.count == 1)
         try state.validate(connections: [a, b], categories: [])
     }
+    @Test func removedChaptersCanBeRestored() throws {
+        var (state, id) = try mixed()
+        let slot = try #require(state.entry(id)?.slots.first)
+        let chapterID = try #require(slot.preferred).chapterID
+        try state.removeSlots(entryID: id, slotIDs: [slot.id])
+        #expect(state.entry(id)?.exclusions.contains(chapterID) == true)
+        try state.restoreChapter(entryID: id, chapterID: chapterID)
+        let restored = try #require(state.entry(id))
+        #expect(!restored.exclusions.contains(chapterID))
+        #expect(restored.slots.flatMap(\.variants).contains(where: { $0.chapterID == chapterID }))
+    }
+
+    @Test func suggestedChapterNamesContinueEditedSequence() throws {
+        var state = MCLibraryState()
+        let id = try state.add(details: details(), connectionID: a, records: records([100]), language: nil)
+        try state.editEntry(id) { entry in
+            entry.slots[0].variants[0].edits.title = "Chapter 4"
+        }
+        let next = try state.suggestedChapterName(entryID: id)
+        #expect(next == "Chapter 5")
+        try state.editEntry(id) { entry in
+            entry.slots[0].variants[0].edits.title = "Episode 4"
+        }
+        let inherited = try state.suggestedChapterName(entryID: id)
+        #expect(inherited == "Episode 5")
+        let empty = try state.createManual(title: "Empty")
+        let first = try state.suggestedChapterName(entryID: empty)
+        #expect(first == "Chapter 1")
+    }
     @Test func alternativesHaveIndependentPhysicalCompletion() throws {
         var (state, id) = try mixed()
         let incoming = try #require(state.chapters.first { $0.identity.listing.connectionID == b && $0.record.number == "20" })
