@@ -217,11 +217,42 @@ final class MCCollectionStore {
                 state.library.entry(entryID) != nil
             else { throw MCLibraryFailure.missing }
 
-            let edits = MCChapterEdits(title: trimmedTitle == displayTitle ? nil : trimmedTitle)
+            let numberedTitle = MCLibraryState.numberedTitle(from: trimmedTitle)
+            let numberOverride = numberedTitle.map(\.number).map(MCLibraryState.numberString)
+            let standardChapterName = numberedTitle?.prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "chapter"
+            let edits = MCChapterEdits(
+                title: trimmedTitle != displayTitle && !standardChapterName ? trimmedTitle : nil,
+                number: numberOverride
+            )
             try state.library.addChapter(
                 entryID: entryID,
                 variant: MCChapterVariant(chapterID: chapterID, edits: edits)
             )
+        }
+    }
+
+    func suggestedChapterName(for entryID: UUID) -> String {
+        (try? library.suggestedChapterName(entryID: entryID)) ?? "Chapter 1"
+    }
+
+    func addExistingChapters(_ chapterIDs: [UUID], to entryID: UUID) throws {
+        try change { state in
+            guard state.library.entry(entryID) != nil else { throw MCLibraryFailure.missing }
+            var nextNumber = try state.library.suggestedNextChapterNumber(entryID: entryID)
+            let suggestedName = try state.library.suggestedChapterName(entryID: entryID)
+            let prefix = MCLibraryState.numberedTitle(from: suggestedName)?.prefix ?? "Chapter "
+            let usesStandardChapterName = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "chapter"
+            for chapterID in chapterIDs {
+                guard state.library.chapter(chapterID) != nil else { throw MCLibraryFailure.missing }
+                guard state.library.entry(entryID)?.slots.flatMap(\.variants).contains(where: { $0.chapterID == chapterID }) != true else { continue }
+                let number = MCLibraryState.numberString(nextNumber)
+                let edits = MCChapterEdits(title: usesStandardChapterName ? nil : "\(prefix)\(number)", number: number)
+                try state.library.addChapter(
+                    entryID: entryID,
+                    variant: MCChapterVariant(chapterID: chapterID, edits: edits)
+                )
+                nextNumber += 1
+            }
         }
     }
 
