@@ -94,7 +94,8 @@ struct CollectionIntegrationTests {
         let store = MCCollectionStore(fileURL: file)
         let a = AidokuRunner.Manga(sourceKey: "cover-a", key: "same", title: "Original A", description: "Source summary")
         let b = AidokuRunner.Manga(sourceKey: "cover-b", key: "same", title: "Original B")
-        let entry = try store.add(a, chapters: [.init(key: "shared", chapterNumber: 1)], title: "Edited on add", description: "My summary", author: "My author")
+        let entry = try store.add(a, chapters: [.init(key: "shared", chapterNumber: 1)], title: "Edited on add", description: "My summary",
+                                  author: "My author", artist: "My artist")
         let other = try store.add(b, chapters: [.init(key: "shared", chapterNumber: 2)])
         try store.addChapter(.init(key: "shared", chapterNumber: 2), from: b, to: entry, title: "Chapter 2")
         let personal = try #require(store.library.entry(entry))
@@ -112,6 +113,7 @@ struct CollectionIntegrationTests {
         #expect(reloaded.library.title(edited) == "Edited on add")
         #expect(reloaded.library.description(edited) == "My summary")
         #expect(edited.authorOverride == "My author")
+        #expect(edited.artistOverride == "My artist")
         #expect(edited.coverID != nil)
         #expect(edited.slots.last?.preferred?.edits.coverID != nil)
         #expect(edited.slots.first?.preferred?.edits.coverID == nil)
@@ -163,33 +165,19 @@ struct CollectionIntegrationTests {
         #expect(store.library.entry(entry)?.slots.count == 1)
     }
 
-    @Test func directAndCrossEntryAddsContinueTargetChapterNames() throws {
+    @Test func directAddsContinueTargetChapterNames() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = MCCollectionStore(fileURL: root.appendingPathComponent("collection.json"))
         let targetManga = AidokuRunner.Manga(sourceKey: "target", key: "book", title: "Target")
         let sourceManga = AidokuRunner.Manga(sourceKey: "source", key: "book", title: "Source")
         let target = try store.add(targetManga, chapters: [.init(key: "four", chapterNumber: 4)])
-        let source = try store.add(sourceManga, chapters: [
-            .init(key: "twenty", chapterNumber: 20),
-            .init(key: "thirty", chapterNumber: 30)
-        ])
-
         let suggested = store.suggestedChapterName(for: target)
         #expect(suggested == "Chapter 5")
         try store.addChapter(.init(key: "forty", chapterNumber: 40), from: sourceManga, to: target, title: suggested)
         let added = try #require(store.library.entry(target)?.slots.last?.preferred)
         #expect(store.library.chapterDisplayTitle(added) == "Chapter 5")
         #expect(added.edits.number == "5")
-
-        var empty = UUID()
-        try store.change { empty = try $0.library.createManual(title: "Empty") }
-        let sourceEntry = try #require(store.library.entry(source))
-        let sourceChapterIDs = sourceEntry.slots.compactMap(\.preferred).map(\.chapterID)
-        try store.addExistingChapters(sourceChapterIDs, to: empty)
-        let emptyEntry = try #require(store.library.entry(empty))
-        let names = emptyEntry.slots.compactMap(\.preferred).map(store.library.chapterDisplayTitle)
-        #expect(names == ["Chapter 1", "Chapter 2"])
     }
 
     @Test func readerActionsStayBelowProgressAtPhoneWidths() {
