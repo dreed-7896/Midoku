@@ -8,6 +8,24 @@
 import UIKit
 
 struct GeneralSettings: Sendable {
+    enum OpeningTab: String, SettingsValue, CaseIterable {
+        case library
+        case browse
+        case history
+        case search
+        case settings
+
+        var title: String {
+            switch self {
+            case .library: "Library"
+            case .browse: "Browse"
+            case .history: "History"
+            case .search: "Search"
+            case .settings: "Settings"
+            }
+        }
+    }
+
     enum AppLockDelay: String, SettingsValue, CaseIterable {
         case immediately
         case fifteenSeconds
@@ -42,6 +60,7 @@ struct GeneralSettings: Sendable {
     var keys: [any SettingsDefault] {
         [
             incognitoMode,
+            openingTab,
             appLock,
             appLockDelay,
             blurAppSwitcher,
@@ -50,6 +69,7 @@ struct GeneralSettings: Sendable {
     }
 
     let incognitoMode = SettingsKey<Bool>("General.incognitoMode", default: false)
+    let openingTab = SettingsKey<OpeningTab>("General.openingTab", default: .library)
     let appLock = SettingsKey<Bool>("General.appLock", default: false)
     let appLockDelay = SettingsKey<AppLockDelay>("General.appLockDelay", default: .oneMinute)
     let blurAppSwitcher = SettingsKey<Bool>("General.blurAppSwitcher", default: true)
