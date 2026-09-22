@@ -7,6 +7,8 @@ struct MCEntryView: View {
     @State private var store = MCCollectionStore.shared
     @State private var showEdit = false
     @State private var showSources = false
+    @State private var showAddChapters = false
+    @State private var showRemovedChapters = false
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var editingChapter: MCID?
@@ -46,7 +48,12 @@ struct MCEntryView: View {
                         header(entry).padding(.horizontal)
                         Section {
                             if slots.isEmpty {
-                                Text("Add chapters from a source to this entry.").foregroundStyle(.secondary).padding(.horizontal)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Add chapters from another library entry or from a source.").foregroundStyle(.secondary)
+                                    Button("Add chapters from library", systemImage: "plus") { showAddChapters = true }
+                                        .buttonStyle(.borderedProminent)
+                                }
+                                .padding(.horizontal)
                             }
                             if grid {
                                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
@@ -69,6 +76,10 @@ struct MCEntryView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button("Edit entry", systemImage: "square.and.pencil") { showEdit = true }
+                            Button("Add chapters from library", systemImage: "plus") { showAddChapters = true }
+                            if !entry.exclusions.isEmpty {
+                                Button("Removed chapters (\(entry.exclusions.count))", systemImage: "arrow.uturn.backward") { showRemovedChapters = true }
+                            }
                             Button("Reset edits", systemImage: "arrow.counterclockwise") { confirmReset = true }
                             Button("Sources and alternatives", systemImage: "square.stack.3d.up") { showSources = true }
                             Picker("Chapter layout", selection: chapterGridOverride) {
@@ -92,6 +103,8 @@ struct MCEntryView: View {
         }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
         .sheet(isPresented: $showSources) { MCEntrySourcesView(entryID: entryID) }
+        .sheet(isPresented: $showAddChapters) { MCAddExistingChaptersView(entryID: entryID) }
+        .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
         .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
         .fullScreenCover(item: $reader) { MCReaderView(sequence: $0.sequence).ignoresSafeArea() }
@@ -173,8 +186,7 @@ struct MCEntryView: View {
                         .font(.title3.bold())
                         .lineLimit(4)
                         .contentShape(Rectangle())
-                        .onTapGesture { copy(title) }
-                        .onLongPressGesture { search(title) }
+                        .gesture(copyOrSearchGesture(for: title))
                     let creators = entry.authorOverride
                         ?? store.library.listing(entry.primaryListingID)?.details.authors?.joined(separator: ", ")
                         ?? store.library.listing(entry.primaryListingID)?.details.artists?.joined(separator: ", ")
@@ -184,10 +196,14 @@ struct MCEntryView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .contentShape(Rectangle())
-                            .onTapGesture { copy(creators) }
-                            .onLongPressGesture { search(creators) }
+                            .gesture(copyOrSearchGesture(for: creators))
                     }
                     Text("\(entry.status.title) · \(entry.links.count) sources").font(.caption).foregroundStyle(.secondary)
+                    if let sourceName = mainSourceName(entry) {
+                        Label("Main source: \(sourceName)", systemImage: "globe")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if !store.library.description(entry).isEmpty {
                         Text(store.library.description(entry)).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
                     }
@@ -232,6 +248,12 @@ struct MCEntryView: View {
             let key = tag.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             return seen.insert(key).inserted
         }
+    }
+
+    private func mainSourceName(_ entry: MCPersonalEntry) -> String? {
+        let listingID = entry.primaryListingID ?? entry.links.first?.listingID
+        guard let listing = store.library.listing(listingID) else { return nil }
+        return store.sourceName(listing.identity.connectionID)
     }
 
     private func chapterRow(_ slot: MCChapterSlot, grid: Bool) -> some View {
@@ -357,6 +379,19 @@ struct MCEntryView: View {
     private func copy(_ value: String) {
         UIPasteboard.general.string = value
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func copyOrSearchGesture(for value: String) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.45)
+            .exclusively(before: TapGesture())
+            .onEnded { result in
+                switch result {
+                case .first:
+                    search(value)
+                case .second:
+                    copy(value)
+                }
+            }
     }
 
     private func search(_ value: String) {
