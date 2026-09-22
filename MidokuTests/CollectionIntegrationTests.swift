@@ -163,6 +163,35 @@ struct CollectionIntegrationTests {
         #expect(store.library.entry(entry)?.slots.count == 1)
     }
 
+    @Test func directAndCrossEntryAddsContinueTargetChapterNames() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("collection.json"))
+        let targetManga = AidokuRunner.Manga(sourceKey: "target", key: "book", title: "Target")
+        let sourceManga = AidokuRunner.Manga(sourceKey: "source", key: "book", title: "Source")
+        let target = try store.add(targetManga, chapters: [.init(key: "four", chapterNumber: 4)])
+        let source = try store.add(sourceManga, chapters: [
+            .init(key: "twenty", chapterNumber: 20),
+            .init(key: "thirty", chapterNumber: 30)
+        ])
+
+        let suggested = store.suggestedChapterName(for: target)
+        #expect(suggested == "Chapter 5")
+        try store.addChapter(.init(key: "forty", chapterNumber: 40), from: sourceManga, to: target, title: suggested)
+        let added = try #require(store.library.entry(target)?.slots.last?.preferred)
+        #expect(store.library.chapterDisplayTitle(added) == "Chapter 5")
+        #expect(added.edits.number == "5")
+
+        var empty = UUID()
+        try store.change { empty = try $0.library.createManual(title: "Empty") }
+        let sourceEntry = try #require(store.library.entry(source))
+        let sourceChapterIDs = sourceEntry.slots.compactMap(\.preferred).map(\.chapterID)
+        try store.addExistingChapters(sourceChapterIDs, to: empty)
+        let emptyEntry = try #require(store.library.entry(empty))
+        let names = emptyEntry.slots.compactMap(\.preferred).map(store.library.chapterDisplayTitle)
+        #expect(names == ["Chapter 1", "Chapter 2"])
+    }
+
     @Test func readerActionsStayBelowProgressAtPhoneWidths() {
         for width in [288.0, 370.0, 600.0] {
             let controls = ReaderControlsView()
