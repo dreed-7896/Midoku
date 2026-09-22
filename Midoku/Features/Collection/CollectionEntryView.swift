@@ -7,7 +7,6 @@ struct MCEntryView: View {
     @State private var store = MCCollectionStore.shared
     @State private var showEdit = false
     @State private var showSources = false
-    @State private var showAddChapters = false
     @State private var showRemovedChapters = false
     @State private var selected = Set<UUID>()
     @State private var selecting = false
@@ -49,9 +48,7 @@ struct MCEntryView: View {
                         Section {
                             if slots.isEmpty {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text("Add chapters from another library entry or from a source.").foregroundStyle(.secondary)
-                                    Button("Add chapters from library", systemImage: "plus") { showAddChapters = true }
-                                        .buttonStyle(.borderedProminent)
+                                    Text("No chapters yet.").foregroundStyle(.secondary)
                                 }
                                 .padding(.horizontal)
                             }
@@ -76,7 +73,6 @@ struct MCEntryView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button("Edit entry", systemImage: "square.and.pencil") { showEdit = true }
-                            Button("Add chapters from library", systemImage: "plus") { showAddChapters = true }
                             if !entry.exclusions.isEmpty {
                                 Button("Removed chapters (\(entry.exclusions.count))", systemImage: "arrow.uturn.backward") { showRemovedChapters = true }
                             }
@@ -103,7 +99,6 @@ struct MCEntryView: View {
         }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
         .sheet(isPresented: $showSources) { MCEntrySourcesView(entryID: entryID) }
-        .sheet(isPresented: $showAddChapters) { MCAddExistingChaptersView(entryID: entryID) }
         .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
         .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
@@ -187,10 +182,10 @@ struct MCEntryView: View {
                         .lineLimit(4)
                         .contentShape(Rectangle())
                         .gesture(copyOrSearchGesture(for: title))
-                    let creators = entry.authorOverride
-                        ?? store.library.listing(entry.primaryListingID)?.details.authors?.joined(separator: ", ")
-                        ?? store.library.listing(entry.primaryListingID)?.details.artists?.joined(separator: ", ")
-                        ?? ""
+                    let details = store.library.listing(entry.primaryListingID)?.details
+                    let author = entry.authorOverride ?? details?.authors?.joined(separator: ", ") ?? ""
+                    let artist = entry.artistOverride ?? details?.artists?.joined(separator: ", ") ?? ""
+                    let creators = [author, artist].filter { !$0.isEmpty }.joined(separator: " · ")
                     if !creators.isEmpty {
                         Text(creators)
                             .font(.subheadline)
@@ -237,6 +232,23 @@ struct MCEntryView: View {
                     Label("Unsave", systemImage: "bookmark.slash").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 4)
                 }
                 .buttonStyle(.bordered)
+
+                Menu {
+                    ForEach(MCPersonalStatus.allCases) { status in
+                        Button {
+                            store.perform { try $0.library.editEntry(entryID) { $0.status = status } }
+                        } label: {
+                            Label(status.title, systemImage: status == entry.status ? "checkmark" : "bookmark")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "bookmark.fill")
+                        .font(.headline)
+                        .frame(width: 22)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Change status, currently \(entry.status.title)")
             }
         }
     }

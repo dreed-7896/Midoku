@@ -25,11 +25,12 @@ private struct MCRemoteCoverField: View {
 }
 
 struct MCEntryEditor: View {
-    let entryID: UUID?
+    let entryID: UUID
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var title = ""
     @State private var author = ""
+    @State private var artist = ""
     @State private var summary = ""
     @State private var status = MCPersonalStatus.planned
     @State private var categories = Set<UUID>()
@@ -48,6 +49,7 @@ struct MCEntryEditor: View {
                 Section("Details") {
                     TextField("Title", text: $title)
                     TextField("Author", text: $author)
+                    TextField("Artist", text: $artist)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
                 }
@@ -65,20 +67,19 @@ struct MCEntryEditor: View {
                     }
                     Button("Manage categories") { showCategories = true }
                 }
-                if entryID != nil {
-                    Section { Button("Reset edits", role: .destructive) { resetConfirm = true } }
-                }
+                Section { Button("Reset edits", role: .destructive) { resetConfirm = true } }
             }
-            .navigationTitle(entryID == nil ? "New entry" : "Edit entry").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Edit entry").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
             }
             .onAppear {
                 guard !loaded else { return }; loaded = true
-                if let entryID, let entry = store.library.entry(entryID) {
+                if let entry = store.library.entry(entryID) {
                     title = store.library.title(entry); summary = store.library.description(entry)
                     author = entry.authorOverride ?? store.library.listing(entry.primaryListingID)?.details.authors?.joined(separator: ", ") ?? ""
+                    artist = entry.artistOverride ?? store.library.listing(entry.primaryListingID)?.details.artists?.joined(separator: ", ") ?? ""
                     status = entry.status; categories = entry.categoryIDs; clearCover = entry.hidesCover
                 }
             }
@@ -89,7 +90,7 @@ struct MCEntryEditor: View {
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .confirmationDialog("Reset this entry’s details?", isPresented: $resetConfirm) {
                 Button("Reset edits", role: .destructive) {
-                    if let entryID, store.perform({ try $0.library.resetDetails(entryID) }) { dismiss() }
+                    if store.perform({ try $0.library.resetDetails(entryID) }) { dismiss() }
                 }
             } message: { Text("Restores entry details and cover. Chapter edits, categories and progress are kept.") }
             .mcErrors(store)
@@ -97,7 +98,7 @@ struct MCEntryEditor: View {
     }
 
     private var coverSource: AidokuRunner.Source? {
-        guard let entryID, let entry = store.library.entry(entryID),
+        guard let entry = store.library.entry(entryID),
               let listing = store.library.listing(entry.primaryListingID) else { return nil }
         return store.source(listing.identity.connectionID)
     }
@@ -117,16 +118,15 @@ struct MCEntryEditor: View {
 
     private func save() {
         if store.perform({ state in
-            let id: UUID
-            if let entryID { id = entryID } else { id = try state.library.createManual(title: title) }
-            guard let original = state.library.entry(id) else { throw MCLibraryFailure.missing }
+            guard let original = state.library.entry(entryID) else { throw MCLibraryFailure.missing }
             let listing = state.library.listing(original.primaryListingID)
             if let cover { state.library.covers.append(cover) }
             let validCategories = categories.intersection(Set(state.categories.map(\.id)))
-            try state.library.editEntry(id) { entry in
+            try state.library.editEntry(entryID) { entry in
                 if title != (original.titleOverride ?? listing?.details.title ?? "") || listing == nil { entry.titleOverride = title.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if summary != (original.descriptionOverride ?? listing?.details.description ?? "") { entry.descriptionOverride = summary }
                 if author != (original.authorOverride ?? listing?.details.authors?.joined(separator: ", ") ?? "") { entry.authorOverride = author }
+                if artist != (original.artistOverride ?? listing?.details.artists?.joined(separator: ", ") ?? "") { entry.artistOverride = artist }
                 entry.status = status; entry.categoryIDs = validCategories; entry.hidesCover = clearCover
                 if let cover { entry.coverID = cover.id }
                 if clearCover { entry.coverID = nil }
@@ -294,6 +294,7 @@ struct MCAddSourceView: View {
     @State private var follow = true
     @State private var title = ""
     @State private var author = ""
+    @State private var artist = ""
     @State private var summary = ""
     @State private var photo: PhotosPickerItem?
     @State private var cover: MCLibraryCover?
@@ -308,6 +309,7 @@ struct MCAddSourceView: View {
                 Section("Details") {
                     TextField("Title", text: $title)
                     TextField("Author", text: $author)
+                    TextField("Artist", text: $artist)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
                     Toggle("Follow new chapters", isOn: $follow)
@@ -333,6 +335,7 @@ struct MCAddSourceView: View {
                 .task {
                     guard !loaded else { return }; loaded = true
                     title = manga.title; summary = manga.description ?? ""; author = manga.authors?.joined(separator: ", ") ?? ""
+                    artist = manga.artists?.joined(separator: ", ") ?? ""
                     await store.importLegacyCategories()
                     if let name = AppSettings.library.defaultCategory.get(), let category = store.snapshot.categories.first(where: { $0.name == name }) { categories = [category.id] }
                 }
@@ -364,7 +367,9 @@ struct MCAddSourceView: View {
             _ = try store.add(manga, chapters: chapters, categories: categories.intersection(Set(store.snapshot.categories.map(\.id))), status: status, follow: follow,
                               title: title == manga.title ? nil : title,
                               description: summary == (manga.description ?? "") ? nil : summary,
-                              author: author == (manga.authors?.joined(separator: ", ") ?? "") ? nil : author, cover: cover)
+                              author: author == (manga.authors?.joined(separator: ", ") ?? "") ? nil : author,
+                              artist: artist == (manga.artists?.joined(separator: ", ") ?? "") ? nil : artist,
+                              cover: cover)
             Task { await MangaManager.shared.addToLibrary(manga: manga, chapters: chapters) }
             dismiss()
         } catch { store.error = error.localizedDescription }

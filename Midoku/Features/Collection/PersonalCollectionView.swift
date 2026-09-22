@@ -46,10 +46,18 @@ private struct MCLibrarySourceOption: Identifiable, Equatable {
     let name: String
 }
 
+private enum MCBatchCategoryMode: String, CaseIterable, Identifiable {
+    case add, replace, remove
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
 struct MCCollectionRootView: View {
     @State private var store = MCCollectionStore.shared
     @State private var path: [UUID] = []
     @State private var query = ""
+    @State private var searchVisible = false
+    @State private var searchFocused: Bool?
     @State private var groupPage: String?
     @State private var statuses = Set<MCPersonalStatus>()
     @State private var tags = Set<String>()
@@ -57,8 +65,9 @@ struct MCCollectionRootView: View {
     @State private var progressFilter = MCLibraryProgressFilter.all
     @AppStorage("Midoku.libraryGrouping") private var grouping = MCLibraryGrouping.category
     @State private var sort = MCLibrarySort.recentlyAdded
-    @State private var showCreate = false
     @State private var showCategories = false
+    @State private var showBatchCategories = false
+    @State private var showBatchArtist = false
     @State private var showImport = false
     @State private var showExport = false
     @State private var document = MCCollectionDocument()
@@ -82,6 +91,7 @@ struct MCCollectionRootView: View {
             let searchable = [
                 store.library.title(entry),
                 entry.authorOverride,
+                entry.artistOverride,
                 details?.authors?.joined(separator: " "),
                 details?.artists?.joined(separator: " "),
                 entryTags(entry).joined(separator: " ")
@@ -162,7 +172,11 @@ struct MCCollectionRootView: View {
             return pages
         case .artist:
             return namedGroupPages(prefix: "artist", emptyTitle: "Unknown artist") { entry in
-                store.library.listing(entry.primaryListingID)?.details.artists ?? []
+                if let override = entry.artistOverride, !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    [override]
+                } else {
+                    store.library.listing(entry.primaryListingID)?.details.artists ?? []
+                }
             }
         case .author:
             return namedGroupPages(prefix: "author", emptyTitle: "Unknown author") { entry in
@@ -225,37 +239,63 @@ struct MCCollectionRootView: View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 if grouping != .none { groupTabs }
-                if selecting { selectionActions }
                 GeometryReader { geometry in
                     if grouping == .none || groupPages.isEmpty {
                         collectionPage(groupPage: nil, size: geometry.size)
                     } else {
-                        TabView(selection: $groupPage) {
-                            ForEach(groupPages) { page in
-                                collectionPage(groupPage: page.id, size: geometry.size).tag(Optional(page.id))
+                        ScrollView(.horizontal) {
+                            LazyHStack(spacing: 0) {
+                                ForEach(groupPages) { page in
+                                    collectionPage(groupPage: page.id, size: geometry.size)
+                                        .frame(width: geometry.size.width, height: geometry.size.height)
+                                        .id(page.id)
+                                }
                             }
+                            .scrollTargetLayout()
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .scrollIndicators(.hidden)
+                        .scrollTargetBehavior(.paging)
+                        .scrollPosition(id: $groupPage)
                     }
                 }
             }
             .background(Color(uiColor: .systemBackground))
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
-            .customSearchable(text: $query, hidesSearchBarWhenScrolling: false, stacked: false)
+            .customSearchable(
+                text: $query,
+                enabled: $searchVisible,
+                focused: $searchFocused,
+                hidesSearchBarWhenScrolling: false,
+                stacked: false,
+                onCancel: { searchVisible = false; searchFocused = false }
+            )
             .environment(\.autocorrectionDisabled, true)
             .toolbar {
                 if selecting {
-                    ToolbarItem(placement: .topBarTrailing) { Button("Done") { selecting = false; selected.removeAll() } }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { selecting = false; selected.removeAll() } label: {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                        .accessibilityLabel("Done selecting")
+                    }
                 } else {
                     ToolbarItem(placement: .topBarLeading) { groupMenu }
                     ToolbarItem(placement: .topBarLeading) { filterMenu }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { showCreate = true } label: { Image(systemName: "plus") }.accessibilityLabel("Create entry")
+                        Button {
+                            searchVisible = true
+                            searchFocused = true
+                        } label: { Image(systemName: "magnifyingglass") }
+                            .accessibilityLabel("Search library")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
-                            Button("Select entries", systemImage: "checkmark.circle") { selecting = true; selected.removeAll() }
+                            Button("Select entries", systemImage: "checkmark.circle") {
+                                searchFocused = false; searchVisible = false
+                                query = ""
+                                selecting = true; selected.removeAll()
+                            }
                             Picker("Sort", selection: $sort) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
                             Toggle("Cover grid", isOn: $grid)
                             Toggle("Chapter grid", isOn: $chapterGrid)
@@ -270,14 +310,18 @@ struct MCCollectionRootView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if selecting { selectionActions }
+            }
             .confirmationDialog("Remove \(selected.count) entries from library?", isPresented: $confirmDelete) {
                 Button("Remove entries", role: .destructive) {
                     if store.removeEntries(selected) { selected.removeAll(); selecting = false }
                 }
             } message: { Text("Reading history and downloaded chapters are kept.") }
-            .sheet(isPresented: $showCreate) { MCEntryEditor(entryID: nil) }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
+            .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
+            .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
             .sheet(isPresented: $showAddPreview) {
                 if let manga = store.snapshot.manga.first?.manga { MCAddSourceView(manga: manga, chapters: []) }
             }
@@ -335,15 +379,45 @@ struct MCCollectionRootView: View {
 
     private var selectionActions: some View {
         HStack {
-            Button(selected.isEmpty ? "Select all" : "Deselect all") {
-                if selected.isEmpty { selected = Set(entries(in: activeGroupPage).map(\.id)) } else { selected.removeAll() }
+            let visibleIDs = Set(entries(in: activeGroupPage).map(\.id))
+            Button(selected.isSuperset(of: visibleIDs) && !visibleIDs.isEmpty ? "Deselect all" : "Select all") {
+                if selected.isSuperset(of: visibleIDs) { selected.subtract(visibleIDs) }
+                else { selected.formUnion(visibleIDs) }
             }
+            .font(.headline)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(.regularMaterial, in: Capsule())
             Spacer()
-            Text("\(selected.count) selected").font(.subheadline).foregroundStyle(.secondary)
-            Button(role: .destructive) { confirmDelete = true } label: { Image(systemName: "trash") }
-                .disabled(selected.isEmpty).accessibilityLabel("Remove selected entries")
-                .padding(.leading, 12)
-        }.padding().background(.bar)
+            Menu {
+                Button("Remove from Library", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                Divider()
+                Button("Edit Categories", systemImage: "folder") { showBatchCategories = true }
+                Button("Edit Artist", systemImage: "person.2") { showBatchArtist = true }
+                Menu("Change Status", systemImage: "bookmark") {
+                    ForEach(MCPersonalStatus.allCases) { status in
+                        Button(status.title) { updateStatus(status) }
+                    }
+                }
+            } label: {
+                Label("Actions (\(selected.count))", systemImage: "ellipsis.circle")
+                    .font(.headline)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(.regularMaterial, in: Capsule())
+            }
+            .disabled(selected.isEmpty)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    private func updateStatus(_ status: MCPersonalStatus) {
+        store.perform { state in
+            for id in selected {
+                try state.library.editEntry(id) { $0.status = status }
+            }
+        }
     }
 
     private func columns(for size: CGSize) -> [GridItem] {
@@ -356,7 +430,7 @@ struct MCCollectionRootView: View {
         if values.isEmpty {
             let libraryIsEmpty = store.library.entries.isEmpty
             UnavailableView(libraryIsEmpty ? "Library Empty" : "No matches", systemImage: "books.vertical.fill",
-                description: Text(libraryIsEmpty ? "Add a title from Browse, or create an entry." : "Try another search, group, or filter."))
+                description: Text(libraryIsEmpty ? "Add a title from Browse." : "Try another search, group, or filter."))
         } else {
             ScrollView {
                 LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
@@ -512,6 +586,121 @@ struct MCCollectionRootView: View {
                 Spacer()
             }
         }
+    }
+}
+
+private struct MCBatchCategoryEditor: View {
+    let entryIDs: Set<UUID>
+    @Environment(\.dismiss) private var dismiss
+    @State private var store = MCCollectionStore.shared
+    @State private var mode = MCBatchCategoryMode.add
+    @State private var categories = Set<UUID>()
+    @State private var showCategories = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Change", selection: $mode) {
+                        ForEach(MCBatchCategoryMode.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Change")
+                } footer: {
+                    Text(mode == .add ? "Adds the selected categories without removing existing ones."
+                        : mode == .replace ? "Replaces the categories on every selected entry."
+                        : "Removes only the selected categories.")
+                }
+
+                Section("Categories") {
+                    ForEach(store.snapshot.categories) { category in
+                        Toggle(category.name, isOn: Binding(
+                            get: { categories.contains(category.id) },
+                            set: { if $0 { categories.insert(category.id) } else { categories.remove(category.id) } }
+                        ))
+                    }
+                    Button("Manage Categories") { showCategories = true }
+                }
+            }
+            .navigationTitle("Edit Categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") { apply() }
+                        .disabled(mode != .replace && categories.isEmpty)
+                }
+            }
+            .sheet(isPresented: $showCategories) { MCCategoriesView() }
+            .mcErrors(store)
+        }
+        .midokuAccent()
+    }
+
+    private func apply() {
+        let valid = categories.intersection(Set(store.snapshot.categories.map(\.id)))
+        if store.perform({ state in
+            for id in entryIDs {
+                try state.library.editEntry(id) { entry in
+                    switch mode {
+                    case .add: entry.categoryIDs.formUnion(valid)
+                    case .replace: entry.categoryIDs = valid
+                    case .remove: entry.categoryIDs.subtract(valid)
+                    }
+                }
+            }
+        }) { dismiss() }
+    }
+}
+
+private struct MCBatchArtistEditor: View {
+    let entryIDs: Set<UUID>
+    @Environment(\.dismiss) private var dismiss
+    @State private var store = MCCollectionStore.shared
+    @State private var artist = ""
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Artist name", text: $artist)
+                        .textInputAutocapitalization(.words)
+                } header: {
+                    Text("Artist")
+                } footer: {
+                    Text("Leave blank to restore each entry’s artist from its source.")
+                }
+            }
+            .navigationTitle("Edit Artist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Apply") { apply() } }
+            }
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                let values = entryIDs.compactMap { id -> String? in
+                    guard let entry = store.library.entry(id) else { return nil }
+                    return entry.artistOverride
+                        ?? store.library.listing(entry.primaryListingID)?.details.artists?.joined(separator: ", ")
+                }
+                if let value = values.first, values.allSatisfy({ $0 == value }) { artist = value }
+            }
+            .mcErrors(store)
+        }
+        .midokuAccent()
+    }
+
+    private func apply() {
+        let value = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        if store.perform({ state in
+            for id in entryIDs {
+                try state.library.editEntry(id) { $0.artistOverride = value.isEmpty ? nil : value }
+            }
+        }) { dismiss() }
     }
 }
 
