@@ -60,6 +60,7 @@ struct MCCollectionRootView: View {
     @State private var searchFocused: Bool?
     @State private var groupPage: String?
     @State private var statuses = Set<MCPersonalStatus>()
+    @State private var artists = Set<String>()
     @State private var tags = Set<String>()
     @State private var sources = Set<UUID>()
     @State private var progressFilter = MCLibraryProgressFilter.all
@@ -100,6 +101,7 @@ struct MCCollectionRootView: View {
             return (query.isEmpty || searchable.localizedCaseInsensitiveContains(query)) &&
                 (groupPage == nil || groupEntryIDs?.contains(entry.id) == true) &&
                 (statuses.isEmpty || statuses.contains(entry.status)) &&
+                (artists.isEmpty || !artists.isDisjoint(with: Set(artistNames(entry)))) &&
                 (tags.isEmpty || !tags.isDisjoint(with: Set(entryTags(entry)))) &&
                 (sources.isEmpty || !sources.isDisjoint(with: Set(sourceIDs))) &&
                 matchesProgress(entry)
@@ -114,15 +116,26 @@ struct MCCollectionRootView: View {
     }
 
     private var hasActiveFilters: Bool {
-        !statuses.isEmpty || !tags.isEmpty || !sources.isEmpty || progressFilter != .all
+        !statuses.isEmpty || !artists.isEmpty || !tags.isEmpty || !sources.isEmpty || progressFilter != .all
     }
 
     private var activeFilterCount: Int {
-        statuses.count + tags.count + sources.count + (progressFilter == .all ? 0 : 1)
+        statuses.count + artists.count + tags.count + sources.count + (progressFilter == .all ? 0 : 1)
     }
 
     private var availableTags: [String] {
         Array(Set(store.library.entries.flatMap { entryTags($0) })).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private func artistNames(_ entry: MCPersonalEntry) -> [String] {
+        let names = entry.artistOverride.map { [$0] }
+            ?? store.library.listing(entry.primaryListingID)?.details.artists ?? []
+        return names.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    private var availableArtists: [String] {
+        Array(Set(store.library.entries.flatMap(artistNames)))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     private var availableSources: [MCLibrarySourceOption] {
@@ -171,13 +184,7 @@ struct MCCollectionRootView: View {
             }
             return pages
         case .artist:
-            return namedGroupPages(prefix: "artist", emptyTitle: "Unknown artist") { entry in
-                if let override = entry.artistOverride, !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    [override]
-                } else {
-                    store.library.listing(entry.primaryListingID)?.details.artists ?? []
-                }
-            }
+            return namedGroupPages(prefix: "artist", emptyTitle: "Unknown artist", values: artistNames)
         case .author:
             return namedGroupPages(prefix: "author", emptyTitle: "Unknown author") { entry in
                 if let override = entry.authorOverride, !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -240,22 +247,18 @@ struct MCCollectionRootView: View {
             VStack(spacing: 0) {
                 if grouping != .none { groupTabs }
                 GeometryReader { geometry in
-                    if grouping == .none || groupPages.isEmpty {
-                        collectionPage(groupPage: nil, size: geometry.size)
+                    let pages = groupPages
+                    let visibleEntries = entries(in: nil)
+                    if grouping == .none || pages.isEmpty {
+                        collectionPage(values: visibleEntries, size: geometry.size)
                     } else {
-                        ScrollView(.horizontal) {
-                            LazyHStack(spacing: 0) {
-                                ForEach(groupPages) { page in
-                                    collectionPage(groupPage: page.id, size: geometry.size)
-                                        .frame(width: geometry.size.width, height: geometry.size.height)
-                                        .id(page.id)
-                                }
+                        TabView(selection: $groupPage) {
+                            ForEach(pages) { page in
+                                collectionPage(values: visibleEntries.filter { page.entryIDs.contains($0.id) }, size: geometry.size)
+                                    .tag(Optional(page.id))
                             }
-                            .scrollTargetLayout()
                         }
-                        .scrollIndicators(.hidden)
-                        .scrollTargetBehavior(.paging)
-                        .scrollPosition(id: $groupPage)
+                        .tabViewStyle(.page(indexDisplayMode: .never))
                     }
                 }
             }
@@ -339,6 +342,7 @@ struct MCCollectionRootView: View {
                 if groupPage.map(values.contains) != true { groupPage = values.first }
             }
             .onChange(of: availableTags) { _, values in tags.formIntersection(values) }
+            .onChange(of: availableArtists) { _, values in artists.formIntersection(values) }
             .onChange(of: availableSources.map(\.id)) { _, values in sources.formIntersection(values) }
             .onChange(of: store.library.entries.map(\.id)) { _, ids in selected.formIntersection(ids) }
             .onAppear {
@@ -425,8 +429,7 @@ struct MCCollectionRootView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
     }
 
-    @ViewBuilder private func collectionPage(groupPage: String?, size: CGSize) -> some View {
-        let values = entries(in: groupPage)
+    @ViewBuilder private func collectionPage(values: [MCPersonalEntry], size: CGSize) -> some View {
         if values.isEmpty {
             let libraryIsEmpty = store.library.entries.isEmpty
             UnavailableView(libraryIsEmpty ? "Library Empty" : "No matches", systemImage: "books.vertical.fill",
@@ -477,7 +480,7 @@ struct MCCollectionRootView: View {
                 }
             }
         }.buttonStyle(.plain)
-        .accessibilityLabel("\(store.library.title(entry)), \(entry.slots.count) chapters, \(entry.status.title)")
+        .accessibilityLabel("\(store.library.title(entry)), \(entry.slots.count) chapters, \(entry.slots.filter { !store.library.isRead($0) }.count) unread, \(entry.status.title)")
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
         .contextMenu {
             Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
@@ -512,6 +515,16 @@ struct MCCollectionRootView: View {
             Picker("Reading progress", selection: $progressFilter) {
                 ForEach(MCLibraryProgressFilter.allCases) { Text($0.title).tag($0) }
             }
+            if !availableArtists.isEmpty {
+                Menu("Artist", systemImage: "person.crop.square") {
+                    ForEach(availableArtists, id: \.self) { artist in
+                        Toggle(artist, isOn: Binding(
+                            get: { artists.contains(artist) },
+                            set: { if $0 { artists.insert(artist) } else { artists.remove(artist) } }
+                        ))
+                    }
+                }
+            }
             if !availableTags.isEmpty {
                 Menu("Tags", systemImage: "tag") {
                     ForEach(availableTags, id: \.self) { tag in
@@ -535,7 +548,7 @@ struct MCCollectionRootView: View {
             if hasActiveFilters {
                 Divider()
                 Button("Clear filters", systemImage: "xmark.circle", role: .destructive) {
-                    statuses.removeAll(); tags.removeAll(); sources.removeAll(); progressFilter = .all
+                    statuses.removeAll(); artists.removeAll(); tags.removeAll(); sources.removeAll(); progressFilter = .all
                 }
             }
         } label: {
@@ -555,6 +568,7 @@ struct MCCollectionRootView: View {
             VStack(alignment: .leading, spacing: 7) {
                 MCEntryCover(entry: entry)
                     .aspectRatio(2/3, contentMode: .fit)
+                    .overlay(alignment: .topTrailing) { unreadBadge(entry).padding(6) }
                     .overlay(alignment: .bottomLeading) {
                         if gridStyle == .compact {
                             VStack(alignment: .leading, spacing: 2) {
@@ -578,6 +592,7 @@ struct MCCollectionRootView: View {
         } else {
             HStack(spacing: 14) {
                 MCEntryCover(entry: entry).frame(width: 66, height: 99).clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .topTrailing) { unreadBadge(entry).padding(4) }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.library.title(entry)).font(.headline).lineLimit(2)
                     Text(entry.status.title).font(.subheadline).foregroundStyle(.secondary)
@@ -585,6 +600,16 @@ struct MCCollectionRootView: View {
                 }
                 Spacer()
             }
+        }
+    }
+
+    @ViewBuilder private func unreadBadge(_ entry: MCPersonalEntry) -> some View {
+        let unread = entry.slots.filter { !store.library.isRead($0) }.count
+        if unread > 0 && !selecting {
+            Text("\(unread)").font(.caption2.bold()).foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(Color.accentColor, in: Capsule())
+                .accessibilityLabel("\(unread) unread chapters")
         }
     }
 }
@@ -709,8 +734,8 @@ struct MCEntryCover: View {
     @State private var store = MCCollectionStore.shared
     var body: some View {
         GeometryReader { geometry in
-            if let id = entry.coverID, let data = store.library.covers.first(where: { $0.id == id })?.data, let image = UIImage(data: data) {
-                Image(uiImage: image).resizable().scaledToFill().frame(width: geometry.size.width, height: geometry.size.height).clipped()
+            if let id = entry.coverID, let cover = store.library.covers.first(where: { $0.id == id }) {
+                MCCustomCoverImage(cover: cover, size: geometry.size)
             } else if !entry.hidesCover, let listing = store.library.listing(entry.primaryListingID), let cover = listing.details.coverURL {
                 SourceImageView(source: store.source(listing.identity.connectionID), imageUrl: cover.absoluteString,
                     width: geometry.size.width, height: geometry.size.height, placeholder: "MidokuCoverPlaceholder").clipped()

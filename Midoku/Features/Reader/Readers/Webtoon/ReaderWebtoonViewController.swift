@@ -914,6 +914,9 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
                 animated: false
             )
             scrollView.contentOffset = collectionNode.contentOffset
+            if let next = delegate?.getNextChapter() {
+                Task { await viewModel.preload(chapter: next) }
+            }
         }
     }
 }

@@ -7,8 +7,7 @@ import UIKit
 enum MCRemoteCoverLoader {
     static func load(
         _ value: String,
-        source: AidokuRunner.Source?,
-        store: MCCollectionStore
+        source: AidokuRunner.Source?
     ) async throws -> MCLibraryCover {
         guard let url = MCRemoteCoverURL.parse(value) else { throw MCLibraryFailure.coverURL }
 
@@ -28,8 +27,8 @@ enum MCRemoteCoverLoader {
             processors: processors,
             userInfo: [.processesKey: !processors.isEmpty]
         )
-        let image = try await ImagePipeline.shared.image(for: request)
-        guard let data = image.jpegData(compressionQuality: 0.92) else { throw MCLibraryFailure.cover }
-        return try store.saveCover(data: data)
+        // Validate the URL, but let Nuke own the image bytes in its clearable cache.
+        _ = try await ImagePipeline.shared.image(for: request)
+        return MCLibraryCover(url: url, sourceKey: source?.key, pageImage: source?.features.processesPages == true)
     }
 }

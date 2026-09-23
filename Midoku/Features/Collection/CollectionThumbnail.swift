@@ -6,6 +6,25 @@ enum MCRequestPurpose {
     @TaskLocal static var thumbnail = false
 }
 
+struct MCCustomCoverImage: View {
+    let cover: MCLibraryCover
+    let size: CGSize
+
+    var body: some View {
+        if let data = cover.data, let image = UIImage(data: data) {
+            Image(uiImage: image).resizable().scaledToFill()
+                .frame(width: size.width, height: size.height).clipped()
+        } else if let url = cover.url {
+            SourceImageView(source: cover.sourceKey.flatMap { SourceStore.shared.source(for: $0) },
+                imageUrl: url.absoluteString, width: size.width, height: size.height,
+                placeholder: "MidokuCoverPlaceholder", pageImage: cover.pageImage == true).clipped()
+        } else {
+            Image("MidokuCoverPlaceholder").resizable().scaledToFill()
+                .frame(width: size.width, height: size.height).clipped()
+        }
+    }
+}
+
 @MainActor
 final class MCThumbnailCache {
     static let shared = MCThumbnailCache()
@@ -100,9 +119,9 @@ struct MCChapterListArtwork: View {
     @State private var cachedSourceImage: UIImage?
 
     private var chapter: MCLibraryChapter? { variant.flatMap { store.library.chapter($0.chapterID) } }
-    private var customImage: UIImage? {
-        guard let id = variant?.edits.coverID, let data = store.library.covers.first(where: { $0.id == id })?.data else { return nil }
-        return UIImage(data: data)
+    private var customCover: MCLibraryCover? {
+        guard let id = variant?.edits.coverID else { return nil }
+        return store.library.covers.first { $0.id == id }
     }
     private var generatedImage: UIImage? {
         chapter.flatMap { MCThumbnailCache.shared.cachedImage(chapterID: $0.id) }
@@ -110,7 +129,9 @@ struct MCChapterListArtwork: View {
 
     var body: some View {
         Group {
-            if let image = customImage ?? generatedImage ?? cachedSourceImage {
+            if let customCover {
+                GeometryReader { geometry in MCCustomCoverImage(cover: customCover, size: geometry.size) }
+            } else if let image = generatedImage ?? cachedSourceImage {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 MCEntryCover(entry: entry)
@@ -119,7 +140,7 @@ struct MCChapterListArtwork: View {
         .clipped()
         .task(id: variant?.chapterID) {
             cachedSourceImage = nil
-            guard customImage == nil, generatedImage == nil, let chapter,
+            guard customCover == nil, generatedImage == nil, let chapter,
                   let thumbnail = store.snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter.thumbnail else { return }
             cachedSourceImage = await existingSourceImage(thumbnail, chapter: chapter)
         }
@@ -153,14 +174,16 @@ struct MCChapterThumbnail: View {
     @State private var image: UIImage?
     @State private var visible = false
     private var chapter: MCLibraryChapter? { variant.flatMap { store.library.chapter($0.chapterID) } }
-    private var customImage: UIImage? {
-        guard let id = variant?.edits.coverID, let data = store.library.covers.first(where: { $0.id == id })?.data else { return nil }
-        return UIImage(data: data)
+    private var customCover: MCLibraryCover? {
+        guard let id = variant?.edits.coverID else { return nil }
+        return store.library.covers.first { $0.id == id }
     }
     var body: some View {
         GeometryReader { geometry in
             Group {
-                if let image = customImage ?? image {
+                if let customCover {
+                    MCCustomCoverImage(cover: customCover, size: geometry.size)
+                } else if let image {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else if let chapter, let thumbnail = store.snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter.thumbnail {
                     SourceImageView(source: store.source(chapter.identity.listing.connectionID), imageUrl: thumbnail,
@@ -173,7 +196,7 @@ struct MCChapterThumbnail: View {
         }
         .onScrollVisibilityChange(threshold: 0.1) { visible = $0 }
         .task(id: "\(variant?.chapterID.uuidString ?? "")-\(visible)") {
-            guard visible, customImage == nil, let chapter,
+            guard visible, customCover == nil, let chapter,
                   store.snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter.thumbnail == nil else { return }
             do { try await Task.sleep(nanoseconds: 300_000_000); try Task.checkCancellation() } catch { return }
             image = await MCThumbnailCache.shared.image(chapter: chapter, store: store)

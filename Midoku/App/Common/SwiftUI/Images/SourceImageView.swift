@@ -20,6 +20,7 @@ struct SourceImageView: View {
     var contentMode: ContentMode = .fill
     var placeholder = "MangaPlaceholder"
     var placeholderSymbol: String?
+    var pageImage = false
 
     @State private var imageRequest: ImageRequest?
 
@@ -28,7 +29,9 @@ struct SourceImageView: View {
         if let downsampleWidth {
             processors.append(DownsampleProcessor(width: downsampleWidth))
         }
-        if let source, source.features.processesCovers {
+        if pageImage, let source, source.features.processesPages {
+            processors.append(PageInterceptorProcessor(source: source, pageContext: nil))
+        } else if let source, source.features.processesCovers {
             processors.append(CoverInterceptorProcessor(source: source))
         }
         return processors
@@ -91,7 +94,7 @@ struct SourceImageView: View {
         }
         imageRequest = ImageRequest(
             urlRequest: await source.getModifiedImageRequest(url: url, context: nil),
-            userInfo: [.processesKey: source.features.processesCovers]
+            userInfo: [.processesKey: (pageImage && source.features.processesPages) || source.features.processesCovers]
         )
     }
 }

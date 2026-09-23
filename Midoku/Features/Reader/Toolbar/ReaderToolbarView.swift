@@ -45,9 +45,9 @@ class ReaderToolbarView: UIView {
     }
 
     func configure() {
-        previousChapterButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
+        previousChapterButton.setImage(UIImage(systemName: "chevron.left.circle.fill"), for: .normal)
         previousChapterButton.accessibilityLabel = "Previous chapter"
-        nextChapterButton.setImage(UIImage(systemName: "chevron.right"), for: .normal)
+        nextChapterButton.setImage(UIImage(systemName: "chevron.right.circle.fill"), for: .normal)
         nextChapterButton.accessibilityLabel = "Next chapter"
         addSubview(previousChapterButton)
         addSubview(nextChapterButton)

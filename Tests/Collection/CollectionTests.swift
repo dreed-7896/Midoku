@@ -188,4 +188,17 @@ struct CollectionTests {
         #expect(MCRemoteCoverURL.parse("not a url") == nil)
     }
 
+    @Test func remoteCoverPersistsOnlyItsURLAndLegacyCoverStillDecodes() throws {
+        let url = try #require(URL(string: "https://images.example.com/cover.jpg"))
+        let remote = MCLibraryCover(url: url, sourceKey: "example", pageImage: true)
+        let encoded = try JSONEncoder().encode(remote)
+        let restored = try JSONDecoder().decode(MCLibraryCover.self, from: encoded)
+        #expect(restored.data == nil)
+        #expect(restored.url == url)
+        #expect(restored.sourceKey == "example")
+        #expect(restored.pageImage == true)
+        let legacy = MCLibraryCover(data: Data([0xFF, 0xD8, 0xFF]))
+        #expect(try JSONDecoder().decode(MCLibraryCover.self, from: JSONEncoder().encode(legacy)).data == legacy.data)
+    }
+
 }

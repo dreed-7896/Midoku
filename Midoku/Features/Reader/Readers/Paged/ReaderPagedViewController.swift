@@ -282,6 +282,9 @@ extension ReaderPagedViewController {
         }
 
         nextChapter = delegate?.getNextChapter()
+        // Prepare the adjacent chapter while the current one is being read, including
+        // the first images. Toolbar arrows can then reuse the ready page list.
+        if nextChapter != nil { preloadNextChapter(pageCount: 2) }
 
         // next chapter transition page
         let nextInfoController = ReaderPageViewController(type: .info(.next), delegate: delegate)

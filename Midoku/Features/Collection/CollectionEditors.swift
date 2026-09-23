@@ -1,5 +1,4 @@
 import AidokuRunner
-import PhotosUI
 import SwiftUI
 
 private struct MCRemoteCoverField: View {
@@ -34,7 +33,6 @@ struct MCEntryEditor: View {
     @State private var summary = ""
     @State private var status = MCPersonalStatus.planned
     @State private var categories = Set<UUID>()
-    @State private var photo: PhotosPickerItem?
     @State private var cover: MCLibraryCover?
     @State private var coverURL = ""
     @State private var loadingCoverURL = false
@@ -48,17 +46,17 @@ struct MCEntryEditor: View {
             Form {
                 Section("Details") {
                     TextField("Title", text: $title)
-                    TextField("Author", text: $author)
                     TextField("Artist", text: $artist)
+                    TextField("Author", text: $author)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
                 }
                 Section("Cover") {
-                    if let cover, let image = UIImage(data: cover.data) { Image(uiImage: image).resizable().scaledToFit().frame(height: 150) }
-                    PhotosPicker("Choose cover", selection: $photo, matching: .images)
+                    if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 100, height: 150)).frame(width: 100, height: 150) }
                     MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                         Task { await useCoverURL() }
                     }
+                    Text("URL covers are cached and fetched again after clearing the image cache.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Hide cover", isOn: $clearCover)
                 }
                 Section("Categories") {
@@ -83,10 +81,6 @@ struct MCEntryEditor: View {
                     status = entry.status; categories = entry.categoryIDs; clearCover = entry.hidesCover
                 }
             }
-            .onChange(of: photo) { _, photo in Task {
-                do { if let data = try await photo?.loadTransferable(type: Data.self) { cover = try store.saveCover(data: data); clearCover = false; coverURL = "" } }
-                catch { store.error = error.localizedDescription }
-            } }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .confirmationDialog("Reset this entry’s details?", isPresented: $resetConfirm) {
                 Button("Reset edits", role: .destructive) {
@@ -108,9 +102,8 @@ struct MCEntryEditor: View {
         loadingCoverURL = true
         defer { loadingCoverURL = false }
         do {
-            cover = try await MCRemoteCoverLoader.load(coverURL, source: coverSource, store: store)
+            cover = try await MCRemoteCoverLoader.load(coverURL, source: coverSource)
             clearCover = false
-            photo = nil
         } catch {
             store.error = error.localizedDescription
         }
@@ -144,7 +137,6 @@ struct MCChapterEditor: View {
     @State private var number = ""
     @State private var volume = ""
     @State private var cover: MCLibraryCover?
-    @State private var photo: PhotosPickerItem?
     @State private var coverURL = ""
     @State private var loadingCoverURL = false
     @State private var loaded = false
@@ -155,11 +147,10 @@ struct MCChapterEditor: View {
                 TextField("Chapter title", text: $title)
                 TextField("Chapter number", text: $number).keyboardType(.decimalPad)
                 TextField("Volume", text: $volume)
-                PhotosPicker("Choose chapter thumbnail", selection: $photo, matching: .images)
                 MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                     Task { await useCoverURL() }
                 }
-                if let cover, let image = UIImage(data: cover.data) { Image(uiImage: image).resizable().scaledToFit().frame(height: 180) }
+                if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 120, height: 180)).frame(width: 120, height: 180) }
                 Button("Reset edits") { save(reset: true) }
             }.navigationTitle("Edit chapter").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -171,10 +162,7 @@ struct MCChapterEditor: View {
                     title = store.library.chapterDisplayTitle(variant); number = store.library.number(variant) ?? ""
                     volume = variant.edits.volume ?? store.library.chapter(variant.chapterID)?.record.volume ?? ""
                 }
-                .onChange(of: photo) { _, photo in Task {
-                    do { if let data = try await photo?.loadTransferable(type: Data.self) { cover = try store.saveCover(data: data); coverURL = "" } }
-                    catch { store.error = error.localizedDescription }
-                } }.mcErrors(store)
+                .mcErrors(store)
         }
     }
 
@@ -188,8 +176,7 @@ struct MCChapterEditor: View {
         loadingCoverURL = true
         defer { loadingCoverURL = false }
         do {
-            cover = try await MCRemoteCoverLoader.load(coverURL, source: coverSource, store: store)
-            photo = nil
+            cover = try await MCRemoteCoverLoader.load(coverURL, source: coverSource)
         } catch {
             store.error = error.localizedDescription
         }
@@ -296,7 +283,6 @@ struct MCAddSourceView: View {
     @State private var author = ""
     @State private var artist = ""
     @State private var summary = ""
-    @State private var photo: PhotosPickerItem?
     @State private var cover: MCLibraryCover?
     @State private var coverURL = ""
     @State private var loadingCoverURL = false
@@ -308,18 +294,18 @@ struct MCAddSourceView: View {
             Form {
                 Section("Details") {
                     TextField("Title", text: $title)
-                    TextField("Author", text: $author)
                     TextField("Artist", text: $artist)
+                    TextField("Author", text: $author)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
                     Toggle("Follow new chapters", isOn: $follow)
                 }
                 Section("Cover") {
-                    if let cover, let image = UIImage(data: cover.data) { Image(uiImage: image).resizable().scaledToFit().frame(height: 140) }
-                    PhotosPicker("Choose cover", selection: $photo, matching: .images)
+                    if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 94, height: 140)).frame(width: 94, height: 140) }
                     MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                         Task { await useCoverURL() }
                     }
+                    Text("Use an image URL so the cover can reload after clearing the cache.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { item in
@@ -339,10 +325,6 @@ struct MCAddSourceView: View {
                     await store.importLegacyCategories()
                     if let name = AppSettings.library.defaultCategory.get(), let category = store.snapshot.categories.first(where: { $0.name == name }) { categories = [category.id] }
                 }
-                .onChange(of: photo) { _, value in Task {
-                    do { if let data = try await value?.loadTransferable(type: Data.self) { cover = try store.saveCover(data: data); coverURL = "" } }
-                    catch { store.error = error.localizedDescription }
-                } }
                 .sheet(isPresented: $showCategories) { MCCategoriesView() }
                 .mcErrors(store)
         }
@@ -354,8 +336,7 @@ struct MCAddSourceView: View {
         defer { loadingCoverURL = false }
         do {
             let source = SourceStore.shared.source(for: manga.sourceKey)
-            cover = try await MCRemoteCoverLoader.load(coverURL, source: source, store: store)
-            photo = nil
+            cover = try await MCRemoteCoverLoader.load(coverURL, source: source)
         } catch {
             store.error = error.localizedDescription
         }

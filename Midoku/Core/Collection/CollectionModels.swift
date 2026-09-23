@@ -6,6 +6,21 @@ nonisolated enum MCPersonalStatus: String, MCSettingChoice {
     var title: String { self == .onHold ? "On hold" : rawValue.capitalized }
 }
 
+nonisolated enum MCChapterDisplaySort: String, Codable, CaseIterable, Identifiable, Sendable {
+    case custom, numberAscending, numberDescending, titleAscending, titleDescending, unreadFirst
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .custom: "Personal order"
+        case .numberAscending: "Chapter number (first to last)"
+        case .numberDescending: "Chapter number (last to first)"
+        case .titleAscending: "Title (A to Z)"
+        case .titleDescending: "Title (Z to A)"
+        case .unreadFirst: "Unread first"
+        }
+    }
+}
+
 nonisolated struct MCLibraryListing: Codable, Identifiable, Sendable {
     var id = UUID()
     let identity: MCSourceListingIdentity
@@ -75,18 +90,27 @@ nonisolated struct MCPersonalEntry: Codable, Identifiable, Sendable {
     var sequenceRevision = 0
     var readerOverride: MCReaderPreferences?
     var descendingDisplay = false
+    var chapterSort: MCChapterDisplaySort?
     /// nil follows the app-wide Appearance setting; otherwise this entry uses its own layout.
     var chapterGridOverride: Bool?
 }
 
-/// Bounded, normalized JPEG/PNG bytes travel with the transactional backup; no arbitrary paths.
+/// Remote covers keep only their URL. Older imported covers retain their image data for compatibility.
 nonisolated struct MCLibraryCover: Codable, Identifiable, Sendable {
     var id = UUID()
-    var data: Data
-    var digest: String
+    var data: Data? = nil
+    var digest: String? = nil
+    var url: URL? = nil
+    var sourceKey: String? = nil
+    var pageImage: Bool? = nil
     init(data: Data) {
         self.data = data
         digest = Self.hash(data)
+    }
+    init(url: URL, sourceKey: String?, pageImage: Bool = false) {
+        self.url = url
+        self.sourceKey = sourceKey
+        self.pageImage = pageImage
     }
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }

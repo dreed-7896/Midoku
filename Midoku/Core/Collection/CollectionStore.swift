@@ -381,6 +381,20 @@ final class MCCollectionStore {
         }
     }
 
+    func setCover(url: URL, sourceKey: String?, target: CoverTarget, forEntry: Bool, pageImage: Bool = false) throws {
+        guard let parsed = MCRemoteCoverURL.parse(url.absoluteString), parsed == url else { throw MCLibraryFailure.coverURL }
+        let cover = MCLibraryCover(url: url, sourceKey: sourceKey, pageImage: pageImage)
+        try change { state in
+            state.library.covers.append(cover)
+            try state.library.editEntry(target.entryID) { entry in
+                guard let s = entry.slots.firstIndex(where: { $0.id == target.slotID }),
+                      let v = entry.slots[s].variants.firstIndex(where: { $0.id == target.variantID }) else { throw MCLibraryFailure.missing }
+                if forEntry { entry.coverID = cover.id; entry.hidesCover = false }
+                else { entry.slots[s].variants[v].edits.coverID = cover.id }
+            }
+        }
+    }
+
     func backupData() throws -> Data { try JSONEncoder().encode(snapshot) }
     func restore(_ data: Data) throws {
         let incoming = try JSONDecoder().decode(MCCollectionSnapshot.self, from: data)

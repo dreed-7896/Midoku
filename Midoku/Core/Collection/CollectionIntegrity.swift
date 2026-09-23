@@ -25,9 +25,14 @@ nonisolated extension MCLibraryState {
                   chapter.record.title.count <= 1000, (chapter.record.number?.count ?? 0) <= 100 else { throw MCLibraryFailure.invalid }
         }
         for cover in covers {
-            guard !cover.data.isEmpty, cover.data.count <= 1_048_576,
-                  cover.digest == MCLibraryCover.hash(cover.data),
-                  cover.data.starts(with: [0xFF, 0xD8, 0xFF]) || cover.data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) else { throw MCLibraryFailure.cover }
+            if let data = cover.data {
+                guard cover.url == nil, !data.isEmpty, data.count <= 1_048_576,
+                      cover.digest == MCLibraryCover.hash(data),
+                      data.starts(with: [0xFF, 0xD8, 0xFF]) || data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) else { throw MCLibraryFailure.cover }
+            } else {
+                guard let url = cover.url, MCRemoteCoverURL.parse(url.absoluteString) == url,
+                      (cover.sourceKey?.count ?? 0) <= 2000 else { throw MCLibraryFailure.cover }
+            }
         }
         func valid(_ edits: MCChapterEdits) -> Bool {
             (edits.title?.count ?? 0) <= 1000 && (edits.number?.count ?? 0) <= 100 && (edits.volume?.count ?? 0) <= 100 &&
@@ -76,7 +81,8 @@ nonisolated extension MCLibraryState {
         }
         for incoming in imported.covers {
             if let local = covers.first(where: { $0.id == incoming.id }) {
-                guard local.digest == incoming.digest else { throw MCLibraryFailure.invalid }
+                guard local.digest == incoming.digest, local.url == incoming.url,
+                      local.sourceKey == incoming.sourceKey, local.pageImage == incoming.pageImage else { throw MCLibraryFailure.invalid }
             } else { result.covers.append(incoming) }
         }
         for var incoming in imported.entries where !entries.contains(where: { $0.id == incoming.id }) {

@@ -77,11 +77,10 @@ extension ReaderViewController {
         actions += [false, true].map { forEntry in
             let action = UIAction(title: forEntry ? "Set as entry cover" : "Set as chapter cover",
                                   image: UIImage(systemName: forEntry ? "book.closed" : "photo"),
-                                  attributes: target == nil ? .disabled : []) { [weak self] _ in
-                guard let target else { return }
+                                  attributes: target == nil || imageURL.flatMap(MCRemoteCoverURL.parse) == nil ? .disabled : []) { [weak self] _ in
+                guard let target, let imageURL, let url = MCRemoteCoverURL.parse(imageURL) else { return }
                 do {
-                    guard let data = image.jpegData(compressionQuality: 0.9) else { throw MCLibraryFailure.cover }
-                    try store.setCover(data: data, target: target, forEntry: forEntry)
+                    try store.setCover(url: url, sourceKey: identity.sourceKey, target: target, forEntry: forEntry, pageImage: true)
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 } catch {
                     let alert = UIAlertController(title: "Cover could not be saved", message: error.localizedDescription, preferredStyle: .alert)
@@ -90,6 +89,7 @@ extension ReaderViewController {
                 }
             }
             if target == nil { action.subtitle = "Add this title to Library first" }
+            else if imageURL.flatMap(MCRemoteCoverURL.parse) == nil { action.subtitle = "This page has no reusable image URL" }
             return action
         }
         return actions

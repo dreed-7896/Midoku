@@ -1,5 +1,69 @@
 import AidokuRunner
+import SafariServices
 import SwiftUI
+
+private struct MCWebPage: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct MCInAppWebView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+
+private struct MCEntryStatusEditor: View {
+    let entryID: UUID
+    @Environment(\.dismiss) private var dismiss
+    @State private var store = MCCollectionStore.shared
+    @State private var status = MCPersonalStatus.planned
+    @State private var categories = Set<UUID>()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Reading status") {
+                    Picker("Status", selection: $status) {
+                        ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) }
+                    }
+                }
+                Section("Categories") {
+                    ForEach(store.snapshot.categories) { category in
+                        Toggle(category.name, isOn: Binding(
+                            get: { categories.contains(category.id) },
+                            set: { if $0 { categories.insert(category.id) } else { categories.remove(category.id) } }
+                        ))
+                    }
+                }
+            }
+            .navigationTitle("Status and categories")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if store.perform({ state in
+                            let valid = categories.intersection(Set(state.categories.map(\.id)))
+                            try state.library.editEntry(entryID) { entry in
+                                entry.status = status
+                                entry.categoryIDs = valid
+                            }
+                        }) { dismiss() }
+                    }
+                }
+            }
+            .onAppear {
+                if let entry = store.library.entry(entryID) {
+                    status = entry.status
+                    categories = entry.categoryIDs
+                }
+            }
+            .mcErrors(store)
+        }
+        .midokuAccent()
+    }
+}
 
 struct MCEntryView: View {
     let entryID: UUID
@@ -14,6 +78,9 @@ struct MCEntryView: View {
     @State private var resettingChapter: MCID?
     @State private var reader: MCReaderSheet?
     @State private var showReorder = false
+    @State private var showStatusEditor = false
+    @State private var didLongPressSave = false
+    @State private var webPage: MCWebPage?
     @State private var confirmRemove = false
     @State private var confirmReset = false
     @State private var confirmResetThumbnails = false
@@ -36,7 +103,29 @@ struct MCEntryView: View {
     }
     private var slots: [MCChapterSlot] {
         guard let entry else { return [] }
-        return entry.descendingDisplay ? Array(entry.slots.reversed()) : entry.slots
+        let original = entry.descendingDisplay ? Array(entry.slots.reversed()) : entry.slots
+        let positions = Dictionary(uniqueKeysWithValues: original.enumerated().map { ($1.id, $0) })
+        let mode = entry.chapterSort ?? .custom
+        guard mode != .custom else { return original }
+        return original.sorted { lhs, rhs in
+            let a = lhs.preferred, b = rhs.preferred
+            let result: ComparisonResult
+            switch mode {
+            case .custom: result = .orderedSame
+            case .numberAscending, .numberDescending:
+                let first = a.flatMap { store.library.number($0) } ?? ""
+                let second = b.flatMap { store.library.number($0) } ?? ""
+                result = first.localizedStandardCompare(second)
+            case .titleAscending, .titleDescending:
+                result = (a.map { store.library.chapterDisplayTitle($0) } ?? "")
+                    .localizedStandardCompare(b.map { store.library.chapterDisplayTitle($0) } ?? "")
+            case .unreadFirst:
+                if store.library.isRead(lhs) != store.library.isRead(rhs) { return !store.library.isRead(lhs) }
+                result = .orderedSame
+            }
+            if result == .orderedSame { return (positions[lhs.id] ?? 0) < (positions[rhs.id] ?? 0) }
+            return mode == .numberDescending || mode == .titleDescending ? result == .orderedDescending : result == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -98,6 +187,9 @@ struct MCEntryView: View {
             } else { ContentUnavailableView("Entry unavailable", systemImage: "book.closed") }
         }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
+        .sheet(isPresented: $showStatusEditor) { MCEntryStatusEditor(entryID: entryID) }
+        .onChange(of: showStatusEditor) { _, value in if !value { didLongPressSave = false } }
+        .sheet(item: $webPage) { MCInAppWebView(url: $0.url).ignoresSafeArea() }
         .sheet(isPresented: $showSources) { MCEntrySourcesView(entryID: entryID) }
         .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
@@ -151,9 +243,20 @@ struct MCEntryView: View {
                 Button { selecting.toggle(); selected.removeAll() } label: {
                     Image(systemName: selecting ? "checkmark.circle.fill" : "checkmark.circle").frame(width: 32, height: 32)
                 }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
-                Button { store.perform { try $0.library.editEntry(entryID) { $0.descendingDisplay.toggle() } } } label: {
-                    Image(systemName: "arrow.up.arrow.down").frame(width: 32, height: 32)
-                }.accessibilityLabel("Reverse displayed chapter order")
+                Menu {
+                    Picker("Sort chapters", selection: Binding(
+                        get: { entry?.chapterSort ?? .custom },
+                        set: { value in store.perform { try $0.library.editEntry(entryID) { $0.chapterSort = value } } }
+                    )) {
+                        ForEach(MCChapterDisplaySort.allCases) { Text($0.title).tag($0) }
+                    }
+                    if entry?.chapterSort == nil || entry?.chapterSort == .custom {
+                        Button("Reverse personal order", systemImage: "arrow.up.arrow.down") {
+                            store.perform { try $0.library.editEntry(entryID) { $0.descendingDisplay.toggle() } }
+                        }
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 32, height: 32) }
+                    .accessibilityLabel("Sort chapters")
             }
             if selecting {
                 HStack {
@@ -174,7 +277,8 @@ struct MCEntryView: View {
     private func header(_ entry: MCPersonalEntry) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 16) {
-                MCEntryCover(entry: entry).frame(width: 88, height: 132).clipShape(RoundedRectangle(cornerRadius: 9))
+                MCEntryCover(entry: entry).frame(width: headerCoverWidth, height: headerCoverWidth * 1.5)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 8) {
                     let title = store.library.title(entry)
                     Text(title)
@@ -183,15 +287,13 @@ struct MCEntryView: View {
                         .contentShape(Rectangle())
                         .gesture(copyOrSearchGesture(for: title))
                     let details = store.library.listing(entry.primaryListingID)?.details
-                    let author = entry.authorOverride ?? details?.authors?.joined(separator: ", ") ?? ""
                     let artist = entry.artistOverride ?? details?.artists?.joined(separator: ", ") ?? ""
-                    let creators = [author, artist].filter { !$0.isEmpty }.joined(separator: " · ")
-                    if !creators.isEmpty {
-                        Text(creators)
+                    if !artist.isEmpty {
+                        Text(artist)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .contentShape(Rectangle())
-                            .gesture(copyOrSearchGesture(for: creators))
+                            .gesture(copyOrSearchGesture(for: artist))
                     }
                     Text("\(entry.status.title) · \(entry.links.count) sources").font(.caption).foregroundStyle(.secondary)
                     if let sourceName = mainSourceName(entry) {
@@ -199,10 +301,11 @@ struct MCEntryView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if !store.library.description(entry).isEmpty {
-                        Text(store.library.description(entry)).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
-                    }
                 }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !store.library.description(entry).isEmpty {
+                Text(store.library.description(entry)).font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             let tags = entryTags(entry)
             if !tags.isEmpty {
@@ -228,29 +331,48 @@ struct MCEntryView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(entry.slots.isEmpty)
 
-                Button { confirmRemove = true } label: {
-                    Label("Unsave", systemImage: "bookmark.slash").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 4)
-                }
-                .buttonStyle(.bordered)
-
-                Menu {
-                    ForEach(MCPersonalStatus.allCases) { status in
-                        Button {
-                            store.perform { try $0.library.editEntry(entryID) { $0.status = status } }
-                        } label: {
-                            Label(status.title, systemImage: status == entry.status ? "checkmark" : "bookmark")
-                        }
-                    }
+                Button {
+                    if didLongPressSave { didLongPressSave = false } else { confirmRemove = true }
                 } label: {
                     Image(systemName: "bookmark.fill")
                         .font(.headline)
-                        .frame(width: 22)
-                        .padding(.vertical, 8)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.bordered)
-                .accessibilityLabel("Change status, currently \(entry.status.title)")
+                .buttonBorderShape(.circle)
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                    didLongPressSave = true
+                    showStatusEditor = true
+                })
+                .accessibilityLabel("Remove from library; hold to edit status and categories")
+                if let url = entryWebURL(entry) {
+                    Button { webPage = MCWebPage(url: url) } label: {
+                        Image(systemName: "globe").font(.headline).frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered).buttonBorderShape(.circle)
+                    .accessibilityLabel("View original source")
+                }
             }
         }
+    }
+
+    private var headerCoverWidth: CGFloat {
+        let count = viewportSize.width > viewportSize.height ? min(10, max(2, landscapeColumns)) : min(6, max(2, portraitColumns))
+        return max(88, (viewportSize.width - 32 - CGFloat(count - 1) * 12) / CGFloat(count))
+    }
+
+    private func entryWebURL(_ entry: MCPersonalEntry) -> URL? {
+        let listingID = entry.primaryListingID ?? entry.links.first?.listingID
+        guard let url = store.library.listing(listingID)?.details.webURL,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
+    }
+
+    private func chapterWebURL(_ slot: MCChapterSlot) -> URL? {
+        guard let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID),
+              let url = store.physical(chapter.identity)?.chapter.url,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
     }
 
     private func entryTags(_ entry: MCPersonalEntry) -> [String] {
@@ -280,6 +402,9 @@ struct MCEntryView: View {
         .contextMenu {
 
                 Button("Read chapter", systemImage: "book") { open(slot) }
+                if let url = chapterWebURL(slot) {
+                    Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
+                }
                 Button("Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
                 Button("Reset edits", systemImage: "arrow.counterclockwise") { resettingChapter = MCID(id: slot.id) }
                 Button(store.library.isRead(slot) ? "Mark unread" : "Mark read") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: !store.library.isRead(slot)) }

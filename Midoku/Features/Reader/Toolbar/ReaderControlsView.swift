@@ -22,12 +22,12 @@ final class ReaderControlsView: UIVisualEffectView {
         actions.axis = .horizontal
         actions.distribution = .fillEqually
         for (button, symbol, label) in [
-            (closeButton, "xmark", "Close reader"),
-            (chaptersButton, "list.bullet", "Chapters"),
-            (settingsButton, "textformat.size", "Reader settings"),
-            (webButton, "safari", "Open in browser")
+            (closeButton, "xmark.circle.fill", "Close reader"),
+            (chaptersButton, "books.vertical.fill", "Chapters"),
+            (settingsButton, "slider.horizontal.3", "Reader settings"),
+            (webButton, "safari.fill", "Open in browser")
         ] {
-            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 20)), for: .normal)
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .semibold)), for: .normal)
             button.accessibilityLabel = label
             button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         }
