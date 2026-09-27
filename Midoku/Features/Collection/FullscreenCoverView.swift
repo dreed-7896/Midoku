@@ -26,7 +26,7 @@ struct MCFullscreenCoverView: View {
                     .frame(width: 44, height: 44).background(.black.opacity(0.65), in: Circle())
             }.padding().accessibilityLabel("Close cover")
         }
-        .background(.black.ignoresSafeArea())
+        .background { Color.black.ignoresSafeArea() }
         .statusBarHidden()
     }
 }

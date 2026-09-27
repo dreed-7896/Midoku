@@ -10,7 +10,7 @@ enum MCCollectionPreview {
         guard ProcessInfo.processInfo.arguments.contains("--collection-preview") else { return }
         let args = ProcessInfo.processInfo.arguments
         AppSettings.flags.libraryRefreshInProgress.reset()
-        AppSettings.appearance.accent.set(args.contains("--accent-preview") ? .purple : .forest)
+        AppSettings.appearance.accent.set(args.contains("--accent-preview") ? "#AF52DE" : MidokuAccent.defaultHex)
         AppSettings.appearance.chapterGridStyle.set(args.contains("--chapter-compact-preview") ? .compact : args.contains("--chapter-clean-preview") ? .clean : .standard)
         AppSettings.appearance.layout.set(args.contains("--compact-preview") ? .compact : .standard)
         UserDefaults.standard.set(true, forKey: "Midoku.collectionGrid")
