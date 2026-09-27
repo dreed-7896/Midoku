@@ -13,6 +13,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  integration:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify collection and artwork integration
+        timeout-minutes: 20
+        run: |
+          mkdir -p build/artifacts
+          set -o pipefail
+          (while sleep 30; do
+            date -u
+            ps -axo pid,ppid,etime,pcpu,rss,comm | sort -nr -k5 | sed -n '1,12p'
+          done) &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
+          simulator=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime, devices in d["devices"].items() if "iOS" in runtime for x in devices if "iPhone" in x["name"]))')
+          xcodebuild -quiet -jobs 2 -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
+            -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath build/DerivedData test \
+            -parallel-testing-enabled NO -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 \
+            -only-testing:MidokuTests/CollectionIntegrationTests \
+            -only-testing:MidokuTests/ArtworkCacheTests \
+            -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/integration-tests.log
+          for preview in library entry reader; do
+            args=(--collection-preview)
+            case "$preview" in
+              library) args+=(--collection-preview-only) ;;
+              entry) args+=(--entry-preview) ;;
+              reader) args+=(--entry-preview --reader-preview) ;;
+            esac
+            xcrun simctl launch --terminate-running-process "$simulator" com.raahat.Midoku "${args[@]}"
+            sleep 3
+            xcrun simctl io "$simulator" screenshot "build/artifacts/$preview.png"
+          done
+      - name: Upload previews and test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Midoku-previews-${{ github.sha }}
+          path: |
+            build/artifacts/
+            build/integration-tests.log
+          if-no-files-found: warn
   build:
     runs-on: xcode-27
     timeout-minutes: 45
@@ -31,27 +82,6 @@ jobs:
           set -o pipefail
           xcodebuild -version
           swift test
-      - name: Verify collection and artwork integration
-        run: |
-          set -o pipefail
-          simulator=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime, devices in d["devices"].items() if "iOS" in runtime for x in devices if "iPhone" in x["name"]))')
-          xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
-            -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath build/DerivedData test \
-            -only-testing:MidokuTests/CollectionIntegrationTests \
-            -only-testing:MidokuTests/ArtworkCacheTests \
-            -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/integration-tests.log
-          for preview in library entry reader; do
-            args=(--collection-preview)
-            case "$preview" in
-              library) args+=(--collection-preview-only) ;;
-              entry) args+=(--entry-preview) ;;
-              reader) args+=(--entry-preview --reader-preview) ;;
-            esac
-            xcrun simctl launch --terminate-running-process "$simulator" com.raahat.Midoku "${args[@]}"
-            sleep 3
-            xcrun simctl io "$simulator" screenshot "build/artifacts/$preview.png"
-          done
       - name: Archive unsigned device app
         run: |
           set -o pipefail
