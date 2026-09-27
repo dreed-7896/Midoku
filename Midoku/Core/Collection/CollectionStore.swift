@@ -120,6 +120,7 @@ final class MCCollectionStore {
     private(set) var isRefreshing = false
     private(set) var writable = true
     private let fileURL: URL
+    @ObservationIgnored private var unreadCounts: [UUID: Int] = [:]
     @ObservationIgnored private var recentReads: [ChapterIdentifier: Date] = [:]
 
     var library: MCLibraryState { snapshot.library }
@@ -131,6 +132,7 @@ final class MCCollectionStore {
             let data = try Data(contentsOf: fileURL)
             let loaded = try JSONDecoder().decode(MCCollectionSnapshot.self, from: data)
             try loaded.validate()
+            unreadCounts = Self.countUnread(in: loaded.library)
             snapshot = loaded
         } catch {
             writable = false
@@ -147,6 +149,7 @@ final class MCCollectionStore {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: [.atomic])
         let categoriesChanged = snapshot.categories != candidate.categories
+        unreadCounts = Self.countUnread(in: candidate.library)
         snapshot = candidate
         if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
     }
@@ -155,6 +158,20 @@ final class MCCollectionStore {
     func perform(_ edit: (inout MCCollectionSnapshot) throws -> Void) -> Bool {
         do { try change(edit); return true }
         catch { self.error = error.localizedDescription; return false }
+    }
+
+    /// Built once per saved snapshot instead of scanning every chapter on each category swipe.
+    func unreadCount(entryID: UUID) -> Int { unreadCounts[entryID, default: 0] }
+
+    private static func countUnread(in library: MCLibraryState) -> [UUID: Int] {
+        let readChapterIDs = Set(library.chapters.filter { library.completed.contains($0.identity) }.map(\.id))
+        return Dictionary(uniqueKeysWithValues: library.entries.map { entry in
+            let unread = entry.slots.reduce(0) { count, slot in
+                let read = slot.completionOverride ?? slot.preferred.map { readChapterIDs.contains($0.chapterID) } ?? false
+                return count + (read ? 0 : 1)
+            }
+            return (entry.id, unread)
+        })
     }
 
     func sourceName(_ connectionID: UUID) -> String {
@@ -290,21 +307,33 @@ final class MCCollectionStore {
     }
 
     func setRead(entryID: UUID, slotIDs: Set<UUID>, read: Bool) {
-        guard let entry = library.entry(entryID) else { return }
-        let identities = entry.slots.filter { slotIDs.contains($0.id) }.compactMap(\.preferred).compactMap { library.chapter($0.chapterID)?.identity }
-        perform { state in
-            for identity in identities {
-                if read { state.library.completed.insert(identity) } else { state.library.completed.remove(identity) }
+        setRead(selections: [entryID: slotIDs], read: read)
+    }
+
+    func setRead(entryIDs: Set<UUID>, read: Bool) {
+        let selections = Dictionary(uniqueKeysWithValues: library.entries.filter { entryIDs.contains($0.id) }
+            .map { ($0.id, Set($0.slots.map(\.id))) })
+        setRead(selections: selections, read: read)
+    }
+
+    private func setRead(selections: [UUID: Set<UUID>], read: Bool) {
+        var identities = Set<MCSourceChapterIdentity>()
+        guard perform({ state in
+            for (entryID, slotIDs) in selections {
+                identities.formUnion(try state.library.setRead(entryID: entryID, slotIDs: slotIDs, read: read))
             }
-            try state.library.editEntry(entryID) { entry in
-                for i in entry.slots.indices where slotIDs.contains(entry.slots[i].id) { entry.slots[i].completionOverride = nil }
-            }
-        }
-        for identity in identities {
-            guard let record = physical(identity) else { continue }
-            Task {
-                if read { await HistoryManager.shared.addHistory(mangaId: record.manga.identifier, chapters: [record.chapter]) }
-                else { await HistoryManager.shared.removeHistory(chapterIds: [.init(sourceKey: record.manga.sourceKey, mangaKey: record.manga.key, chapterKey: record.chapter.key)]) }
+        }) else { return }
+        let records = identities.compactMap { physical($0) }
+        Task {
+            for group in Dictionary(grouping: records, by: { $0.manga.identifier }).values {
+                guard let first = group.first else { continue }
+                if read {
+                    await HistoryManager.shared.addHistory(mangaId: first.manga.identifier, chapters: group.map(\.chapter))
+                } else {
+                    await HistoryManager.shared.removeHistory(chapterIds: group.map {
+                        .init(sourceKey: $0.manga.sourceKey, mangaKey: $0.manga.key, chapterKey: $0.chapter.key)
+                    })
+                }
             }
         }
     }

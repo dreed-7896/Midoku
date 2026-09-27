@@ -45,10 +45,14 @@ class ReaderToolbarView: UIView {
     }
 
     func configure() {
-        previousChapterButton.setImage(UIImage(systemName: "chevron.left.circle.fill"), for: .normal)
+        previousChapterButton.setImage(UIImage(systemName: "backward.end.fill"), for: .normal)
         previousChapterButton.accessibilityLabel = "Previous chapter"
-        nextChapterButton.setImage(UIImage(systemName: "chevron.right.circle.fill"), for: .normal)
+        nextChapterButton.setImage(UIImage(systemName: "forward.end.fill"), for: .normal)
         nextChapterButton.accessibilityLabel = "Next chapter"
+        let symbol = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        for button in [previousChapterButton, nextChapterButton] {
+            button.setPreferredSymbolConfiguration(symbol, forImageIn: .normal)
+        }
         addSubview(previousChapterButton)
         addSubview(nextChapterButton)
         incognitoModeLabel.font = .systemFont(ofSize: 10)
@@ -57,12 +61,12 @@ class ReaderToolbarView: UIView {
         incognitoModeLabel.isHidden = !AppSettings.general.incognitoMode.get()
         addSubview(incognitoModeLabel)
 
-        currentPageLabel.font = .systemFont(ofSize: 10)
+        currentPageLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         currentPageLabel.textAlignment = .center
         currentPageLabel.sizeToFit()
         addSubview(currentPageLabel)
 
-        pagesLeftLabel.font = .systemFont(ofSize: 10)
+        pagesLeftLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         pagesLeftLabel.textColor = .secondaryLabel
         pagesLeftLabel.textAlignment = .right
         addSubview(pagesLeftLabel)
@@ -97,8 +101,8 @@ class ReaderToolbarView: UIView {
             nextChapterButton.topAnchor.constraint(equalTo: topAnchor),
             nextChapterButton.widthAnchor.constraint(equalToConstant: 44),
             nextChapterButton.heightAnchor.constraint(equalToConstant: 44),
-            sliderView.heightAnchor.constraint(equalToConstant: 32),
-            sliderView.topAnchor.constraint(equalTo: topAnchor),
+            sliderView.heightAnchor.constraint(equalToConstant: 44),
+            sliderView.centerYAnchor.constraint(equalTo: previousChapterButton.centerYAnchor),
             sliderView.leadingAnchor.constraint(equalTo: previousChapterButton.trailingAnchor, constant: 4),
             sliderView.trailingAnchor.constraint(equalTo: nextChapterButton.leadingAnchor, constant: -4)
         ])

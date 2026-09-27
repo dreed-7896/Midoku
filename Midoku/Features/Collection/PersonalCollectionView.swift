@@ -157,7 +157,7 @@ struct MCCollectionRootView: View {
 
     private func matchesProgress(_ entry: MCPersonalEntry) -> Bool {
         guard progressFilter != .all else { return true }
-        let read = entry.slots.filter { store.library.isRead($0) }.count
+        let read = entry.slots.count - store.unreadCount(entryID: entry.id)
         return switch progressFilter {
         case .all: true
         case .notStarted: read == 0
@@ -244,10 +244,10 @@ struct MCCollectionRootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
+            let pages = groupPages
             VStack(spacing: 0) {
-                if grouping != .none { groupTabs }
+                if grouping != .none { groupTabs(pages: pages) }
                 GeometryReader { geometry in
-                    let pages = groupPages
                     let visibleEntries = entries(in: nil)
                     if grouping == .none || pages.isEmpty {
                         collectionPage(values: visibleEntries, size: geometry.size)
@@ -365,12 +365,12 @@ struct MCCollectionRootView: View {
         }.midokuAccent()
     }
 
-    private var groupTabs: some View {
+    private func groupTabs(pages: [MCLibraryGroupPage]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 24) {
-                    ForEach(groupPages) { page in
-                        groupButton(page.title, count: page.entryIDs.count, id: page.id)
+                    ForEach(pages) { page in
+                        groupButton(page.title, count: page.entryIDs.count, id: page.id, active: (groupPage ?? pages.first?.id) == page.id)
                     }
                 }.padding(.horizontal)
             }
@@ -395,6 +395,9 @@ struct MCCollectionRootView: View {
             Spacer()
             Menu {
                 Button("Remove from Library", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                Divider()
+                Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: selected, read: true) }
+                Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: selected, read: false) }
                 Divider()
                 Button("Edit Categories", systemImage: "folder") { showBatchCategories = true }
                 Button("Edit Artist", systemImage: "person.2") { showBatchArtist = true }
@@ -447,23 +450,23 @@ struct MCCollectionRootView: View {
         }
     }
 
-    private func groupButton(_ name: String, count: Int, id: String) -> some View {
+    private func groupButton(_ name: String, count: Int, id: String, active: Bool) -> some View {
         Button { withAnimation { groupPage = id } } label: {
             HStack(spacing: 6) {
-                Text(name).font(.subheadline.weight(activeGroupPage == id ? .semibold : .medium))
+                Text(name).font(.subheadline.weight(active ? .semibold : .medium))
                 Text("\(count)")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(activeGroupPage == id ? Color.accentColor : .secondary)
+                    .foregroundStyle(active ? Color.accentColor : .secondary)
                     .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color(uiColor: activeGroupPage == id ? UIColor.tertiarySystemFill : UIColor.secondarySystemFill), in: Capsule())
+                    .background(Color(uiColor: active ? UIColor.tertiarySystemFill : UIColor.secondarySystemFill), in: Capsule())
             }
-            .foregroundStyle(activeGroupPage == id ? Color.accentColor : .secondary)
+            .foregroundStyle(active ? Color.accentColor : .secondary)
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) {
-                if activeGroupPage == id { Capsule().fill(Color.accentColor).frame(height: 3) }
+                if active { Capsule().fill(Color.accentColor).frame(height: 3) }
             }
         }.buttonStyle(.plain).id(id)
-        .accessibilityAddTraits(activeGroupPage == id ? .isSelected : [])
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private func entryButton(_ entry: MCPersonalEntry) -> some View {
@@ -471,7 +474,9 @@ struct MCCollectionRootView: View {
             if selecting { if !selected.insert(entry.id).inserted { selected.remove(entry.id) } }
             else { path.append(entry.id) }
         } label: {
-            entryLabel(entry).overlay(alignment: .topTrailing) {
+            entryLabel(entry).frame(maxWidth: .infinity, alignment: .leading).clipped()
+                .contentShape(Rectangle())
+                .overlay(alignment: .topTrailing) {
                 if selecting {
                     Image(systemName: selected.contains(entry.id) ? "checkmark.circle.fill" : "circle")
                         .font(.title2).symbolRenderingMode(.palette)
@@ -480,9 +485,12 @@ struct MCCollectionRootView: View {
                 }
             }
         }.buttonStyle(.plain)
-        .accessibilityLabel("\(store.library.title(entry)), \(entry.slots.count) chapters, \(entry.slots.filter { !store.library.isRead($0) }.count) unread, \(entry.status.title)")
+        .accessibilityLabel("\(store.library.title(entry)), \(entry.slots.count) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
         .contextMenu {
+            Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: [entry.id], read: true) }
+            Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [entry.id], read: false) }
+            Divider()
             Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
             Button("Select entry", systemImage: "checkmark.circle") { selected.insert(entry.id); selecting = true }
             Button("Remove from library", systemImage: "trash", role: .destructive) {
@@ -604,7 +612,7 @@ struct MCCollectionRootView: View {
     }
 
     @ViewBuilder private func unreadBadge(_ entry: MCPersonalEntry) -> some View {
-        let unread = entry.slots.filter { !store.library.isRead($0) }.count
+        let unread = store.unreadCount(entryID: entry.id)
         if unread > 0 && !selecting {
             Text("\(unread)").font(.caption2.bold()).foregroundStyle(.white)
                 .padding(.horizontal, 6).padding(.vertical, 3)
@@ -731,18 +739,20 @@ private struct MCBatchArtistEditor: View {
 
 struct MCEntryCover: View {
     let entry: MCPersonalEntry
+    var contentMode: ContentMode = .fill
     @State private var store = MCCollectionStore.shared
     var body: some View {
         GeometryReader { geometry in
             if let id = entry.coverID, let cover = store.library.covers.first(where: { $0.id == id }) {
-                MCCustomCoverImage(cover: cover, size: geometry.size)
+                MCCustomCoverImage(cover: cover, size: geometry.size, contentMode: contentMode)
             } else if !entry.hidesCover, let listing = store.library.listing(entry.primaryListingID), let cover = listing.details.coverURL {
                 SourceImageView(source: store.source(listing.identity.connectionID), imageUrl: cover.absoluteString,
-                    width: geometry.size.width, height: geometry.size.height, placeholder: "MidokuCoverPlaceholder").clipped()
+                    width: geometry.size.width, height: geometry.size.height, contentMode: contentMode, placeholder: "MidokuCoverPlaceholder").clipped()
             } else {
-                Image("MidokuCoverPlaceholder").resizable().scaledToFill()
+                Image("MidokuCoverPlaceholder").resizable().aspectRatio(contentMode: contentMode)
+                    .frame(width: geometry.size.width, height: geometry.size.height).clipped()
             }
-        }.accessibilityHidden(true)
+        }.clipped().contentShape(Rectangle()).accessibilityHidden(true)
     }
 }
 

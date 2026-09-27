@@ -31,6 +31,27 @@ jobs:
           set -o pipefail
           xcodebuild -version
           swift test
+      - name: Verify collection and artwork integration
+        run: |
+          set -o pipefail
+          simulator=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime, devices in d["devices"].items() if "iOS" in runtime for x in devices if "iPhone" in x["name"]))')
+          xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
+            -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath build/DerivedData test \
+            -only-testing:MidokuTests/CollectionIntegrationTests \
+            -only-testing:MidokuTests/ArtworkCacheTests \
+            -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/integration-tests.log
+          for preview in library entry reader; do
+            args=(--collection-preview)
+            case "$preview" in
+              library) args+=(--collection-preview-only) ;;
+              entry) args+=(--entry-preview) ;;
+              reader) args+=(--entry-preview --reader-preview) ;;
+            esac
+            xcrun simctl launch --terminate-running-process "$simulator" com.raahat.Midoku "${args[@]}"
+            sleep 3
+            xcrun simctl io "$simulator" screenshot "build/artifacts/$preview.png"
+          done
       - name: Archive unsigned device app
         run: |
           set -o pipefail

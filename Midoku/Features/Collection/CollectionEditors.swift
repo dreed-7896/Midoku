@@ -37,6 +37,7 @@ struct MCEntryEditor: View {
     @State private var coverURL = ""
     @State private var loadingCoverURL = false
     @State private var clearCover = false
+    @State private var restoreCover = false
     @State private var showCategories = false
     @State private var loaded = false
     @State private var resetConfirm = false
@@ -58,6 +59,10 @@ struct MCEntryEditor: View {
                     }
                     Text("URL covers are cached and fetched again after clearing the image cache.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Hide cover", isOn: $clearCover)
+                    Button("Reset entry cover", systemImage: "arrow.counterclockwise") {
+                        cover = nil; coverURL = ""; clearCover = false; restoreCover = true
+                    }.disabled(loadingCoverURL)
+                    if restoreCover { Text("The original source cover will be restored when you save.").font(.caption).foregroundStyle(.secondary) }
                 }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { item in
@@ -104,6 +109,7 @@ struct MCEntryEditor: View {
         do {
             cover = try await MCRemoteCoverLoader.load(coverURL, source: coverSource)
             clearCover = false
+            restoreCover = false
         } catch {
             store.error = error.localizedDescription
         }
@@ -121,6 +127,7 @@ struct MCEntryEditor: View {
                 if author != (original.authorOverride ?? listing?.details.authors?.joined(separator: ", ") ?? "") { entry.authorOverride = author }
                 if artist != (original.artistOverride ?? listing?.details.artists?.joined(separator: ", ") ?? "") { entry.artistOverride = artist }
                 entry.status = status; entry.categoryIDs = validCategories; entry.hidesCover = clearCover
+                if restoreCover { entry.coverID = nil }
                 if let cover { entry.coverID = cover.id }
                 if clearCover { entry.coverID = nil }
             }

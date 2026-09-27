@@ -23,6 +23,13 @@ struct SourceImageView: View {
     var pageImage = false
 
     @State private var imageRequest: ImageRequest?
+    @State private var artwork: MCArtworkCache.Artwork?
+    @State private var loadedKey: String?
+    @State private var cacheRevision = ""
+
+    private var cacheKey: String {
+        MCArtworkCache.key(url: imageUrl, sourceKey: source?.key, pageImage: pageImage, width: downsampleWidth)
+    }
 
     private var processors: [ImageProcessing] {
         var processors: [ImageProcessing] = []
@@ -38,9 +45,27 @@ struct SourceImageView: View {
     }
 
     var body: some View {
+        Group {
+            if let cached = (loadedKey == cacheKey ? artwork : nil) ?? MCArtworkCache.shared.memoryImage(for: cacheKey) {
+                if let data = cached.animatedData {
+                    GIFImage(data: data, contentMode: contentMode).frame(width: width, height: height)
+                } else {
+                    Image(uiImage: cached.image).resizable().aspectRatio(contentMode: contentMode)
+                        .frame(width: width, height: height)
+                }
+            } else {
+                remoteImage
+            }
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        .task(id: cacheKey) { await loadImageRequest(url: imageUrl) }
+    }
+
+    private var remoteImage: some View {
         LazyImage(
             request: imageRequest,
-            transaction: .init(animation: .default)
+            transaction: .init(animation: nil)
         ) { state in
             if state.imageContainer?.type == .gif, let data = state.imageContainer?.data {
                 GIFImage(
@@ -68,32 +93,45 @@ struct SourceImageView: View {
             }
         }
         .processors(processors)
-        .onAppear {
-            guard imageRequest == nil else { return }
-            Task {
-                await loadImageRequest(url: imageUrl)
-            }
+        .onDisappear(.lowerPriority)
+        .onCompletion { result in
+            guard case .success(let response) = result, loadedKey == cacheKey else { return }
+            artwork = MCArtworkCache.shared.store(
+                image: response.image,
+                animatedData: response.container.type == .gif ? response.container.data : nil,
+                for: cacheKey, revision: cacheRevision
+            )
         }
-        .onChange(of: imageUrl) { newValue in
-            imageRequest = nil
-            Task {
-                await loadImageRequest(url: newValue)
-            }
-        }
+        .id(cacheKey)
     }
 
     func loadImageRequest(url: String) async {
+        let key = cacheKey
+        loadedKey = key
+        imageRequest = nil
+        artwork = MCArtworkCache.shared.memoryImage(for: key)
+        cacheRevision = MCArtworkCache.shared.revision(for: key)
+        if artwork != nil { return }
+        if let cached = await MCArtworkCache.shared.image(for: key) {
+            guard !Task.isCancelled, key == cacheKey else { return }
+            artwork = cached
+            return
+        }
+        guard !Task.isCancelled, key == cacheKey else { return }
         let url = URL(string: url)
         if let fileUrl = url?.toMidokuFileUrl() {
             imageRequest = ImageRequest(url: fileUrl)
             return
         }
         guard let source, let url, !url.isFileURL else {
-            imageRequest = ImageRequest(url: url)
+            imageRequest = ImageRequest(url: url, options: MCArtworkCache.shared.needsReload(for: key) ? .reloadIgnoringCachedData : [])
             return
         }
+        let request = await source.getModifiedImageRequest(url: url, context: nil)
+        guard !Task.isCancelled, key == cacheKey else { return }
         imageRequest = ImageRequest(
-            urlRequest: await source.getModifiedImageRequest(url: url, context: nil),
+            urlRequest: request,
+            options: MCArtworkCache.shared.needsReload(for: key) ? .reloadIgnoringCachedData : [],
             userInfo: [.processesKey: (pageImage && source.features.processesPages) || source.features.processesCovers]
         )
     }

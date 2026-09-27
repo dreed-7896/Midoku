@@ -21,13 +21,20 @@ final class ReaderControlsView: UIVisualEffectView {
         let actions = UIStackView(arrangedSubviews: [closeButton, chaptersButton, settingsButton, webButton])
         actions.axis = .horizontal
         actions.distribution = .fillEqually
+        actions.spacing = 10
         for (button, symbol, label) in [
-            (closeButton, "xmark.circle.fill", "Close reader"),
-            (chaptersButton, "books.vertical.fill", "Chapters"),
+            (closeButton, "chevron.down", "Close reader"),
+            (chaptersButton, "list.bullet", "Chapters"),
             (settingsButton, "slider.horizontal.3", "Reader settings"),
-            (webButton, "safari.fill", "Open in browser")
+            (webButton, "safari", "Open in browser")
         ] {
-            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .semibold)), for: .normal)
+            var configuration = UIButton.Configuration.plain()
+            configuration.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium))
+            configuration.baseForegroundColor = .label
+            configuration.background.backgroundColor = .secondarySystemFill
+            configuration.background.cornerRadius = 12
+            configuration.contentInsets = .init(top: 10, leading: 12, bottom: 10, trailing: 12)
+            button.configuration = configuration
             button.accessibilityLabel = label
             button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         }
@@ -40,8 +47,8 @@ final class ReaderControlsView: UIVisualEffectView {
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
-            toolbar.heightAnchor.constraint(equalToConstant: 44)
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
+            toolbar.heightAnchor.constraint(equalToConstant: 62)
         ])
     }
 

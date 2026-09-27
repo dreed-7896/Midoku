@@ -211,7 +211,7 @@ extension SettingsView {
                     }
                 }
             case "Advanced.clearNetworkCache":
-                var totalCacheSize = URLCache.shared.currentDiskUsage
+                var totalCacheSize = URLCache.shared.currentDiskUsage + MCArtworkCache.shared.diskSize + MCThumbnailCache.shared.diskSize
                 if let nukeCache = ImagePipeline.shared.configuration.dataCache as? DataCache {
                     totalCacheSize += nukeCache.totalSize
                 }
@@ -387,6 +387,8 @@ extension SettingsView {
     }
 
     func clearNetworkCache() async {
+        MCArtworkCache.shared.removeAll()
+        MCThumbnailCache.shared.removeAll()
         URLCache.shared.removeAllCachedResponses()
         HTTPCookieStorage.shared.removeCookies(since: Date.distantPast)
         await WKWebsiteDataStore.default().clearRecords()

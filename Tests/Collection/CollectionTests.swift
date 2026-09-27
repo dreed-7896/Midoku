@@ -17,6 +17,45 @@ struct CollectionTests {
         try state.addChapter(entryID: id, variant: MCChapterVariant(chapterID: chapter.id))
         return (state, id)
     }
+    @Test func nextProgressUsesReadingSequenceAndCanBeReversed() throws {
+        var state = MCLibraryState()
+        let id = try state.add(details: details(), connectionID: a, records: records([1, 2, 3, 4]), language: nil)
+        let ordered = try #require(state.entry(id)).slots
+        try state.editEntry(id) { $0.descendingDisplay = true; $0.chapterSort = .numberDescending }
+        let next = state.nextSlotIDs(entryID: id, after: ordered[1].id)
+        #expect(next == Set(ordered.dropFirst(2).map(\.id)))
+        try state.setRead(entryID: id, slotIDs: next, read: true)
+        #expect(try #require(state.entry(id)).slots.map { state.isRead($0) } == [false, false, true, true])
+        try state.setRead(entryID: id, slotIDs: next, read: false)
+        #expect(try #require(state.entry(id)).slots.allSatisfy { !state.isRead($0) })
+        #expect(state.nextSlotIDs(entryID: id, after: ordered[3].id).isEmpty)
+    }
+
+    @Test func resettingOneThumbnailPreservesOtherArtworkAndEdits() throws {
+        var state = MCLibraryState()
+        let id = try state.add(details: details(), connectionID: a, records: records([1, 2]), language: nil)
+        let coverA = MCLibraryCover(data: Data([1]))
+        let coverB = MCLibraryCover(data: Data([2]))
+        state.covers = [coverA, coverB]
+        try state.editEntry(id) { entry in
+            entry.slots[0].variants[0].edits.coverID = coverA.id
+            entry.slots[0].variants[0].edits.title = "Keep title"
+            entry.slots[1].variants[0].edits.coverID = coverB.id
+            entry.coverID = coverB.id
+        }
+        let first = try #require(state.entry(id)?.slots.first)
+        try state.resetChapterThumbnails(entryID: id, slotIDs: [first.id])
+        let entry = try #require(state.entry(id))
+        #expect(entry.slots[0].preferred?.edits.coverID == nil)
+        #expect(entry.slots[0].preferred?.edits.title == "Keep title")
+        #expect(entry.slots[1].preferred?.edits.coverID == coverB.id)
+        #expect(entry.coverID == coverB.id)
+        #expect(state.covers.map(\.id) == [coverB.id])
+        try state.resetCover(entryID: id)
+        #expect(state.entry(id)?.coverID == nil)
+        #expect(state.entry(id)?.slots[1].preferred?.edits.coverID == coverB.id)
+    }
+
     @Test func sourceAToBToASurvivesRestartAndRefresh() throws {
         let (original, id) = try mixed()
         var state = try JSONDecoder().decode(MCLibraryState.self, from: JSONEncoder().encode(original))

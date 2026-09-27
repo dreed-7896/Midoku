@@ -219,6 +219,30 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         return entry.id
     }
 
+    /// Next means the persisted reading sequence, independent of the current display sort.
+    func nextSlotIDs(entryID: UUID, after slotID: UUID) -> Set<UUID> {
+        guard let entry = entry(entryID), let index = entry.slots.firstIndex(where: { $0.id == slotID }) else { return [] }
+        return Set(entry.slots.dropFirst(index + 1).map(\.id))
+    }
+
+    @discardableResult
+    mutating func setRead(entryID: UUID, slotIDs: Set<UUID>, read: Bool) throws -> Set<MCSourceChapterIdentity> {
+        guard let entry = entry(entryID) else { throw MCLibraryFailure.missing }
+        let identities = Set(entry.slots.filter { slotIDs.contains($0.id) }.compactMap(\.preferred)
+            .compactMap { chapter($0.chapterID)?.identity })
+        if read { completed.formUnion(identities) } else { completed.subtract(identities) }
+        try editEntry(entryID) { entry in
+            for index in entry.slots.indices where slotIDs.contains(entry.slots[index].id) {
+                entry.slots[index].completionOverride = nil
+            }
+        }
+        return identities
+    }
+
+    mutating func resetCover(entryID: UUID) throws {
+        try editEntry(entryID) { entry in entry.coverID = nil; entry.hidesCover = false }
+    }
+
     /// Reset presentation overrides without rebuilding or discarding the mixed-source composition.
     mutating func resetDetails(_ id: UUID) throws {
         try editEntry(id) { entry in
@@ -241,9 +265,9 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     }
 
     /// Clears chapter artwork overrides for one entry without changing any other chapter edits.
-    mutating func resetChapterThumbnails(entryID: UUID) throws {
+    mutating func resetChapterThumbnails(entryID: UUID, slotIDs: Set<UUID>? = nil) throws {
         try editEntry(entryID) { entry in
-            for slot in entry.slots.indices {
+            for slot in entry.slots.indices where slotIDs == nil || slotIDs!.contains(entry.slots[slot].id) {
                 for variant in entry.slots[slot].variants.indices {
                     entry.slots[slot].variants[variant].edits.coverID = nil
                 }

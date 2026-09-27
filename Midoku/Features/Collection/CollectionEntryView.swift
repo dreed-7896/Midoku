@@ -70,6 +70,7 @@ struct MCEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var showEdit = false
+    @State private var showCover = false
     @State private var showSources = false
     @State private var showRemovedChapters = false
     @State private var selected = Set<UUID>()
@@ -187,6 +188,7 @@ struct MCEntryView: View {
             } else { ContentUnavailableView("Entry unavailable", systemImage: "book.closed") }
         }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
+        .fullScreenCover(isPresented: $showCover) { if let entry { MCFullscreenCoverView(entry: entry) } }
         .sheet(isPresented: $showStatusEditor) { MCEntryStatusEditor(entryID: entryID) }
         .onChange(of: showStatusEditor) { _, value in if !value { didLongPressSave = false } }
         .sheet(item: $webPage) { MCInAppWebView(url: $0.url).ignoresSafeArea() }
@@ -235,28 +237,12 @@ struct MCEntryView: View {
     }
 
     private var chapterActions: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
+            if let entry { readingActions(entry) }
             HStack {
                 Text(selecting ? "\(selected.count) selected" : "\(slots.count) chapters").font(.headline)
                 Spacer()
                 if store.isRefreshing { ProgressView() }
-                Button { selecting.toggle(); selected.removeAll() } label: {
-                    Image(systemName: selecting ? "checkmark.circle.fill" : "checkmark.circle").frame(width: 32, height: 32)
-                }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
-                Menu {
-                    Picker("Sort chapters", selection: Binding(
-                        get: { entry?.chapterSort ?? .custom },
-                        set: { value in store.perform { try $0.library.editEntry(entryID) { $0.chapterSort = value } } }
-                    )) {
-                        ForEach(MCChapterDisplaySort.allCases) { Text($0.title).tag($0) }
-                    }
-                    if entry?.chapterSort == nil || entry?.chapterSort == .custom {
-                        Button("Reverse personal order", systemImage: "arrow.up.arrow.down") {
-                            store.perform { try $0.library.editEntry(entryID) { $0.descendingDisplay.toggle() } }
-                        }
-                    }
-                } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 32, height: 32) }
-                    .accessibilityLabel("Sort chapters")
             }
             if selecting {
                 HStack {
@@ -277,8 +263,11 @@ struct MCEntryView: View {
     private func header(_ entry: MCPersonalEntry) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 16) {
-                MCEntryCover(entry: entry).frame(width: headerCoverWidth, height: headerCoverWidth * 1.5)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                Button { showCover = true } label: {
+                    MCEntryCover(entry: entry).frame(width: headerCoverWidth, height: headerCoverWidth * 1.5)
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("View cover fullscreen")
                 VStack(alignment: .leading, spacing: 8) {
                     let title = store.library.title(entry)
                     Text(title)
@@ -301,6 +290,7 @@ struct MCEntryView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    coverActions(entry)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if !store.library.description(entry).isEmpty {
@@ -322,38 +312,66 @@ struct MCEntryView: View {
                     }
                 }
             }
-            HStack(spacing: 10) {
-                Button {
-                    if let slot = entry.slots.first(where: { !store.library.isRead($0) }) ?? entry.slots.first { open(slot) }
-                } label: {
-                    Label("Read", systemImage: "book.fill").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(entry.slots.isEmpty)
-
-                Button {
-                    if didLongPressSave { didLongPressSave = false } else { confirmRemove = true }
-                } label: {
-                    Image(systemName: "bookmark.fill")
-                        .font(.headline)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.circle)
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                    didLongPressSave = true
-                    showStatusEditor = true
-                })
-                .accessibilityLabel("Remove from library; hold to edit status and categories")
-                if let url = entryWebURL(entry) {
-                    Button { webPage = MCWebPage(url: url) } label: {
-                        Image(systemName: "globe").font(.headline).frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.bordered).buttonBorderShape(.circle)
-                    .accessibilityLabel("View original source")
-                }
-            }
         }
+    }
+
+    private func readingActions(_ entry: MCPersonalEntry) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                if let slot = entry.slots.first(where: { !store.library.isRead($0) }) ?? entry.slots.first { open(slot) }
+            } label: {
+                Label("Read", systemImage: "book.pages").font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.small)
+            .disabled(entry.slots.isEmpty)
+            Spacer(minLength: 8)
+                Button { selecting.toggle(); selected.removeAll() } label: {
+                    Image(systemName: selecting ? "checkmark.circle.fill" : "checkmark.circle").frame(width: 24, height: 24)
+                }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
+                Menu {
+                    Picker("Sort chapters", selection: Binding(
+                        get: { self.entry?.chapterSort ?? .custom },
+                        set: { value in store.perform { try $0.library.editEntry(entryID) { $0.chapterSort = value } } }
+                    )) {
+                        ForEach(MCChapterDisplaySort.allCases) { Text($0.title).tag($0) }
+                    }
+                    if self.entry?.chapterSort == nil || self.entry?.chapterSort == .custom {
+                        Button("Reverse personal order", systemImage: "arrow.up.arrow.down") {
+                            store.perform { try $0.library.editEntry(entryID) { $0.descendingDisplay.toggle() } }
+                        }
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 24, height: 24) }
+                    .accessibilityLabel("Sort chapters")
+
+        }
+        .buttonStyle(.bordered).controlSize(.small)
+    }
+
+    private func coverActions(_ entry: MCPersonalEntry) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                if didLongPressSave { didLongPressSave = false } else { confirmRemove = true }
+            } label: { coverActionIcon("bookmark.fill") }
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                didLongPressSave = true; showStatusEditor = true
+            })
+            .accessibilityLabel("Remove from library; hold to edit status and categories")
+            Button { Task { await store.refresh(entryID: entryID) } } label: { coverActionIcon("arrow.clockwise") }
+                .disabled(store.isRefreshing).accessibilityLabel("Refresh entry")
+            if let url = entryWebURL(entry) {
+                Button { webPage = MCWebPage(url: url) } label: { coverActionIcon("safari") }
+                    .accessibilityLabel("View original source")
+            }
+        }.buttonStyle(.plain)
+    }
+
+    private func coverActionIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+            .frame(width: 36, height: 32)
+            .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 9))
+            .frame(width: 44, height: 44).contentShape(Rectangle())
     }
 
     private var headerCoverWidth: CGFloat {
@@ -395,7 +413,7 @@ struct MCEntryView: View {
             if selecting { if !selected.insert(slot.id).inserted { selected.remove(slot.id) } }
             else { open(slot) }
         } label: {
-            chapterLabel(slot, grid: grid)
+            chapterLabel(slot, grid: grid).frame(maxWidth: .infinity, alignment: .leading).clipped()
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8))
@@ -407,7 +425,15 @@ struct MCEntryView: View {
                 }
                 Button("Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
                 Button("Reset edits", systemImage: "arrow.counterclockwise") { resettingChapter = MCID(id: slot.id) }
-                Button(store.library.isRead(slot) ? "Mark unread" : "Mark read") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: !store.library.isRead(slot)) }
+                Menu("Reading progress", systemImage: "checkmark.circle") {
+                    Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: true) }
+                    Button("Mark unread", systemImage: "circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: false) }
+                    Divider()
+                    let next = store.library.nextSlotIDs(entryID: entryID, after: slot.id)
+                    Button("Read all next", systemImage: "checkmark.circle.fill") { store.setRead(entryID: entryID, slotIDs: next, read: true) }.disabled(next.isEmpty)
+                    Button("Unread all next", systemImage: "circle.dashed") { store.setRead(entryID: entryID, slotIDs: next, read: false) }.disabled(next.isEmpty)
+                }
+                Button("Reset thumbnail", systemImage: "photo.badge.arrow.down") { resetChapterThumbnails(slotIDs: [slot.id]) }
                 Button("Download", systemImage: "arrow.down.circle") {
                     guard let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID), let physical = store.physical(chapter.identity) else { return }
                     Task { await DownloadManager.shared.download(manga: physical.manga, chapters: [physical.chapter]) }
@@ -505,10 +531,18 @@ struct MCEntryView: View {
         do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: entryID, slotID: slot.id)) }
         catch { store.error = error.localizedDescription }
     }
-    private func resetChapterThumbnails() {
+    private func resetChapterThumbnails(slotIDs: Set<UUID>? = nil) {
         guard let entry else { return }
-        let chapterIDs = Set(entry.slots.flatMap(\.variants).map(\.chapterID))
-        if store.perform({ try $0.library.resetChapterThumbnails(entryID: entryID) }) {
+        let affected = entry.slots.filter { slotIDs == nil || slotIDs!.contains($0.id) }
+        let chapterIDs = Set(affected.flatMap(\.variants).map(\.chapterID))
+        if store.perform({ try $0.library.resetChapterThumbnails(entryID: entryID, slotIDs: slotIDs) }) {
+            for chapterID in chapterIDs {
+                if let chapter = store.library.chapter(chapterID),
+                   let url = store.snapshot.chapters.first(where: { $0.chapterID == chapterID })?.chapter.thumbnail {
+                    let sourceKey = store.snapshot.connections.first { $0.id == chapter.identity.listing.connectionID }?.sourceKey
+                    MCArtworkCache.shared.reset(MCArtworkCache.key(url: url, sourceKey: sourceKey))
+                }
+            }
             MCThumbnailCache.shared.reset(chapterIDs: chapterIDs)
             thumbnailRevision += 1
         }

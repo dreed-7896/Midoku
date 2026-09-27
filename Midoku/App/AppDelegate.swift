@@ -186,7 +186,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             $0.dataCache = dataCache
             $0.imageCache = imageCache
             $0.dataLoader = dataLoader
-            $0.dataCachePolicy = .storeOriginalData
+            $0.dataCachePolicy = .storeAll
             $0.isStoringPreviewsInMemoryCache = false
         }
 

@@ -7,6 +7,24 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func unreadCountsFollowSavedProgressOverridesAndRestart() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        let manga = AidokuRunner.Manga(sourceKey: "counts", key: "book", title: "Counts")
+        let id = try store.add(manga, chapters: [.init(key: "one", chapterNumber: 1), .init(key: "two", chapterNumber: 2)])
+        #expect(store.unreadCount(entryID: id) == 2)
+        let first = try #require(store.library.entry(id)?.slots.first)
+        try store.change { _ = try $0.library.setRead(entryID: id, slotIDs: [first.id], read: true) }
+        #expect(store.unreadCount(entryID: id) == 1)
+        try store.change { state in
+            try state.library.editEntry(id) { $0.slots[0].completionOverride = false }
+        }
+        #expect(store.unreadCount(entryID: id) == 2)
+        #expect(MCCollectionStore(fileURL: file).unreadCount(entryID: id) == 2)
+    }
+
     @Test func pageLoadingAndPreloadingUsePhysicalChapterIdentity() async throws {
         await SourceManager.shared.waitForSourcesLoad()
         let sources = SourceStore.shared.sourcesByKey
