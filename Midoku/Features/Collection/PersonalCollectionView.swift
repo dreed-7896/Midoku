@@ -396,7 +396,7 @@ struct MCCollectionRootView: View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Reading").font(.largeTitle.bold())
+                    Text("Up next").font(.title2.bold())
                     Text("\(store.readingEntries.count) \(store.readingEntries.count == 1 ? "entry" : "entries")")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
