@@ -29,6 +29,7 @@ struct BackupContentView: View {
                     )
                 }
                 Section {
+                    infoCell(title: "Personal Collection", value: String(backup.counts.collection))
                     infoCell(
                         title: NSLocalizedString("LIBRARY_ENTRIES"),
                         value: String(backup.counts.library)

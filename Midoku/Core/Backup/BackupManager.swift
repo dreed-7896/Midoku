@@ -121,10 +121,17 @@ actor BackupManager {
             []
         }
         let collectionData: Data?
+        let collectionEntryCount: Int?
         if options.libraryEntries {
-            collectionData = try await MainActor.run { try MCCollectionStore.shared.backupData() }
+            let collection = try await MainActor.run { () throws -> (Data, Int) in
+                let store = MCCollectionStore.shared
+                return (try store.backupData(), store.library.entries.count)
+            }
+            collectionData = collection.0
+            collectionEntryCount = collection.1
         } else {
             collectionData = nil
+            collectionEntryCount = nil
         }
         return await CoreDataManager.shared.container.performBackgroundTask { context in
             let library: [BackupLibraryManga] = if options.libraryEntries {
@@ -192,6 +199,7 @@ actor BackupManager {
 
             return Backup(
                 collectionData: collectionData,
+                collectionEntryCount: collectionEntryCount,
                 library: library,
                 history: history,
                 manga: manga,

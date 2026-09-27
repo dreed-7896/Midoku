@@ -143,7 +143,8 @@ struct CollectionIntegrationTests {
         }
 
         let backup = Backup(
-            collectionData: try store.backupData(), library: [], history: [], manga: [], chapters: [],
+            collectionData: try store.backupData(), collectionEntryCount: store.library.entries.count,
+            library: [], history: [], manga: [], chapters: [],
             trackItems: [], readingSessions: [], vocabulary: [], updates: [], categories: [],
             sources: [], sourceLists: [], settings: nil, date: .now, name: nil, automatic: true, version: "test"
         )
@@ -151,6 +152,7 @@ struct CollectionIntegrationTests {
         let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
         try encoder.encode(backup).write(to: backupURL)
         let loaded = try #require(Backup.load(from: backupURL))
+        #expect(BackupInfo.load(from: backupURL)?.counts.collection == 2)
         let restored = MCCollectionStore(fileURL: root.appendingPathComponent("restored.json"))
         try restored.restore(try #require(loaded.collectionData))
 

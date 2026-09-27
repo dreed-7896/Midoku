@@ -14,6 +14,7 @@ struct BackupInfo: Hashable, Identifiable, Sendable {
     var id: URL { url }
 
     struct Counts: Hashable, Sendable {
+        var collection = 0
         var library = 0
         var history = 0
         var manga = 0
@@ -55,6 +56,7 @@ struct BackupInfo: Hashable, Identifiable, Sendable {
         self.version = backup.version
         self.size = size
         self.counts = Counts(
+            collection: backup.collectionEntryCount ?? 0,
             library: backup.library?.count ?? 0,
             history: backup.history?.count ?? 0,
             manga: backup.manga?.count ?? 0,
@@ -102,6 +104,7 @@ struct BackupInfo: Hashable, Identifiable, Sendable {
             // rather than displaying a partial or nonsensical summary
             guard let value = scanner.value(for: ref) else { return nil }
             switch key {
+                case "collectionEntryCount": if case let .int(value) = value { counts.collection = value }
                 case "name": if case let .string(value) = value { name = value }
                 case "date": if case let .date(value) = value { date = value }
                 case "automatic": if case let .bool(value) = value { automatic = value }

@@ -11,6 +11,7 @@ struct Backup: Codable, Hashable, Identifiable, Sendable {
     var id: Int { hashValue }
 
     var collectionData: Data? = nil
+    var collectionEntryCount: Int? = nil
     var library: [BackupLibraryManga]?
     var history: [BackupHistory]?
     var manga: [BackupManga]?
