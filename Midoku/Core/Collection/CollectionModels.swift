@@ -139,6 +139,10 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     var covers: [MCLibraryCover] = []
     var completed: Set<MCSourceChapterIdentity> = []
     var updates: [MCLibraryUpdate] = []
+    // Optional for collections written before Reading mode existed.
+    var readingEntryIDs: [UUID]? = nil
+
+    var readingIDs: [UUID] { readingEntryIDs ?? [] }
 
     func entry(_ id: UUID) -> MCPersonalEntry? { entries.first { $0.id == id } }
     func listing(_ id: UUID?) -> MCLibraryListing? { listings.first { $0.id == id } }
@@ -393,6 +397,7 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     mutating func removeEntries(_ ids: Set<UUID>) {
         entries.removeAll { ids.contains($0.id) }
         updates.removeAll { ids.contains($0.entryID) }
+        readingEntryIDs = readingIDs.filter { !ids.contains($0) }
         // Shared physical records, downloads, History and progress deliberately survive.
     }
 

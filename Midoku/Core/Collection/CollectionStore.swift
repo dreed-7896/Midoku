@@ -125,6 +125,35 @@ final class MCCollectionStore {
 
     var library: MCLibraryState { snapshot.library }
 
+    var readingEntries: [MCPersonalEntry] {
+        let entries = Dictionary(uniqueKeysWithValues: library.entries.map { ($0.id, $0) })
+        return library.readingIDs.compactMap { entries[$0] }
+    }
+
+    @discardableResult
+    func addToReading(_ ids: Set<UUID>) -> Bool {
+        perform { state in
+            var ordered = state.library.readingIDs
+            let existing = Set(ordered)
+            ordered.append(contentsOf: state.library.entries.map(\.id).filter { ids.contains($0) && !existing.contains($0) })
+            state.library.readingEntryIDs = ordered
+        }
+    }
+
+    @discardableResult
+    func removeFromReading(_ ids: Set<UUID>) -> Bool {
+        perform { $0.library.readingEntryIDs = $0.library.readingIDs.filter { !ids.contains($0) } }
+    }
+
+    @discardableResult
+    func addRandomToReading(count: Int) -> Bool {
+        perform { state in
+            let existing = Set(state.library.readingIDs)
+            let eligible = state.library.entries.map(\.id).filter { !existing.contains($0) }
+            state.library.readingEntryIDs = state.library.readingIDs + Array(eligible.shuffled().prefix(max(0, count)))
+        }
+    }
+
     init(fileURL: URL = FileManager.default.applicationSupportDirectory.appendingPathComponent("MidokuCollection.json")) {
         self.fileURL = fileURL
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }

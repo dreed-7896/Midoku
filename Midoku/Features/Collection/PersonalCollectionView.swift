@@ -77,6 +77,8 @@ struct MCCollectionRootView: View {
     @State private var confirmDelete = false
     @State private var editingEntry: MCID?
     @State private var showAddPreview = false
+    @State private var readingMode = false
+    @State private var showReadingAdd = false
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
     @AppStorage("Appearance.libraryGridStyle") private var gridStyle = ChapterGridStyle.standard
@@ -244,38 +246,20 @@ struct MCCollectionRootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            let pages = groupPages
-            VStack(spacing: 0) {
-                if grouping != .none { groupTabs(pages: pages) }
-                GeometryReader { geometry in
-                    let visibleEntries = entries(in: nil)
-                    if grouping == .none || pages.isEmpty {
-                        collectionPage(values: visibleEntries, size: geometry.size)
-                    } else {
-                        TabView(selection: $groupPage) {
-                            ForEach(pages) { page in
-                                collectionPage(values: visibleEntries.filter { page.entryIDs.contains($0.id) }, size: geometry.size)
-                                    .tag(Optional(page.id))
-                            }
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                    }
-                }
+            Group {
+                if readingMode { readingPage }
+                else { regularLibraryPage }
             }
             .background(Color(uiColor: .systemBackground))
-            .navigationTitle("Library")
+            .navigationTitle(readingMode ? "Reading" : "Library")
             .navigationBarTitleDisplayMode(.inline)
-            .customSearchable(
-                text: $query,
-                enabled: $searchVisible,
-                focused: $searchFocused,
-                hidesSearchBarWhenScrolling: false,
-                stacked: false,
-                onCancel: { searchVisible = false; searchFocused = false }
-            )
-            .environment(\.autocorrectionDisabled, true)
             .toolbar {
-                if selecting {
+                if readingMode {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Exit Reading Mode") { readingMode = false }
+                            .fontWeight(.semibold)
+                    }
+                } else if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { selecting = false; selected.removeAll() } label: {
                             Image(systemName: "checkmark.circle.fill")
@@ -294,6 +278,12 @@ struct MCCollectionRootView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            Button("Reading mode", systemImage: "book") {
+                                query = ""; searchVisible = false; searchFocused = false
+                                selected.removeAll(); selecting = false
+                                readingMode = true
+                            }
+                            Divider()
                             Button("Select entries", systemImage: "checkmark.circle") {
                                 searchFocused = false; searchVisible = false
                                 query = ""
@@ -314,7 +304,7 @@ struct MCCollectionRootView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if selecting { selectionActions }
+                if selecting && !readingMode { selectionActions }
             }
             .confirmationDialog("Remove \(selected.count) entries from library?", isPresented: $confirmDelete) {
                 Button("Remove entries", role: .destructive) {
@@ -322,6 +312,7 @@ struct MCCollectionRootView: View {
                 }
             } message: { Text("Reading history and downloaded chapters are kept.") }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
+            .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
             .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
@@ -353,6 +344,10 @@ struct MCCollectionRootView: View {
                 let args = ProcessInfo.processInfo.arguments
                 if args.contains("--collection-preview") {
                     try? await Task.sleep(for: .milliseconds(750))
+                    if args.contains("--reading-preview") {
+                        if let id = MCCollectionPreview.entryID { store.addToReading([id]) }
+                        readingMode = true
+                    }
                     if args.contains("--add-preview") { showAddPreview = true }
                     if args.contains("--categories-preview") { showCategories = true }
                     if args.contains("--selection-preview") { selecting = true; selected = Set(store.library.entries.map(\.id)) }
@@ -363,6 +358,76 @@ struct MCCollectionRootView: View {
                 await store.adoptExistingLibrary()
             }
         }.midokuAccent()
+    }
+
+    private var regularLibraryPage: some View {
+        Group {
+            let pages = groupPages
+            VStack(spacing: 0) {
+                if grouping != .none { groupTabs(pages: pages) }
+                GeometryReader { geometry in
+                    let visibleEntries = entries(in: nil)
+                    if grouping == .none || pages.isEmpty {
+                        collectionPage(values: visibleEntries, size: geometry.size)
+                    } else {
+                        TabView(selection: $groupPage) {
+                            ForEach(pages) { page in
+                                collectionPage(values: visibleEntries.filter { page.entryIDs.contains($0.id) }, size: geometry.size)
+                                    .tag(Optional(page.id))
+                            }
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                    }
+                }
+            }
+            .customSearchable(
+                text: $query,
+                enabled: $searchVisible,
+                focused: $searchFocused,
+                hidesSearchBarWhenScrolling: false,
+                stacked: false,
+                onCancel: { searchVisible = false; searchFocused = false }
+            )
+            .environment(\.autocorrectionDisabled, true)
+        }
+    }
+
+    private var readingPage: some View {
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Reading").font(.largeTitle.bold())
+                    Text("\(store.readingEntries.count) \(store.readingEntries.count == 1 ? "entry" : "entries")")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal).padding(.top, 18).padding(.bottom, 8)
+                if store.readingEntries.isEmpty {
+                    UnavailableView("Nothing in Reading", systemImage: "books.vertical",
+                        description: Text("Tap + to add entries from your library."))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns(for: geometry.size), alignment: .leading, spacing: grid ? 20 : 14) {
+                            ForEach(store.readingEntries) { entry in entryButton(entry) }
+                        }
+                        .padding(.horizontal).padding(.vertical)
+                        .padding(.bottom, 64)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
+                Button { showReadingAdd = true } label: {
+                    Image(systemName: "plus").font(.title2.bold())
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Color.accentColor, in: Circle())
+                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                }
+                .accessibilityLabel("Add to Reading")
+                .padding(.trailing, 24).padding(.bottom, 24)
+            }
+        }
     }
 
     private func groupTabs(pages: [MCLibraryGroupPage]) -> some View {
@@ -394,6 +459,10 @@ struct MCCollectionRootView: View {
             .background(.regularMaterial, in: Capsule())
             Spacer()
             Menu {
+                Button("Add to Reading", systemImage: "book") {
+                    if store.addToReading(selected) { selected.removeAll(); selecting = false }
+                }
+                Divider()
                 Button("Remove from Library", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 Divider()
                 Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: selected, read: true) }
@@ -488,13 +557,21 @@ struct MCCollectionRootView: View {
         .accessibilityLabel("\(store.library.title(entry)), \(entry.slots.count) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
         .contextMenu {
+            if readingMode {
+                Button("Remove from Reading", systemImage: "minus.circle") { store.removeFromReading([entry.id]) }
+            } else if !store.library.readingIDs.contains(entry.id) {
+                Button("Add to Reading", systemImage: "book") { store.addToReading([entry.id]) }
+            }
+            Divider()
             Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: [entry.id], read: true) }
             Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [entry.id], read: false) }
-            Divider()
-            Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
-            Button("Select entry", systemImage: "checkmark.circle") { selected.insert(entry.id); selecting = true }
-            Button("Remove from library", systemImage: "trash", role: .destructive) {
-                selected = [entry.id]; confirmDelete = true
+            if !readingMode {
+                Divider()
+                Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
+                Button("Select entry", systemImage: "checkmark.circle") { selected.insert(entry.id); selecting = true }
+                Button("Remove from library", systemImage: "trash", role: .destructive) {
+                    selected = [entry.id]; confirmDelete = true
+                }
             }
         }
     }
@@ -619,6 +696,101 @@ struct MCCollectionRootView: View {
                 .background(Color.accentColor, in: Capsule())
                 .accessibilityLabel("\(unread) unread chapters")
         }
+    }
+}
+
+private struct MCReadingAddSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var store = MCCollectionStore.shared
+    @State private var search = ""
+    @State private var selected = Set<UUID>()
+    @State private var randomCount = 1
+
+    private var available: [MCPersonalEntry] {
+        let added = Set(store.library.readingIDs)
+        return store.library.entries.filter { !added.contains($0.id) }
+            .sorted { store.library.title($0).localizedStandardCompare(store.library.title($1)) == .orderedAscending }
+    }
+
+    private var matching: [MCPersonalEntry] {
+        search.isEmpty ? available : available.filter { store.library.title($0).localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search your library", text: $search)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                }
+                Section {
+                    Stepper(value: $randomCount, in: 1...max(1, available.count)) {
+                        Label("Random entries", systemImage: "shuffle")
+                        Text("\(min(randomCount, available.count)) of \(available.count) available")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .disabled(available.isEmpty)
+                    Button("Add Random Entries") {
+                        if store.addRandomToReading(count: min(randomCount, available.count)) { dismiss() }
+                    }
+                    .disabled(available.isEmpty)
+                } header: {
+                    Text("Surprise me")
+                } footer: {
+                    Text("Random picks come from entries that are not already in Reading.")
+                }
+                Section {
+                    ForEach(matching) { entry in
+                        Button {
+                            if !selected.insert(entry.id).inserted { selected.remove(entry.id) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                MCEntryCover(entry: entry)
+                                    .frame(width: 40, height: 60)
+                                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(store.library.title(entry)).font(.body.weight(.medium))
+                                        .foregroundStyle(.primary).lineLimit(2)
+                                    Text("\(entry.slots.count) chapters")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: selected.contains(entry.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3).foregroundStyle(Color.accentColor)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(store.library.title(entry)), \(selected.contains(entry.id) ? "selected" : "not selected")")
+                    }
+                    if matching.isEmpty {
+                        Text(available.isEmpty ? "All library entries are in Reading." : "No matching entries.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Choose from Library")
+                } footer: {
+                    Text("Tap one entry or select several, then add them together.")
+                }
+            }
+            .navigationTitle("Add to Reading")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add \(selected.count)") {
+                        if store.addToReading(selected) { dismiss() }
+                    }
+                    .disabled(selected.isEmpty)
+                }
+            }
+            .mcErrors(store)
+        }
+        .midokuAccent()
     }
 }
 

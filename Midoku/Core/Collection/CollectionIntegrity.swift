@@ -10,6 +10,7 @@ nonisolated extension MCLibraryState {
               unique(updates.map(\.id)) else { throw MCLibraryFailure.invalid }
         let listingKeys = Set(listings.map(\.identity)), chapterIDs = Set(chapters.map(\.id))
         let coverIDs = Set(covers.map(\.id)), listingIDs = Set(listings.map(\.id)), entryIDs = Set(entries.map(\.id))
+        guard unique(readingIDs), Set(readingIDs).isSubset(of: entryIDs) else { throw MCLibraryFailure.invalid }
         let allSlots = entries.flatMap(\.slots)
         guard unique(allSlots.map(\.id)), unique(allSlots.flatMap(\.variants).map(\.id)) else { throw MCLibraryFailure.invalid }
         for listing in listings {

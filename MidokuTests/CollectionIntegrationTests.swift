@@ -117,6 +117,7 @@ struct CollectionIntegrationTests {
         try store.addChapter(.init(key: "same", chapterNumber: 1), from: second, to: entryID, title: "Alternate")
         let secondEntry = try store.add(AidokuRunner.Manga(sourceKey: "third", key: "other", title: "Other"),
                                         chapters: [.init(key: "other", chapterNumber: 2)])
+        #expect(store.addToReading([entryID, secondEntry]))
         try store.change { state in
             try state.library.editEntry(entryID) { entry in
                 let alternative = try #require(entry.slots.last?.preferred)
@@ -157,6 +158,7 @@ struct CollectionIntegrationTests {
         try restored.restore(try #require(loaded.collectionData))
 
         #expect(restored.library.entries.map(\.id) == [entryID, secondEntry])
+        #expect(restored.library.readingIDs == [entryID, secondEntry])
         let entry = try #require(restored.library.entry(entryID))
         #expect(restored.library.title(entry) == "My custom entry")
         #expect(entry.slots.count == 1)
@@ -167,6 +169,37 @@ struct CollectionIntegrationTests {
         #expect(restored.library.covers.first(where: { $0.id == entry.slots[0].preferred?.edits.coverID })?.data != nil)
         #expect(restored.library.chapter(entry.slots[0].preferred?.chapterID ?? UUID())?.identity.listing.externalID == second.key)
         try restored.snapshot.validate()
+    }
+
+    @Test func readingQueueSurvivesRestartAndPrunesDeletedEntries() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        try store.change { state in
+            _ = try state.library.createManual(title: "One")
+            _ = try state.library.createManual(title: "Two")
+            _ = try state.library.createManual(title: "Three")
+        }
+        let ids = store.library.entries.map(\.id)
+        #expect(store.addToReading([ids[0], ids[1]]))
+        #expect(store.addToReading([ids[0]]))
+        #expect(store.library.readingIDs == Array(ids.prefix(2)))
+        #expect(store.addRandomToReading(count: 10))
+        #expect(store.library.readingIDs == ids)
+        #expect(MCCollectionStore(fileURL: file).readingEntries.map(\.id) == ids)
+        try store.change { $0.library.removeEntries([ids[1]]) }
+        #expect(store.library.readingIDs == [ids[0], ids[2]])
+        #expect(MCCollectionStore(fileURL: file).readingEntries.map(\.id) == [ids[0], ids[2]])
+
+        // Collections saved before Reading mode do not have a readingEntryIDs key.
+        var legacy = try #require(JSONSerialization.jsonObject(with: store.backupData()) as? [String: Any])
+        var library = try #require(legacy["library"] as? [String: Any])
+        library.removeValue(forKey: "readingEntryIDs")
+        legacy["library"] = library
+        let decoded = try JSONDecoder().decode(MCCollectionSnapshot.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(decoded.library.readingIDs.isEmpty)
+        try decoded.validate()
     }
     @Test func addDetailsAndReaderCoversSurviveRestartWithoutChangingSource() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

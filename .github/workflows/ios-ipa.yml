@@ -54,10 +54,11 @@ jobs:
           fi
           xcrun simctl bootstatus "$preview_simulator" -b
           xcrun simctl install "$preview_simulator" build/DerivedData/Build/Products/Debug-iphonesimulator/Midoku.app
-          for preview in library entry reader; do
+          for preview in library reading entry reader; do
             args=(--collection-preview)
             case "$preview" in
               library) args+=(--collection-preview-only) ;;
+              reading) args+=(--collection-preview-only --reading-preview) ;;
               entry) args+=(--entry-preview) ;;
               reader) args+=(--entry-preview --reader-preview) ;;
             esac
