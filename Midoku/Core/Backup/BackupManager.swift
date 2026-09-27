@@ -19,11 +19,17 @@ actor BackupManager {
     }
 
     private static let backupTaskIdentifier = (Bundle.main.bundleIdentifier ?? "") + ".backup"
-    private static let maxAutoBackups = 4
+    private static let maxAutoBackups = 1
+    private var isRunningScheduledBackups = false
+    private var lastLocalAttempt = Date.distantPast
+    private var lastCloudAttempt = Date.distantPast
 
     private static let excludedSettings: Set<String> = [
         AppSettings.browse.sourceLists.key, // stored separately
-        AppSettings.general.icloudSync.key
+        AppSettings.general.icloudSync.key,
+        AppSettings.backups.iCloudBackups.enabled.key,
+        AppSettings.backups.iCloudBackups.interval.key,
+        AppSettings.backups.iCloudBackups.lastBackup.key
     ]
     static let excludedSettingsPrefixes = [
         "Flag",
@@ -47,25 +53,25 @@ actor BackupManager {
         "Dictionary"
     ]
 
-    func save(backup: Backup, url: URL? = nil) {
-        Self.directory.createDirectory()
+    func save(backup: Backup, url: URL? = nil) throws {
+        try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
-        if let plist = try? encoder.encode(backup) {
-            if let url = url {
-                try? plist.write(to: url)
-            } else {
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-                let path = Self.directory.appendingPathComponent("midoku_\(dateFormatter.string(from: backup.date)).aib")
-                try? plist.write(to: path)
-            }
-            NotificationCenter.default.post(name: .updateBackupList, object: nil)
+        let plist = try encoder.encode(backup)
+        if let url {
+            try plist.write(to: url, options: .atomic)
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            let path = Self.directory.appendingPathComponent("midoku_\(dateFormatter.string(from: backup.date)).aib")
+            try plist.write(to: path, options: .atomic)
         }
+        NotificationCenter.default.post(name: .updateBackupList, object: nil)
     }
 
-    func saveNewBackup(name: String = "", options: BackupOptions) async {
-        save(backup: await createBackup(name: name, options: options))
+    func saveNewBackup(name: String = "", options: BackupOptions) async throws {
+        let backup = try await createBackup(name: name, options: options)
+        try save(backup: backup)
     }
 
     func importBackup(from url: URL) -> Bool {
@@ -106,13 +112,18 @@ actor BackupManager {
         let sensitiveSettings: Bool
     }
 
-    func createBackup(name: String = "", options: BackupOptions) async -> Backup {
+    func createBackup(name: String = "", options: BackupOptions) async throws -> Backup {
         let sourceLists: [String] = if options.sourceLists {
             await SourceManager.shared.getSourceListURLs().map { $0.absoluteString }
         } else {
             []
         }
-        let collectionData: Data? = if options.libraryEntries { await MainActor.run { try? MCCollectionStore.shared.backupData() } } else { nil }
+        let collectionData: Data?
+        if options.libraryEntries {
+            collectionData = try await MainActor.run { try MCCollectionStore.shared.backupData() }
+        } else {
+            collectionData = nil
+        }
         return await CoreDataManager.shared.container.performBackgroundTask { context in
             let library: [BackupLibraryManga] = if options.libraryEntries {
                 CoreDataManager.shared.getLibraryManga(context: context).map {
@@ -244,8 +255,10 @@ actor BackupManager {
     func renameBackup(url: URL, name: String?) -> Bool {
         guard var backup = Backup.load(from: url) else { return false }
         backup.name = name?.isEmpty ?? true ? nil : name
-        save(backup: backup, url: url)
-        return true
+        do {
+            try save(backup: backup, url: url)
+            return true
+        } catch { return false }
     }
 
     func removeBackup(url: URL) {
@@ -292,8 +305,7 @@ extension BackupManager {
                 try await MainActor.run { try MCCollectionStore.shared.restore(data) }
             } catch { return false }
         }
-        await doRestore(from: backup)
-        return true
+        return await doRestore(from: backup)
     }
 
     @discardableResult
@@ -740,7 +752,7 @@ extension BackupManager {
             guard let self, let task = task as? BGProcessingTask else { return }
 
             Task { @Sendable in
-                await self.createAutoBackup()
+                await self.runScheduledBackups()
 
                 task.setTaskCompleted(success: true)
             }
@@ -749,36 +761,42 @@ extension BackupManager {
     }
 
     func scheduleAutoBackup() {
-        guard AppSettings.backups.autoBackups.enabled.get() else {
+        let localEnabled = AppSettings.backups.autoBackups.enabled.get()
+        let cloudEnabled = AppSettings.backups.iCloudBackups.enabled.get()
+        guard localEnabled || cloudEnabled else {
 #if !targetEnvironment(simulator)
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backupTaskIdentifier)
 #endif
             return
         }
 
-        let lastUpdated = AppSettings.backups.autoBackups.lastBackup.get()
-        let interval: Double = switch AppSettings.backups.autoBackups.interval.get() {
-            case "6hours": 21600
-            case "12hours": 43200
-            case "daily": 86400
-            case "2days": 172800
-            case "weekly": 604800
-            default: 0
-        }
-        let nextUpdateTime = lastUpdated + interval
+        let nextLocal = localEnabled ? max(
+            nextBackupDate(
+                lastBackup: AppSettings.backups.autoBackups.lastBackup.get(),
+                interval: AppSettings.backups.autoBackups.interval.get()
+            ),
+            lastLocalAttempt.addingTimeInterval(3600)
+        ) : Date.distantFuture
+        let nextCloud = cloudEnabled ? max(
+            nextBackupDate(
+                lastBackup: AppSettings.backups.iCloudBackups.lastBackup.get(),
+                interval: AppSettings.backups.iCloudBackups.interval.get()
+            ),
+            lastCloudAttempt.addingTimeInterval(3600)
+        ) : Date.distantFuture
+        let nextUpdateTime = min(nextLocal, nextCloud)
 
-        if nextUpdateTime < Date.now {
-            // interval time has passed, create auto backup now
-            Task {
-                await createAutoBackup()
+        if nextUpdateTime <= Date.now {
+            if !isRunningScheduledBackups {
+                Task { await runScheduledBackups() }
             }
         } else {
 #if !targetEnvironment(simulator)
-            // schedule task for the future
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backupTaskIdentifier)
             let request = BGProcessingTaskRequest(identifier: Self.backupTaskIdentifier)
             request.earliestBeginDate = nextUpdateTime
             request.requiresExternalPower = false
-            request.requiresNetworkConnectivity = false
+            request.requiresNetworkConnectivity = nextCloud <= nextLocal
 
             Task {
                 do {
@@ -788,6 +806,45 @@ extension BackupManager {
                 }
             }
 #endif
+        }
+    }
+
+    private func nextBackupDate(lastBackup: Date, interval: String) -> Date {
+        let seconds: Double = switch interval {
+            case "6hours": 21600
+            case "12hours": 43200
+            case "daily": 86400
+            case "2days": 172800
+            case "weekly": 604800
+            default: 86400
+        }
+        return lastBackup.addingTimeInterval(seconds)
+    }
+
+    private func runScheduledBackups() async {
+        guard !isRunningScheduledBackups else { return }
+        isRunningScheduledBackups = true
+        defer {
+            isRunningScheduledBackups = false
+            scheduleAutoBackup()
+        }
+        if AppSettings.backups.autoBackups.enabled.get(),
+           nextBackupDate(lastBackup: AppSettings.backups.autoBackups.lastBackup.get(),
+                          interval: AppSettings.backups.autoBackups.interval.get()) <= Date.now,
+           lastLocalAttempt.addingTimeInterval(3600) <= Date.now {
+            lastLocalAttempt = .now
+            await createAutoBackup()
+        }
+        if AppSettings.backups.iCloudBackups.enabled.get(),
+           nextBackupDate(lastBackup: AppSettings.backups.iCloudBackups.lastBackup.get(),
+                          interval: AppSettings.backups.iCloudBackups.interval.get()) <= Date.now,
+           lastCloudAttempt.addingTimeInterval(3600) <= Date.now {
+            lastCloudAttempt = .now
+            do {
+                try await CloudBackupManager.shared.saveLatestBackup(automatic: true)
+            } catch {
+                LogManager.logger.error("Could not save iCloud backup: \(error)")
+            }
         }
     }
 
@@ -806,28 +863,28 @@ extension BackupManager {
         let sourceLists = AppSettings.backups.autoBackups.sourceLists.get()
         let sensitiveSettings = AppSettings.backups.autoBackups.sensitiveSettings.get()
 
-        await self.saveNewBackup(
-            options: .init(
-                automatic: true,
-                libraryEntries: libraryEntries,
-                history: history,
-                chapters: chapters,
-                tracking: tracking,
-                readingSessions: readingSessions,
-                vocabulary: vocabulary,
-                updates: updates,
-                categories: categories,
-                settings: settings,
-                sourceLists: sourceLists,
-                sensitiveSettings: sensitiveSettings
+        do {
+            try await self.saveNewBackup(
+                options: .init(
+                    automatic: true,
+                    libraryEntries: libraryEntries,
+                    history: history,
+                    chapters: chapters,
+                    tracking: tracking,
+                    readingSessions: readingSessions,
+                    vocabulary: vocabulary,
+                    updates: updates,
+                    categories: categories,
+                    settings: settings,
+                    sourceLists: sourceLists,
+                    sensitiveSettings: sensitiveSettings
+                )
             )
-        )
-
-        // update last auto backup time
-        AppSettings.backups.autoBackups.lastBackup.set(Date.now)
-
-        cleanUpAutoBackups()
-        scheduleAutoBackup() // schedule the next one
+            AppSettings.backups.autoBackups.lastBackup.set(Date.now)
+            cleanUpAutoBackups()
+        } catch {
+            LogManager.logger.error("Could not save automatic backup: \(error)")
+        }
     }
 
     // ensure we keep only the latest maxAutoBackups automatic backups

@@ -105,6 +105,67 @@ struct CollectionIntegrationTests {
         try store.restore(before)
         #expect(store.library.title(try #require(store.library.entries.first)) == "Keep me")
     }
+
+    @Test func aibRoundTripPreservesCustomCoversAndMixedChapterVariants() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("original.json"))
+        let first = AidokuRunner.Manga(sourceKey: "first-source", key: "book", title: "First")
+        let second = AidokuRunner.Manga(sourceKey: "second-source", key: "book", title: "Second")
+        let entryID = try store.add(first, chapters: [.init(key: "same", chapterNumber: 1)])
+        try store.addChapter(.init(key: "same", chapterNumber: 1), from: second, to: entryID, title: "Alternate")
+        let secondEntry = try store.add(AidokuRunner.Manga(sourceKey: "third", key: "other", title: "Other"),
+                                        chapters: [.init(key: "other", chapterNumber: 2)])
+        try store.change { state in
+            try state.library.editEntry(entryID) { entry in
+                let alternative = try #require(entry.slots.last?.preferred)
+                entry.slots[0].variants.append(alternative)
+                entry.slots[0].preferredID = alternative.id
+                entry.slots.removeLast()
+                entry.titleOverride = "My custom entry"
+            }
+        }
+        let variantID = try #require(store.library.entry(entryID)?.slots.first?.preferredID)
+        let target = try #require(store.coverTarget(
+            identifier: .init(sourceKey: second.sourceKey, mangaKey: second.key, chapterKey: "same"),
+            entryID: entryID, variantID: variantID
+        ))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        }
+        let coverData = try #require(image.pngData())
+        try store.setCover(data: coverData, target: target, forEntry: true)
+        try store.setCover(data: coverData, target: target, forEntry: false)
+        let slotID = try #require(store.library.entry(entryID)?.slots.first?.id)
+        try store.change { state in
+            _ = try state.library.setRead(entryID: entryID, slotIDs: [slotID], read: true)
+        }
+
+        let backup = Backup(
+            collectionData: try store.backupData(), library: [], history: [], manga: [], chapters: [],
+            trackItems: [], readingSessions: [], vocabulary: [], updates: [], categories: [],
+            sources: [], sourceLists: [], settings: nil, date: .now, name: nil, automatic: true, version: "test"
+        )
+        let backupURL = root.appendingPathComponent("Midoku-Latest.aib")
+        let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+        try encoder.encode(backup).write(to: backupURL)
+        let loaded = try #require(Backup.load(from: backupURL))
+        let restored = MCCollectionStore(fileURL: root.appendingPathComponent("restored.json"))
+        try restored.restore(try #require(loaded.collectionData))
+
+        #expect(restored.library.entries.map(\.id) == [entryID, secondEntry])
+        let entry = try #require(restored.library.entry(entryID))
+        #expect(restored.library.title(entry) == "My custom entry")
+        #expect(entry.slots.count == 1)
+        #expect(entry.slots[0].variants.count == 2)
+        #expect(entry.slots[0].preferredID == variantID)
+        #expect(restored.library.isRead(entry.slots[0]))
+        #expect(restored.library.covers.first(where: { $0.id == entry.coverID })?.data != nil)
+        #expect(restored.library.covers.first(where: { $0.id == entry.slots[0].preferred?.edits.coverID })?.data != nil)
+        #expect(restored.library.chapter(entry.slots[0].preferred?.chapterID ?? UUID())?.identity.listing.externalID == second.key)
+        try restored.snapshot.validate()
+    }
     @Test func addDetailsAndReaderCoversSurviveRestartWithoutChangingSource() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

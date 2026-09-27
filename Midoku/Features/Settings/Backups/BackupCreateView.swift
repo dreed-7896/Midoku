@@ -20,6 +20,8 @@ struct BackupCreateView: View {
     @State private var settings = true
     @State private var sourceLists = true
     @State private var sensitiveSettings = false
+    @State private var backupError: String?
+    @State private var isSaving = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -55,6 +57,14 @@ struct BackupCreateView: View {
             }
             .navigationTitle(NSLocalizedString("CREATE_BACKUP"))
             .navigationBarTitleDisplayMode(.inline)
+            .alert(NSLocalizedString("BACKUP_ERROR"), isPresented: Binding(
+                get: { backupError != nil },
+                set: { if !$0 { backupError = nil } }
+            )) {
+                Button(NSLocalizedString("OK"), role: .cancel) { backupError = nil }
+            } message: {
+                Text(backupError ?? "")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     CloseButton {
@@ -63,25 +73,32 @@ struct BackupCreateView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     DoneButton {
+                        guard !isSaving else { return }
+                        isSaving = true
                         Task {
-                            await BackupManager.shared.saveNewBackup(
-                                name: name,
-                                options: .init(
-                                    libraryEntries: libraryEntries,
-                                    history: history,
-                                    chapters: chapters,
-                                    tracking: tracking,
-                                    readingSessions: readingSessions,
-                                    vocabulary: vocabulary,
-                                    updates: updates,
-                                    categories: categories,
-                                    settings: settings,
-                                    sourceLists: sourceLists,
-                                    sensitiveSettings: sensitiveSettings
+                            do {
+                                try await BackupManager.shared.saveNewBackup(
+                                    name: name,
+                                    options: .init(
+                                        libraryEntries: libraryEntries,
+                                        history: history,
+                                        chapters: chapters,
+                                        tracking: tracking,
+                                        readingSessions: readingSessions,
+                                        vocabulary: vocabulary,
+                                        updates: updates,
+                                        categories: categories,
+                                        settings: settings,
+                                        sourceLists: sourceLists,
+                                        sensitiveSettings: sensitiveSettings
+                                    )
                                 )
-                            )
+                                dismiss()
+                            } catch {
+                                backupError = error.localizedDescription
+                            }
+                            isSaving = false
                         }
-                        dismiss()
                     }
                 }
             }
