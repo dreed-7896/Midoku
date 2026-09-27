@@ -204,8 +204,15 @@ struct CollectionIntegrationTests {
             controls.titleLabel.text = "Chapter 21"
             controls.toolbar.totalPages = 25
             controls.toolbar.currentPage = 1
-            controls.frame = CGRect(x: 0, y: 0, width: width, height: 130)
-            controls.layoutIfNeeded()
+            let host = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 800))
+            controls.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(controls)
+            NSLayoutConstraint.activate([
+                controls.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                controls.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+                controls.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+            ])
+            host.layoutIfNeeded()
             let slider = controls.toolbar.sliderView
             let sliderFrame = slider.convert(slider.bounds, to: controls)
             for button in [controls.closeButton, controls.chaptersButton, controls.settingsButton, controls.webButton] {
