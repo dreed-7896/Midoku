@@ -63,7 +63,9 @@ actor BackupManager {
         } else {
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-            let path = Self.directory.appendingPathComponent("midoku_\(dateFormatter.string(from: backup.date)).aib")
+            let path = backup.automatic == true
+                ? Self.directory.appendingPathComponent("Midoku-Automatic.aib")
+                : Self.directory.appendingPathComponent("midoku_\(dateFormatter.string(from: backup.date)).aib")
             try plist.write(to: path, options: .atomic)
         }
         NotificationCenter.default.post(name: .updateBackupList, object: nil)

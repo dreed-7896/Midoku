@@ -33,26 +33,7 @@ struct CloudBackupsView: View {
                     Text("Saves one .aib file containing library entries, chapters and reading progress, categories, history, tracking, and source links. Downloaded pages and app settings are excluded. iOS chooses when background backups run.")
                 }
 
-                Section {
-                    HStack {
-                        Text("Latest in iCloud")
-                        Spacer()
-                        if let latestDate {
-                            Text(latestDate, format: .dateTime.date().hour().minute())
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text(isAvailable ? "None" : "Unavailable")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Button("Back Up Now") { runBackup() }
-                        .disabled(isBusy || !isAvailable)
-                    Button("Import Latest Backup") { importBackup() }
-                        .disabled(isBusy || latestDate == nil)
-                    if isBusy { ProgressView() }
-                } footer: {
-                    Text("Import adds a local copy to Backups. Select it there to review and restore. Each new iCloud backup replaces the previous app-managed file.")
-                }
+                backupActions
             }
             .navigationTitle("iCloud Backup")
             .navigationBarTitleDisplayMode(.inline)
@@ -77,6 +58,24 @@ struct CloudBackupsView: View {
             } message: {
                 Text("The iCloud backup is in your local Backups list. Select it to restore.")
             }
+        }
+    }
+
+    private var backupActions: some View {
+        Section {
+            HStack {
+                Text("Latest in iCloud")
+                Spacer()
+                Text(latestDate?.formatted(date: .abbreviated, time: .shortened) ?? (isAvailable ? "None" : "Unavailable"))
+                    .foregroundStyle(.secondary)
+            }
+            Button("Back Up Now") { runBackup() }
+                .disabled(isBusy || !isAvailable)
+            Button("Import Latest Backup") { importBackup() }
+                .disabled(isBusy || latestDate == nil)
+            if isBusy { ProgressView() }
+        } footer: {
+            Text("Import adds a local copy to Backups. Select it there to review and restore. Each new iCloud backup replaces the previous app-managed file.")
         }
     }
 
