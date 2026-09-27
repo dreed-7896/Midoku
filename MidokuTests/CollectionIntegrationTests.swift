@@ -191,6 +191,10 @@ struct CollectionIntegrationTests {
         try store.change { $0.library.removeEntries([ids[1]]) }
         #expect(store.library.readingIDs == [ids[0], ids[2]])
         #expect(MCCollectionStore(fileURL: file).readingEntries.map(\.id) == [ids[0], ids[2]])
+        #expect(store.removeFromReading(Set(store.library.readingIDs)))
+        #expect(store.library.readingIDs.isEmpty)
+        #expect(store.library.entries.map(\.id) == [ids[0], ids[2]])
+        #expect(MCCollectionStore(fileURL: file).readingEntries.isEmpty)
 
         // Collections saved before Reading mode do not have a readingEntryIDs key.
         var legacy = try #require(JSONSerialization.jsonObject(with: store.backupData()) as? [String: Any])

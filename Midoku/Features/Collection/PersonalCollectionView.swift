@@ -69,9 +69,6 @@ struct MCCollectionRootView: View {
     @State private var showCategories = false
     @State private var showBatchCategories = false
     @State private var showBatchArtist = false
-    @State private var showImport = false
-    @State private var showExport = false
-    @State private var document = MCCollectionDocument()
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var confirmDelete = false
@@ -79,6 +76,7 @@ struct MCCollectionRootView: View {
     @State private var showAddPreview = false
     @State private var readingMode = false
     @State private var showReadingAdd = false
+    @State private var confirmResetReading = false
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
     @AppStorage("Appearance.libraryGridStyle") private var gridStyle = ChapterGridStyle.standard
@@ -255,9 +253,16 @@ struct MCCollectionRootView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if readingMode {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button { showReadingAdd = true } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("Add to Reading")
+                        Button { confirmResetReading = true } label: { Image(systemName: "arrow.counterclockwise") }
+                            .accessibilityLabel("Reset Reading")
+                            .disabled(store.library.readingIDs.isEmpty)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Exit Reading Mode") { readingMode = false }
-                            .fontWeight(.semibold)
+                        Button { readingMode = false } label: { Image(systemName: "xmark") }
+                            .accessibilityLabel("Exit Reading Mode")
                     }
                 } else if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -271,17 +276,17 @@ struct MCCollectionRootView: View {
                     ToolbarItem(placement: .topBarLeading) { filterMenu }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            searchVisible = true
-                            searchFocused = true
-                        } label: { Image(systemName: "magnifyingglass") }
-                            .accessibilityLabel("Search library")
+                            query = ""; searchVisible = false; searchFocused = false
+                            selected.removeAll(); selecting = false
+                            readingMode = true
+                        } label: { Image(systemName: "book") }
+                            .accessibilityLabel("Reading mode")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
-                            Button("Reading mode", systemImage: "book") {
-                                query = ""; searchVisible = false; searchFocused = false
-                                selected.removeAll(); selecting = false
-                                readingMode = true
+                            Button("Search library", systemImage: "magnifyingglass") {
+                                searchVisible = true
+                                searchFocused = true
                             }
                             Divider()
                             Button("Select entries", systemImage: "checkmark.circle") {
@@ -294,11 +299,6 @@ struct MCCollectionRootView: View {
                             Toggle("Chapter grid", isOn: $chapterGrid)
                             Button("Categories", systemImage: "folder") { showCategories = true }
                             Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
-                            Divider()
-                            Button("Export library", systemImage: "square.and.arrow.up") {
-                                do { document = MCCollectionDocument(data: try store.backupData()); showExport = true } catch { store.error = error.localizedDescription }
-                            }
-                            Button("Import library", systemImage: "square.and.arrow.down") { showImport = true }
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
                     }
                 }
@@ -311,6 +311,11 @@ struct MCCollectionRootView: View {
                     if store.removeEntries(selected) { selected.removeAll(); selecting = false }
                 }
             } message: { Text("Reading history and downloaded chapters are kept.") }
+            .confirmationDialog("Clear Reading?", isPresented: $confirmResetReading) {
+                Button("Clear Reading", role: .destructive) {
+                    store.removeFromReading(Set(store.library.readingIDs))
+                }
+            } message: { Text("Your library entries and reading progress will stay unchanged.") }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
@@ -319,10 +324,6 @@ struct MCCollectionRootView: View {
             .sheet(isPresented: $showAddPreview) {
                 if let manga = store.snapshot.manga.first?.manga { MCAddSourceView(manga: manga, chapters: []) }
             }
-            .fileExporter(isPresented: $showExport, document: document, contentType: .json, defaultFilename: "Midoku-library") { result in
-                if case .failure(let error) = result { store.error = error.localizedDescription }
-            }
-            .sheet(isPresented: $showImport) { MCImportCollectionView() }
             .mcErrors(store)
             .navigationDestination(for: UUID.self) { MCEntryView(entryID: $0) }
             .onChange(of: grouping) { _, value in
@@ -394,38 +395,17 @@ struct MCCollectionRootView: View {
 
     private var readingPage: some View {
         GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Up next").font(.title2.bold())
-                    Text("\(store.readingEntries.count) \(store.readingEntries.count == 1 ? "entry" : "entries")")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-                .padding(.horizontal).padding(.top, 18).padding(.bottom, 8)
-                if store.readingEntries.isEmpty {
-                    UnavailableView("Nothing in Reading", systemImage: "books.vertical",
-                        description: Text("Tap + to add entries from your library."))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns(for: geometry.size), alignment: .leading, spacing: grid ? 20 : 14) {
-                            ForEach(store.readingEntries) { entry in entryButton(entry) }
-                        }
-                        .padding(.horizontal).padding(.vertical)
-                        .padding(.bottom, 64)
+            if store.readingEntries.isEmpty {
+                UnavailableView("Nothing in Reading", systemImage: "books.vertical",
+                    description: Text("Tap + in the top left to add entries from your library."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns(for: geometry.size), alignment: .leading, spacing: grid ? 20 : 14) {
+                        ForEach(store.readingEntries) { entry in entryButton(entry) }
                     }
+                    .padding(.horizontal).padding(.vertical)
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .bottomTrailing) {
-                Button { showReadingAdd = true } label: {
-                    Image(systemName: "plus").font(.title2.bold())
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(Color.accentColor, in: Circle())
-                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-                }
-                .accessibilityLabel("Add to Reading")
-                .padding(.trailing, 24).padding(.bottom, 24)
             }
         }
     }
@@ -582,7 +562,7 @@ struct MCCollectionRootView: View {
                 ForEach(MCLibraryGrouping.allCases) { Text($0.title).tag($0) }
             }
         } label: {
-            Image(systemName: grouping == .none ? "rectangle.3.group" : "rectangle.3.group.fill")
+            Image(systemName: grouping == .none ? "square.stack.3d.up" : "square.stack.3d.up.fill")
         }
         .accessibilityLabel(grouping == .none ? "Group library" : "Grouped by \(grouping.title)")
     }
