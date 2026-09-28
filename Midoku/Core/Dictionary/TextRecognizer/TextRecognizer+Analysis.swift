@@ -10,18 +10,18 @@ import Vision
 
 @available(iOS 18.0, *)
 extension TextRecognizer {
-    func analyze(_ image: UIImage, language: String?) async {
+    func analyze(_ image: UIImage, language: String?, forceLanguage: Bool = false) async {
         guard let cgImage = image.cgImage else { return }
-        let recognizedObservations = await recognizeObservations(in: cgImage, language: language)
+        let recognizedObservations = await recognizeObservations(in: cgImage, language: language, forceLanguage: forceLanguage)
         guard !Task.isCancelled else { return }
         observations = recognizedObservations
         rebuildClusterCache()
     }
 
-    private func recognizeObservations(in cgImage: CGImage, language: String?) async -> [OCRObservation] {
+    private func recognizeObservations(in cgImage: CGImage, language: String?, forceLanguage: Bool) async -> [OCRObservation] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
-        let restrictOCRLanguages = AppSettings.dictionary.restrictOCRLanguages.get()
+        let restrictOCRLanguages = forceLanguage || AppSettings.dictionary.restrictOCRLanguages.get()
         if restrictOCRLanguages, let language {
             request.recognitionLanguages = [Locale.Language(identifier: language)]
         }

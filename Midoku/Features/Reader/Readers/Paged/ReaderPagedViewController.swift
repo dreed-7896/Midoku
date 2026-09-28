@@ -6,6 +6,7 @@
 //
 
 import AidokuRunner
+import SwiftUI
 import UIKit
 import VisionKit
 
@@ -1315,6 +1316,12 @@ extension ReaderPagedViewController: UIContextMenuInteractionDelegate {
             }
 
             var actions = [shareAction, saveToPhotosAction, reloadAction]
+            if #available(iOS 18.0, *), let image = pageView.image {
+                actions.insert(UIAction(title: "Translate", image: UIImage(systemName: "character.bubble")) { [weak self] _ in
+                    guard let self else { return }
+                    self.present(UIHostingController(rootView: TranslationModalView(images: [image], webtoon: false)), animated: true)
+                }, at: 0)
+            }
             if let image = pageView.image,
                let page = self.pageViewControllers.first(where: { $0.pageView?.imageView == pageView })?.page {
                 actions += self.delegate?.collectionCoverActions(

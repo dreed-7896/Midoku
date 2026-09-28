@@ -320,6 +320,8 @@ extension SettingsView {
             FilterGroupsView()
         } else if key == "Reader.tapZones" {
             TapZonesSelectView()
+        } else if key == "Translation" {
+            TranslationSettingsView()
         } else if key == "Reader.upscalingModels" {
             UpscaleModelListView()
         } else if key == "Dictionary.dictionaries" {

@@ -8,6 +8,7 @@
 import AidokuRunner
 import AsyncDisplayKit
 import Nuke
+import SwiftUI
 import UIKit
 
 class ReaderWebtoonViewController: ZoomableCollectionViewController {
@@ -464,7 +465,12 @@ extension ReaderWebtoonViewController: UIContextMenuInteractionDelegate {
                 chapterKey: node.page.chapterId,
                 imageURL: node.page.imageURL
             ) ?? []
-            return UIMenu(title: "", children: [shareAction, saveToPhotosAction, reloadAction] + coverActions)
+            let translateAction = UIAction(title: "Translate", image: UIImage(systemName: "character.bubble")) { [weak self] _ in
+                guard let self else { return }
+                self.stopAutoScroll()
+                self.present(UIHostingController(rootView: TranslationModalView(images: [image], webtoon: true)), animated: true)
+            }
+            return UIMenu(title: "", children: [translateAction, shareAction, saveToPhotosAction, reloadAction] + coverActions)
         })
     }
 

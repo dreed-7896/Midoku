@@ -104,6 +104,15 @@ enum Settings {
                     inlineTitle: true,
                     icon: .system(name: "book.fill", color: "green")
                 ))
+            ),
+            .init(
+                key: "Translation",
+                title: "Translation",
+                value: .page(.init(
+                    items: [],
+                    inlineTitle: true,
+                    icon: .system(name: "character.bubble.fill", color: "teal")
+                ))
             )
         ] + {
             if #available(iOS 18.0, *) {
