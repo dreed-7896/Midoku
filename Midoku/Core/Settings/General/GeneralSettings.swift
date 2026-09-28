@@ -63,8 +63,7 @@ struct GeneralSettings: Sendable {
             openingTab,
             appLock,
             appLockDelay,
-            blurAppSwitcher,
-            icloudSync
+            blurAppSwitcher
         ]
     }
 
@@ -73,5 +72,4 @@ struct GeneralSettings: Sendable {
     let appLock = SettingsKey<Bool>("General.appLock", default: false)
     let appLockDelay = SettingsKey<AppLockDelay>("General.appLockDelay", default: .oneMinute)
     let blurAppSwitcher = SettingsKey<Bool>("General.blurAppSwitcher", default: true)
-    let icloudSync = SettingsKey<Bool>("General.icloudSync", default: false)
 }

@@ -252,19 +252,7 @@ struct MCCollectionRootView: View {
             .navigationTitle(readingMode ? "Reading" : "Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if readingMode {
-                    ToolbarItemGroup(placement: .topBarLeading) {
-                        Button { showReadingAdd = true } label: { Image(systemName: "plus") }
-                            .accessibilityLabel("Add to Reading")
-                        Button { confirmResetReading = true } label: { Image(systemName: "arrow.counterclockwise") }
-                            .accessibilityLabel("Reset Reading")
-                            .disabled(store.library.readingIDs.isEmpty)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { readingMode = false } label: { Image(systemName: "xmark") }
-                            .accessibilityLabel("Exit Reading Mode")
-                    }
-                } else if selecting {
+                if selecting && !readingMode {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { selecting = false; selected.removeAll() } label: {
                             Image(systemName: "checkmark.circle.fill")
@@ -304,7 +292,8 @@ struct MCCollectionRootView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if selecting && !readingMode { selectionActions }
+                if readingMode { readingActions }
+                else if selecting { selectionActions }
             }
             .confirmationDialog("Remove \(selected.count) entries from library?", isPresented: $confirmDelete) {
                 Button("Remove entries", role: .destructive) {
@@ -397,7 +386,7 @@ struct MCCollectionRootView: View {
         GeometryReader { geometry in
             if store.readingEntries.isEmpty {
                 UnavailableView("Nothing in Reading", systemImage: "books.vertical",
-                    description: Text("Tap + in the top left to add entries from your library."))
+                    description: Text("Tap + below to add entries from your library."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -408,6 +397,35 @@ struct MCCollectionRootView: View {
                 }
             }
         }
+    }
+
+    private var readingActions: some View {
+        HStack(spacing: 24) {
+            Button { readingMode = false } label: { Image(systemName: "xmark") }
+                .accessibilityLabel("Exit Reading Mode")
+            Button { confirmResetReading = true } label: { Image(systemName: "arrow.counterclockwise") }
+                .accessibilityLabel("Reset Reading")
+                .disabled(store.library.readingIDs.isEmpty)
+            Spacer()
+            Button { showReadingAdd = true } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Add to Reading")
+            Button {
+                openRandomEntry(from: store.readingEntries)
+            } label: { Image(systemName: "shuffle") }
+                .accessibilityLabel("Open random Reading entry; hold for entire library")
+                .disabled(store.library.entries.isEmpty)
+                .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    openRandomEntry(from: store.library.entries)
+                })
+        }
+        .font(.title3)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .background(.regularMaterial)
+    }
+
+    private func openRandomEntry(from entries: [MCPersonalEntry]) {
+        if let entry = entries.randomElement() { path.append(entry.id) }
     }
 
     private func groupTabs(pages: [MCLibraryGroupPage]) -> some View {

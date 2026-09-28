@@ -5,7 +5,6 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).download</string>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER).backup</string>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).libraryRefresh</string>
 	</array>
 	<key>CFBundleDocumentTypes</key>
@@ -62,8 +61,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>ICLOUD_CONTAINER_ID</key>
-	<string>$(ICLOUD_CONTAINER_ID)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

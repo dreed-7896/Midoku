@@ -59,6 +59,7 @@ struct SourceHomeContentView: View {
         self.source = source
         self._listings = listings
         self._headerListingSelection = headerListingSelection
+        self._listingSelection = State(initialValue: headerListingSelection.wrappedValue)
         self._path = StateObject(wrappedValue: NavigationCoordinator(rootViewController: holdingViewController))
     }
 

@@ -9,27 +9,16 @@ import Foundation
 
 struct BackupsSettings: Sendable {
     var keys: [any SettingsDefault] {
-        autoBackups.keys + iCloudBackups.keys
+        autoBackups.keys
     }
 
     let autoBackups = AutoBackupsSettings()
-    let iCloudBackups = CloudBackupsSettings()
 }
 
 extension BackupsSettings {
-    struct CloudBackupsSettings: Sendable {
-        var keys: [any SettingsDefault] { [enabled, interval, lastBackup] }
-
-        let enabled = SettingsKey<Bool>("iCloudBackups.enabled", default: false)
-        let interval = SettingsKey<String>("iCloudBackups.interval", default: "daily")
-        let lastBackup = SettingsKey<Date>("iCloudBackups.lastBackup", default: Date.distantPast)
-    }
-
     struct AutoBackupsSettings: Sendable {
         var keys: [any SettingsDefault] {
             [
-                enabled,
-                interval,
                 lastBackup,
                 libraryEntries,
                 chapters,
@@ -45,8 +34,6 @@ extension BackupsSettings {
             ]
         }
 
-        let enabled = SettingsKey<Bool>("AutomaticBackups.enabled", default: true)
-        let interval = SettingsKey<String>("AutomaticBackups.interval", default: "daily")
         let lastBackup = SettingsKey<Date>("AutomaticBackups.lastBackup", default: Date.distantPast)
         let libraryEntries = SettingsKey<Bool>("AutomaticBackups.libraryEntries", default: true)
         let chapters = SettingsKey<Bool>("AutomaticBackups.chapters", default: true)

@@ -18,7 +18,6 @@ struct BackupsView: View {
     @State private var showCreateSheet = false
     @State private var showImportSheet = false
     @State private var showAutoBackupsSheet = false
-    @State private var showCloudBackupsSheet = false
     @State private var showImportFailAlert = false
 
     @EnvironmentObject private var path: NavigationCoordinator
@@ -35,15 +34,6 @@ struct BackupsView: View {
 
     var body: some View {
         let list = List {
-            Section {
-                Button {
-                    showCloudBackupsSheet = true
-                } label: {
-                    Label("iCloud Backup", systemImage: "icloud.and.arrow.up")
-                }
-            } footer: {
-                Text("Keep one latest library backup in iCloud Drive.")
-            }
             Section {
                 ForEach(backupUrls, id: \.self) { url in
                     let backup = backups[url]
@@ -93,9 +83,6 @@ struct BackupsView: View {
         .sheet(isPresented: $showAutoBackupsSheet) {
             AutomaticBackupsView()
                 .navigationTransitionZoom(sourceID: SheetID.autoBackup, in: transitionNamespace)
-        }
-        .sheet(isPresented: $showCloudBackupsSheet) {
-            CloudBackupsView()
         }
         .sheet(item: $targetRestoreBackup) { backup in
             BackupContentView(backup: backup)

@@ -27,7 +27,10 @@ class SourceViewController: OldMangaCollectionViewController {
         return activityIndicator
     }()
 
-    init(source: Source) {
+    private let initialListingIndex: Int?
+
+    init(source: Source, initialListingIndex: Int? = nil) {
+        self.initialListingIndex = initialListingIndex
         self.source = source
         super.init()
         Task {
@@ -95,6 +98,10 @@ class SourceViewController: OldMangaCollectionViewController {
         Task {
             if !hidesListings {
                 await viewModel.loadListings()
+                let loadedListings = await viewModel.listings
+                if let initialListingIndex, loadedListings.indices.contains(initialListingIndex) {
+                    await viewModel.setCurrentListing(initialListingIndex)
+                }
                 self.collectionView.collectionViewLayout = self.makeCollectionViewLayout(
                     showHeader: await !viewModel.listings.isEmpty
                 )

@@ -11,6 +11,7 @@ import Nuke
 protocol SourceCellDelegate: AnyObject {
     func getButtonPressed(cell: SourceTableViewCell)
     func warningButtonPressed(cell: SourceTableViewCell)
+    func latestButtonPressed(cell: SourceTableViewCell)
 }
 
 class SourceTableViewCell: UITableViewCell {
@@ -34,6 +35,7 @@ class SourceTableViewCell: UITableViewCell {
     private let subtitleLabel = UILabel()
     private let separator = UIView()
     private let warningButton = UIButton()
+    private let latestButton = UIButton(type: .system)
     let getButton = GetButtonView()
 
     private var imageTask: ImageTask?
@@ -114,6 +116,12 @@ class SourceTableViewCell: UITableViewCell {
         warningButton.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(warningButton)
 
+        latestButton.setImage(UIImage(systemName: "clock.arrow.circlepath"), for: .normal)
+        latestButton.accessibilityLabel = "Latest releases"
+        latestButton.addTarget(self, action: #selector(latestPressed), for: .touchUpInside)
+        latestButton.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(latestButton)
+
         getButton.button.addTarget(self, action: #selector(getPressed), for: .touchUpInside)
         getButton.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(getButton)
@@ -131,6 +139,9 @@ class SourceTableViewCell: UITableViewCell {
             iconView.heightAnchor.constraint(equalToConstant: iconSize),
 
             labelStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
+            labelStack.trailingAnchor.constraint(lessThanOrEqualTo: warningButton.leadingAnchor, constant: -8),
+            labelStack.trailingAnchor.constraint(lessThanOrEqualTo: latestButton.leadingAnchor, constant: -8),
+            labelStack.trailingAnchor.constraint(lessThanOrEqualTo: getButton.leadingAnchor, constant: -8),
             labelStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
 
             badgeLabel.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
@@ -138,8 +149,13 @@ class SourceTableViewCell: UITableViewCell {
             badgeView.widthAnchor.constraint(equalTo: badgeLabel.widthAnchor, constant: 10),
             badgeView.heightAnchor.constraint(equalTo: badgeLabel.heightAnchor, constant: 4),
 
-            warningButton.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor, constant: -6),
+            warningButton.trailingAnchor.constraint(equalTo: latestButton.leadingAnchor, constant: -4),
             warningButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+
+            latestButton.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor, constant: -6),
+            latestButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            latestButton.widthAnchor.constraint(equalToConstant: 36),
+            latestButton.heightAnchor.constraint(equalToConstant: 44),
 
             getButton.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
             getButton.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -183,6 +199,7 @@ class SourceTableViewCell: UITableViewCell {
         subtitleLabel.text = SourceLanguage.displayName(for: SourceLanguage.primaryCode(for: info.languages))
 
         warningButton.isHidden = !info.external || info.externalInfo != nil
+        latestButton.isHidden = info.disabled || (section != .installed && section != .pinned)
         getButton.isHidden = section != .updates
         buttonTitle = NSLocalizedString("BUTTON_UPDATE")
 
@@ -245,5 +262,9 @@ class SourceTableViewCell: UITableViewCell {
 
     @objc func warningPressed() {
         delegate?.warningButtonPressed(cell: self)
+    }
+
+    @objc func latestPressed() {
+        delegate?.latestButtonPressed(cell: self)
     }
 }

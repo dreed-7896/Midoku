@@ -196,11 +196,15 @@ class NewSourceViewController: UIViewController {
     init(
         source: AidokuRunner.Source,
         onlySearch: Bool? = nil,
-        searchQuery: String? = nil
+        searchQuery: String? = nil,
+        initialListingIndex: Int? = nil
     ) {
         self.source = source
         self.onlySearch = onlySearch ?? source.onlySearch
         self.searchText = searchQuery ?? ""
+        if let initialListingIndex {
+            self.headerListingSelection = initialListingIndex + (source.features.providesHome ? 1 : 0)
+        }
         super.init(nibName: nil, bundle: nil)
 
         self.searchViewController.searchText = self.searchText

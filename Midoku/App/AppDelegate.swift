@@ -6,7 +6,6 @@
 //
 
 import AidokuRunner
-import CloudKit
 import Nuke
 import SwiftUI
 import UserNotifications
@@ -159,18 +158,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // makes the main thread win the race deterministically.
         _ = CoreDataManager.shared
 
-        // check for icloud availability
-        // https://developer.apple.com/documentation/foundation/filemanager/url(forubiquitycontaineridentifier:)
-        // Do not call this method from your app’s main thread. Because this method might take a nontrivial amount of
-        // time to set up iCloud and return the requested URL, you should always call it from a secondary thread.
-        Task.detached {
-            let isiCloudAvailable = FileManager.default.url(forUbiquityContainerIdentifier: nil) != nil
-            if !isiCloudAvailable {
-                LogManager.logger.info("iCloud unavailable")
-            }
-            AppSettings.flags.isiCloudAvailable.register(isiCloudAvailable)
-        }
-
         DataLoader.sharedUrlCache.diskCapacity = 0
 
         let pipeline = ImagePipeline(delegate: self) {
@@ -197,7 +184,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         application.applicationSupportsShakeToEdit = true
 
-        BackupManager.shared.register()
         MangaManager.shared.register()
 
         ReaderTemporaryPageStore.removeAllSessions()
@@ -207,7 +193,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--collection-preview") { return }
             #endif
-            await BackupManager.shared.scheduleAutoBackup()
+            await BackupManager.shared.createAutoBackupIfNeeded()
             if #available(iOS 18.0, *) {
                 DictionaryManager.shared.autoUpdateDictionaries()
             }

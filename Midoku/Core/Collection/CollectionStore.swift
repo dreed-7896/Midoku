@@ -218,6 +218,95 @@ final class MCCollectionStore {
         return library.entries.first { $0.primaryListingID == listing.id }?.id
     }
 
+    /// Replace a source in place so the personal entry, categories and Reading order survive migration.
+    func migrate(_ oldManga: AidokuRunner.Manga, to newManga: AidokuRunner.Manga,
+                 chapters newChapters: [AidokuRunner.Chapter]) throws {
+        guard let oldConnection = snapshot.connections.first(where: { $0.sourceKey == oldManga.sourceKey }),
+              let oldListing = library.listings.first(where: {
+                  $0.identity.connectionID == oldConnection.id && $0.identity.externalID == oldManga.key
+              }), library.entries.contains(where: { $0.links.contains { $0.listingID == oldListing.id } })
+        else { return }
+        let sourceName = SourceStore.shared.source(for: newManga.sourceKey)?.name ?? newManga.sourceKey
+        try change { state in
+            let oldChapterRecords = Dictionary(uniqueKeysWithValues: state.library.chapters.map { ($0.id, $0) })
+            let oldReadIDs = Set(state.library.chapters.filter { state.library.completed.contains($0.identity) }.map(\.id))
+            let newListingID = try state.remember(newManga, chapters: newChapters, sourceName: sourceName, complete: true)
+            guard let newListing = state.library.listing(newListingID) else { throw MCLibraryFailure.missing }
+            let incoming = state.library.chapters.filter { $0.identity.listing == newListing.identity && $0.available }
+            let oldIDs = Set(oldChapterRecords.values.filter { $0.identity.listing == oldListing.identity }.map(\.id))
+            let numbers = Dictionary(grouping: incoming.filter { $0.record.number != nil }, by: { $0.record.number! })
+            let titles = Dictionary(grouping: incoming, by: { $0.record.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) })
+            var replacements: [UUID: MCLibraryChapter] = [:]
+            for old in oldChapterRecords.values where old.identity.listing == oldListing.identity {
+                let exact = incoming.first { $0.record.id == old.record.id }
+                let byNumber = old.record.number.flatMap { numbers[$0] }.flatMap { $0.count == 1 ? $0.first : nil }
+                let titleKey = old.record.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let byTitle = titles[titleKey].flatMap { $0.count == 1 ? $0.first : nil }
+                if let match = exact ?? byNumber ?? byTitle { replacements[old.id] = match }
+            }
+
+            let affectedIDs = state.library.entries.filter { $0.links.contains { $0.listingID == oldListing.id } }.map(\.id)
+            for id in affectedIDs {
+                guard let index = state.library.entries.firstIndex(where: { $0.id == id }) else { continue }
+                var entry = state.library.entries[index]
+                let existingTarget = state.library.entries.firstIndex(where: { $0.id != id && $0.primaryListingID == newListingID })
+                if let targetIndex = existingTarget {
+                    state.library.entries[targetIndex].categoryIDs.formUnion(entry.categoryIDs)
+                    if state.library.entries[targetIndex].status == .planned { state.library.entries[targetIndex].status = entry.status }
+                    if state.library.readingIDs.contains(id) {
+                        state.library.readingEntryIDs = state.library.readingIDs.map { $0 == id ? state.library.entries[targetIndex].id : $0 }
+                        var seen = Set<UUID>()
+                        state.library.readingEntryIDs = state.library.readingIDs.filter { seen.insert($0).inserted }
+                    }
+                    for slot in entry.slots where state.library.isRead(slot) {
+                        for variant in slot.variants where oldIDs.contains(variant.chapterID) {
+                            if let replacement = replacements[variant.chapterID] { state.library.completed.insert(replacement.identity) }
+                        }
+                    }
+                    state.library.removeEntries([id])
+                    continue
+                }
+                let oldLink = entry.links.first { $0.listingID == oldListing.id }
+                entry.links.removeAll { $0.listingID == oldListing.id }
+                if !entry.links.contains(where: { $0.listingID == newListingID }) {
+                    entry.links.append(MCEntrySourceLink(listingID: newListingID,
+                        followsNewChapters: oldLink?.followsNewChapters ?? true,
+                        language: newChapters.first?.language, needsInitialImport: false))
+                }
+                if entry.primaryListingID == oldListing.id { entry.primaryListingID = newListingID }
+                entry.exclusions.subtract(oldIDs)
+                let incomingIDs = Set(incoming.map(\.id))
+                var used = Set(entry.slots.flatMap(\.variants).map(\.chapterID).filter { incomingIDs.contains($0) })
+                entry.slots = entry.slots.compactMap { original in
+                    var slot = original
+                    let wasRead = state.library.isRead(original)
+                    slot.variants = original.variants.compactMap { variant in
+                        guard oldIDs.contains(variant.chapterID) else { return variant }
+                        guard let replacement = replacements[variant.chapterID], used.insert(replacement.id).inserted else { return nil }
+                        if wasRead || oldReadIDs.contains(variant.chapterID) { state.library.completed.insert(replacement.identity) }
+                        var updated = variant
+                        updated.chapterID = replacement.id
+                        return updated
+                    }
+                    guard let first = slot.variants.first else { return nil }
+                    if !slot.variants.contains(where: { $0.id == slot.preferredID }) { slot.preferredID = first.id }
+                    return slot
+                }
+                let present = Set(entry.slots.flatMap(\.variants).map(\.chapterID))
+                for chapter in incoming where !present.contains(chapter.id) {
+                    entry.slots.append(MCChapterSlot(variant: MCChapterVariant(chapterID: chapter.id)))
+                }
+                entry.sequenceRevision += 1
+                entry.updatedAt = Date()
+                if !entry.manualOrder { state.library.sortSequence(&entry) }
+                state.library.entries[index] = entry
+                state.library.updates.removeAll { $0.entryID == id && oldIDs.contains($0.chapterID) }
+            }
+            state.adopted.remove(oldManga.identifier)
+            state.adopted.insert(newManga.identifier)
+        }
+    }
+
     @discardableResult
     func add(_ manga: AidokuRunner.Manga, chapters: [AidokuRunner.Chapter], categories: Set<UUID> = [], status: MCPersonalStatus = .planned, follow: Bool = true,
              title: String? = nil, description: String? = nil, author: String? = nil, artist: String? = nil,

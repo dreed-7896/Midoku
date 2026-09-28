@@ -168,6 +168,11 @@ struct MCEntryView: View {
                             }
                             Button("Reset edits", systemImage: "arrow.counterclockwise") { confirmReset = true }
                             Button("Sources and alternatives", systemImage: "square.stack.3d.up") { showSources = true }
+                            if store.snapshot.manga.contains(where: { $0.listingID == entry.primaryListingID }) {
+                                Button("Migrate to another source", systemImage: "arrow.triangle.branch") {
+                                    migrateEntry(entry)
+                                }
+                            }
                             Picker("Chapter layout", selection: chapterGridOverride) {
                                 Text("Use appearance setting").tag(Bool?.none)
                                 Text("Grid").tag(Bool?.some(true))
@@ -234,6 +239,12 @@ struct MCEntryView: View {
             }
             #endif
         }
+    }
+
+    private func migrateEntry(_ entry: MCPersonalEntry) {
+        guard let manga = store.snapshot.manga.first(where: { $0.listingID == entry.primaryListingID })?.manga else { return }
+        let viewController = SwiftUINavigationViewController(rootView: MigrateSelectDestinationView(selectedSeries: [manga]))
+        UIApplication.shared.appDelegate?.visibleViewController?.present(viewController, animated: true)
     }
 
     private var chapterActions: some View {

@@ -184,6 +184,32 @@ class BrowseViewController: BaseTableViewController {
 }
 
 extension BrowseViewController {
+    func latestButtonPressed(cell: SourceTableViewCell) {
+        guard let key = cell.info?.sourceId,
+              let source = SourceManager.shared.store.source(for: key) else { return }
+        Task {
+            let names: [String]
+            if let legacy = source.legacySource {
+                names = legacy.listings.map(\.name)
+            } else {
+                names = (try? await source.getListings())?.map(\.name) ?? []
+            }
+            guard let index = names.firstIndex(where: {
+                $0.range(of: #"\b(latest|new|recent)\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+            }) else {
+                presentAlert(title: "Latest unavailable", message: "This extension does not provide a Latest or New tab.")
+                return
+            }
+            let controller: UIViewController
+            if let legacy = source.legacySource {
+                controller = SourceViewController(source: legacy, initialListingIndex: index)
+            } else {
+                controller = NewSourceViewController(source: source, initialListingIndex: index)
+            }
+            navigationController?.pushViewController(controller, animated: true)
+        }
+    }
+
     func uninstall(sourceKeys: [String]) {
         let containsLocalSource = sourceKeys.contains(where: { $0 == LocalSourceRunner.sourceKey })
 

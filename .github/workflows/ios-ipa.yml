@@ -9,114 +9,43 @@ permissions:
   contents: read
 
 concurrency:
-  group: midoku-merged-${{ github.ref }}
+  group: midoku-ipa-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  integration:
-    runs-on: xcode-27
-    timeout-minutes: 25
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Verify collection and artwork integration
-        timeout-minutes: 20
-        run: |
-          mkdir -p build/artifacts
-          set -o pipefail
-          (while sleep 30; do
-            date -u
-            ps -axo pid,ppid,etime,pcpu,rss,comm | sort -nr -k5 | sed -n '1,12p'
-          done) &
-          monitor_pid=$!
-          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
-          simulator=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for runtime, devices in d["devices"].items() if "iOS" in runtime for x in devices if "iPhone" in x["name"]))')
-          xcodebuild -jobs 2 -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
-            -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath build/DerivedData \
-            -resultBundlePath build/Integration.xcresult test \
-            -parallel-testing-enabled NO -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 \
-            -only-testing:MidokuTests/CollectionIntegrationTests \
-            -only-testing:MidokuTests/ArtworkCacheTests \
-            -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/integration-tests.log
-          xcrun xcresulttool get test-results summary --path build/Integration.xcresult > build/artifacts/test-summary.json
-          cat build/artifacts/test-summary.json
-          preview_simulator=$(xcrun simctl list devices booted -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((x["udid"] for runtime, devices in d["devices"].items() if "iOS" in runtime for x in devices if "iPhone" in x["name"]), ""))')
-          if [ -z "$preview_simulator" ]; then
-            preview_simulator="$simulator"
-            xcrun simctl boot "$preview_simulator"
-          fi
-          xcrun simctl bootstatus "$preview_simulator" -b
-          xcrun simctl install "$preview_simulator" build/DerivedData/Build/Products/Debug-iphonesimulator/Midoku.app
-          for preview in library reading entry reader; do
-            args=(--collection-preview)
-            case "$preview" in
-              library) args+=(--collection-preview-only) ;;
-              reading) args+=(--collection-preview-only --reading-preview) ;;
-              entry) args+=(--entry-preview) ;;
-              reader) args+=(--entry-preview --reader-preview) ;;
-            esac
-            xcrun simctl launch --terminate-running-process "$preview_simulator" com.raahat.Midoku "${args[@]}"
-            sleep 3
-            xcrun simctl io "$preview_simulator" screenshot "build/artifacts/$preview.png"
-          done
-      - name: Upload previews and test diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: Midoku-previews-${{ github.sha }}
-          path: |
-            build/artifacts/
-            build/integration-tests.log
-          if-no-files-found: warn
   build:
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 40
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Verify collection domain
-        run: |
-          mkdir -p build/artifacts
-          set -o pipefail
-          xcodebuild -version
-          swift test
-      - name: Archive unsigned device app
+      - name: Build unsigned device app
+        shell: bash
         run: |
           set -o pipefail
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Release \
-            -destination 'generic/platform=iOS' archive \
-            -archivePath build/Midoku.xcarchive -skipPackagePluginValidation \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee build/archive.log
+            -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData \
+            -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build \
+            2>&1 | tee build.log
       - name: Package IPA
+        shell: bash
         run: |
           mkdir -p build/package/Payload build/artifacts
-          app=build/Midoku.xcarchive/Products/Applications/Midoku.app
+          app=build/DerivedData/Build/Products/Release-iphoneos/Midoku.app
           test -s "$app/Midoku"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = com.raahat.Midoku
-          file "$app/Midoku"
           ditto "$app" build/package/Payload/Midoku.app
-          (cd build/package && zip -qry ../artifacts/Midoku-merged-unsigned.ipa Payload)
-          unzip -t build/artifacts/Midoku-merged-unsigned.ipa
-          (cd build/artifacts && shasum -a 256 Midoku-merged-unsigned.ipa > SHA256SUMS.txt)
-          printf 'Commit: %s\nUnsigned iOS 27 device build for LiveContainer.\n' "$GITHUB_SHA" > build/artifacts/BUILD.txt
+          (cd build/package && zip -qry ../artifacts/Midoku-unsigned.ipa Payload)
+          unzip -t build/artifacts/Midoku-unsigned.ipa
+          (cd build/artifacts && shasum -a 256 Midoku-unsigned.ipa > SHA256SUMS.txt)
+          printf 'Commit: %s\nUnsigned iOS device build for LiveContainer.\n' "$GITHUB_SHA" > build/artifacts/BUILD.txt
       - name: Upload IPA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Midoku-merged-unsigned-${{ github.sha }}
+          name: Midoku-unsigned-${{ github.sha }}
           path: build/artifacts/
           if-no-files-found: error

@@ -48,7 +48,6 @@ struct MangaDetailsHeaderView: View {
     @State private var readButtonText = NSLocalizedString("LOADING_ELLIPSIS")
     @State private var readButtonDisabled = true
     @State private var animationTrigger = false
-    @State private var longHeldBookmark = false
     @State private var longHeldTitle = false
     @State private var longHeldCreator = false
     @State private var longHeldSafari = false
@@ -237,6 +236,9 @@ struct MangaDetailsHeaderView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    showLibraryEditor()
+                })
                 .font(.system(size: 14, weight: .medium))
                 .padding(10)
                 .foregroundStyle(Color.accentColor)
@@ -347,10 +349,6 @@ struct MangaDetailsHeaderView: View {
         HStack(spacing: 8) {
             Button {
                 // long holding also triggers a press on release, so cancel that
-                if longHeldBookmark {
-                    longHeldBookmark = false
-                    return
-                }
                 if bookmarked && isTracking {
                     // show confirm prompt
                     showLibraryRemoveConfirm = true
@@ -363,16 +361,9 @@ struct MangaDetailsHeaderView: View {
                 Image(systemName: "bookmark.fill")
             }
             .buttonStyle(MangaActionButtonStyle(selected: bookmarked))
-            .simultaneousGesture(
-                // on long hold, show category select
-                LongPressGesture()
-                    .onEnded { _ in
-                        if let id = MCCollectionStore.shared.entryID(for: manga) {
-                            longHeldBookmark = true
-                            path.present(UIHostingController(rootView: MCEntryEditor(entryID: id)))
-                        }
-                    }
-            )
+            .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                showLibraryEditor()
+            })
             .alert(NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM"), isPresented: $showLibraryRemoveConfirm) {
                 Button(NSLocalizedString("CANCEL"), role: .cancel) {}
                 Button(NSLocalizedString("REMOVE"), role: .destructive) {
@@ -466,6 +457,28 @@ struct MangaDetailsHeaderView: View {
             // remove from library
             await MangaManager.shared.removeFromLibrary(mangaId: mangaId)
             bookmarked = false
+        } else {
+            let store = MCCollectionStore.shared
+            await store.importLegacyCategories()
+            let categories: Set<UUID> = if let name = AppSettings.library.defaultCategory.get(),
+                let category = store.snapshot.categories.first(where: { $0.name == name }) {
+                [category.id]
+            } else {
+                []
+            }
+            do {
+                _ = try store.add(manga, chapters: manga.chapters ?? chapters, categories: categories)
+                bookmarked = true
+                await MangaManager.shared.addToLibrary(manga: manga, chapters: manga.chapters ?? chapters)
+            } catch {
+                store.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func showLibraryEditor() {
+        if let id = MCCollectionStore.shared.entryID(for: manga) {
+            path.present(UIHostingController(rootView: MCEntryEditor(entryID: id)))
         } else {
             path.present(UIHostingController(rootView: MCAddSourceView(manga: manga, chapters: manga.chapters ?? chapters)))
         }

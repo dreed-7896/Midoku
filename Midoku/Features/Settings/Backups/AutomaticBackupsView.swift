@@ -8,34 +8,13 @@
 import SwiftUI
 
 struct AutomaticBackupsView: View {
-    @StateObject private var enabled = UserDefaultsBool(key: AppSettings.backups.autoBackups.enabled.key)
-
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         PlatformNavigationStack {
             List {
                 Section {
-                    toggle(key: AppSettings.backups.autoBackups.enabled.key, title: NSLocalizedString("AUTOMATIC_BACKUPS"))
-
-                    if enabled.value {
-                        SettingView(
-                            setting: .init(
-                                key: AppSettings.backups.autoBackups.interval.key,
-                                title: NSLocalizedString("BACKUP_INTERVAL"),
-                                value: .select(.init(
-                                    values: ["6hours", "12hours", "daily", "2days", "weekly"],
-                                    titles: [
-                                        NSLocalizedString("EVERY_6_HOURS"),
-                                        NSLocalizedString("EVERY_12_HOURS"),
-                                        NSLocalizedString("DAILY"),
-                                        NSLocalizedString("EVERY_2_DAYS"),
-                                        NSLocalizedString("WEEKLY")
-                                    ]
-                                ))
-                            )
-                        )
-                    }
+                    Text("When the app opens, its one automatic backup is replaced if it is at least 5 hours old.")
                 } footer: {
                     let date = AppSettings.backups.autoBackups.lastBackup.get()
                     if date > Date.distantPast {
@@ -43,8 +22,7 @@ struct AutomaticBackupsView: View {
                     }
                 }
 
-                if enabled.value {
-                    Section(NSLocalizedString("LIBRARY")) {
+                Section(NSLocalizedString("LIBRARY")) {
                         toggle(key: AppSettings.backups.autoBackups.libraryEntries.key, title: NSLocalizedString("LIBRARY_ENTRIES"))
                         toggle(key: AppSettings.backups.autoBackups.chapters.key, title: NSLocalizedString("CHAPTERS"))
                         toggle(key: AppSettings.backups.autoBackups.tracking.key, title: NSLocalizedString("TRACKING"))
@@ -54,14 +32,12 @@ struct AutomaticBackupsView: View {
                         toggle(key: AppSettings.backups.autoBackups.vocabulary.key, title: NSLocalizedString("VOCABULARY"))
                         toggle(key: AppSettings.backups.autoBackups.updates.key, title: NSLocalizedString("MANGA_UPDATES"))
                     }
-                    Section(NSLocalizedString("SETTINGS")) {
+                Section(NSLocalizedString("SETTINGS")) {
                         toggle(key: AppSettings.backups.autoBackups.settings.key, title: NSLocalizedString("SETTINGS"))
                         toggle(key: AppSettings.backups.autoBackups.sourceLists.key, title: NSLocalizedString("SOURCE_LISTS"))
                         toggle(key: AppSettings.backups.autoBackups.sensitiveSettings.key, title: NSLocalizedString("SENSITIVE_SETTINGS"))
                     }
-                }
             }
-            .animation(.default, value: enabled.value)
             .navigationTitle(NSLocalizedString("AUTOMATIC_BACKUPS"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -69,11 +45,6 @@ struct AutomaticBackupsView: View {
                     CloseButton {
                         dismiss()
                     }
-                }
-            }
-            .onChange(of: enabled.value) { _ in
-                Task {
-                    await BackupManager.shared.scheduleAutoBackup()
                 }
             }
         }

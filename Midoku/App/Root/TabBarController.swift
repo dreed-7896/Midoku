@@ -87,7 +87,7 @@ class TabBarController: UITabBarController {
         searchNavigationController = searchViewController
 
         let historyPath = NavigationCoordinator(rootViewController: nil)
-        let historyHostingController = UIHostingController(rootView: HistoryView()
+        let historyHostingController = UIHostingController(rootView: UpdatesHistoryView()
             .environmentObject(historyPath))
         historyPath.rootViewController = historyHostingController
         let historyViewController = NavigationController(rootViewController: historyHostingController)
@@ -140,8 +140,8 @@ class TabBarController: UITabBarController {
                     browseViewController
                 },
                 UITab(
-                    title: NSLocalizedString("HISTORY"),
-                    image: UIImage(systemName: "clock.fill"),
+                    title: "Updates",
+                    image: UIImage(systemName: "bell.badge"),
                     identifier: "2"
                 ) { _ in
                     historyViewController
@@ -171,8 +171,7 @@ class TabBarController: UITabBarController {
                 tag: 1
             )
             historyViewController.tabBarItem = UITabBarItem(
-                tabBarSystemItem: .history,
-                tag: 2
+                title: "Updates", image: UIImage(systemName: "bell.badge"), tag: 2
             )
             searchViewController.tabBarItem = UITabBarItem(
                 tabBarSystemItem: .search,

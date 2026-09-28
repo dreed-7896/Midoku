@@ -817,6 +817,11 @@ extension MangaManager {
                         let newManga = details.0
                         let newChapters = details.1
 
+                        // Keep the old personal entry if the destination could not supply its chapters.
+                        if newChapters.isEmpty, await MCCollectionStore.shared.entryID(for: oldManga) != nil {
+                            return nil
+                        }
+
                         return await Self.migrate(
                             copy: copy,
                             forceRemoveFromLibrary: forceRemoveFromLibrary,
@@ -833,6 +838,25 @@ extension MangaManager {
                         progressReport(Float(counter) / Float(fromSeries.count * 2))
                     }
                     if let result {
+                        let chapters = newDetails[result.from.key]?.1 ?? []
+                        var collectionMigrated = true
+                        if !copy || forceRemoveFromLibrary {
+                            do {
+                                try await MCCollectionStore.shared.migrate(result.from, to: result.to, chapters: chapters)
+                            } catch {
+                                collectionMigrated = false
+                                LogManager.logger.error("Could not migrate Midoku entry: \(error)")
+                                let message = error.localizedDescription
+                                await MainActor.run {
+                                    MCCollectionStore.shared.error = "The source migrated, but the personal entry could not be updated: \(message)"
+                                }
+                            }
+                        } else {
+                            try? await MCCollectionStore.shared.add(result.to, chapters: chapters)
+                        }
+                        if copy && forceRemoveFromLibrary && collectionMigrated {
+                            await MangaManager.shared.removeFromLibrary(mangaId: result.from.identifier)
+                        }
                         if !copy {
                             await TrackerManager.shared.bindEnhancedTrackers(manga: result.to)
                             NotificationCenter.default.post(name: .migratedManga, object: result)
@@ -1018,11 +1042,6 @@ extension MangaManager {
                 LogManager.logger.error("Error migrating manga \(oldManga.key): \(error)")
                 return nil
             }
-        }
-
-        // remove old item from library
-        if copy && forceRemoveFromLibrary {
-            await shared.removeFromLibrary(mangaId: oldManga.identifier)
         }
 
         return result
