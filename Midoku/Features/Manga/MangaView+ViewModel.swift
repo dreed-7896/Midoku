@@ -655,7 +655,7 @@ extension MangaView.ViewModel {
                 context: context
             )
         }
-        bookmarked = inLibrary
+        bookmarked = inLibrary || MCCollectionStore.shared.entryID(for: manga) != nil
     }
 
     private func loadHistory() async {

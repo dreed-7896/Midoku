@@ -303,10 +303,12 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         let incoming = chapters.filter { $0.identity.listing == identity && $0.available && (language == nil || $0.record.language == language) }
         for index in entries.indices {
             guard let link = entries[index].links.first(where: { $0.listingID == listingID }),
-                  (link.followsNewChapters || link.needsInitialImport == true), link.language == language else { continue }
+                  (link.followsNewChapters || link.needsInitialImport == true),
+                  (language == nil || link.language == language) else { continue }
             var entry = entries[index]
+            let matchingIncoming = incoming.filter { link.language == nil || $0.record.language == link.language }
             let present = Set(entry.slots.flatMap(\.variants).map(\.chapterID))
-            let additions = incoming.filter { !present.contains($0.id) && !entry.exclusions.contains($0.id) && !(link.followBaseline ?? []).contains($0.id) }
+            let additions = matchingIncoming.filter { !present.contains($0.id) && !entry.exclusions.contains($0.id) && !(link.followBaseline ?? []).contains($0.id) }
             // Equal numbers stay separate; grouping always requires explicit equivalence confirmation.
             for item in additions {
                 entry.slots.append(MCChapterSlot(variant: MCChapterVariant(chapterID: item.id)))
@@ -315,7 +317,7 @@ nonisolated struct MCLibraryState: Codable, Sendable {
                 }
             }
             if let linkIndex = entry.links.firstIndex(where: { $0.id == link.id }), entry.links[linkIndex].followBaseline != nil {
-                entry.links[linkIndex].followBaseline?.formUnion(incoming.map(\.id))
+                entry.links[linkIndex].followBaseline?.formUnion(matchingIncoming.map(\.id))
             }
             if let linkIndex = entry.links.firstIndex(where: { $0.id == link.id }) { entry.links[linkIndex].needsInitialImport = false }
             if !entry.manualOrder { sortSequence(&entry) }
@@ -387,6 +389,21 @@ nonisolated struct MCLibraryState: Codable, Sendable {
                 entry.slots.append(MCChapterSlot(variant: MCChapterVariant(chapterID: chapterID)))
             }
         }
+    }
+    /// Forget a removed alternative without allowing a later source refresh to add it again.
+    mutating func forgetRemovedAlternative(entryID: UUID, chapterID: UUID) throws {
+        guard let entry = entry(entryID), entry.exclusions.contains(chapterID),
+              let source = chapter(chapterID),
+              let main = listing(entry.primaryListingID),
+              let alternative = listings.first(where: { $0.identity == source.identity.listing }),
+              source.identity.listing != main.identity else { throw MCLibraryFailure.invalid }
+        try editEntry(entryID) { entry in
+            guard let index = entry.links.firstIndex(where: { $0.listingID == alternative.id })
+            else { throw MCLibraryFailure.missing }
+            entry.exclusions.remove(chapterID)
+            entry.links[index].followBaseline = (entry.links[index].followBaseline ?? []).union([chapterID])
+        }
+        updates.removeAll { $0.entryID == entryID && $0.chapterID == chapterID }
     }
     mutating func moveSlot(entryID: UUID, slotID: UUID, offset: Int) throws {
         try editEntry(entryID) { entry in

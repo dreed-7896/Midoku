@@ -58,6 +58,17 @@ struct MangaUpdatesView: View {
                 }
             }
             .listStyle(.plain)
+            .refreshable {
+                loadingTask?.cancel()
+                await MangaManager.shared.refreshLibrary(forceAll: true)
+                await MCCollectionStore.shared.refresh()
+                offset = 0
+                entries = []
+                reachedEnd = false
+                hasNoUpdates = false
+                loadingMore = true
+                await loadNewEntries()
+            }
             .overlay {
                 if hasNoUpdates {
                     VStack(alignment: .center) {
@@ -135,7 +146,7 @@ struct MangaUpdatesView: View {
 
 extension MangaUpdatesView {
     private func loadNewEntries() async {
-        let newUpdates = await CoreDataManager.shared.container.performBackgroundTask { [offset] context in
+        let legacyUpdates = await CoreDataManager.shared.container.performBackgroundTask { [offset] context in
             CoreDataManager.shared.getRecentMangaUpdates(limit: limit, offset: offset, context: context).compactMap {
                 if let mangaObj = CoreDataManager.shared.getManga(
                     mangaId: $0.identifier.mangaIdentifier,
@@ -154,6 +165,31 @@ extension MangaUpdatesView {
                 }
             }
         }
+        guard !Task.isCancelled else { return }
+        let store = MCCollectionStore.shared
+        let personalLibrary = store.library
+        let personalUpdates: [UpdateInfo] = offset == 0 ? personalLibrary.updates.compactMap { update in
+            guard let physical = personalLibrary.chapter(update.chapterID).flatMap({
+                store.physical($0.identity)
+            }) else { return nil }
+            let manga = physical.manga
+            let chapter = physical.chapter
+            return UpdateInfo(
+                id: update.id.uuidString,
+                chapterIdentifier: ChapterIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key, chapterKey: chapter.key),
+                date: update.discoveredAt,
+                manga: manga,
+                chapter: Chapter(sourceId: manga.sourceKey, id: chapter.key, mangaId: manga.key,
+                    title: chapter.title, scanlator: chapter.scanlators?.joined(separator: ", "),
+                    url: chapter.url?.absoluteString, lang: chapter.language ?? "en",
+                    chapterNum: chapter.chapterNumber, volumeNum: chapter.volumeNumber,
+                    dateUploaded: chapter.dateUploaded, thumbnail: chapter.thumbnail,
+                    locked: chapter.locked, sourceOrder: 0),
+                viewed: false
+            )
+        } : []
+        let legacyIDs = Set(legacyUpdates.map(\.chapterIdentifier))
+        let newUpdates = legacyUpdates + personalUpdates.filter { !legacyIDs.contains($0.chapterIdentifier) }
         guard !newUpdates.isEmpty else {
             reachedEnd = true
             loadingMore = false
@@ -180,7 +216,9 @@ extension MangaUpdatesView {
 
                 var updatesOfTheDay = updatesDict[day] ?? [:]
                 var newValue = updatesOfTheDay[obj.key] ?? []
-                newValue.append(info)
+                if !newValue.contains(where: { $0.chapterIdentifier == info.chapterIdentifier }) {
+                    newValue.append(info)
+                }
                 updatesOfTheDay[obj.key] = newValue
                 updatesDict[day] = updatesOfTheDay
             }
@@ -199,7 +237,7 @@ extension MangaUpdatesView {
         guard !Task.isCancelled else { return }
 
         offset += limit
-        reachedEnd = newUpdates.count < limit
+        reachedEnd = legacyUpdates.count < limit
 
         withAnimation {
             entries = newEntries
@@ -238,6 +276,19 @@ extension MangaUpdatesView {
         withAnimation {
             entries = newEntries
             if newEntries.isEmpty { hasNoUpdates = true }
+        }
+
+        MCCollectionStore.shared.perform { state in
+            let identifiers = Set(updates)
+            let removedIDs = Set(state.library.updates.filter { item in
+                guard let chapter = state.library.chapter(item.chapterID),
+                      let listing = state.library.listings.first(where: { $0.identity == chapter.identity.listing }),
+                      let manga = state.manga.first(where: { $0.listingID == listing.id })?.manga else { return false }
+                let id = ChapterIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key,
+                    chapterKey: chapter.record.id)
+                return identifiers.contains(id)
+            }.map(\.id))
+            state.library.updates.removeAll { removedIDs.contains($0.id) }
         }
 
         Task {

@@ -115,19 +115,32 @@ struct MCRemovedChaptersView: View {
                     ContentUnavailableView("No removed chapters", systemImage: "trash")
                 } else {
                     ForEach(chapters) { chapter in
-                        Button {
-                            restore(chapter.id)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(chapter.record.number.map { "Chapter \($0)" } ?? chapter.record.title)
-                                        .foregroundStyle(.primary)
-                                    Text(store.sourceName(chapter.identity.listing.connectionID))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                        HStack {
+                            Button {
+                                restore(chapter.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(chapter.record.number.map { "Chapter \($0)" } ?? chapter.record.title)
+                                            .foregroundStyle(.primary)
+                                        Text(store.sourceName(chapter.identity.listing.connectionID))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "arrow.uturn.backward.circle")
                                 }
-                                Spacer()
-                                Image(systemName: "arrow.uturn.backward.circle")
+                            }
+                            .buttonStyle(.plain)
+                            if let entry = store.library.entry(entryID),
+                               let main = store.library.listing(entry.primaryListingID),
+                               chapter.identity.listing != main.identity {
+                                Menu {
+                                    Button("Delete", systemImage: "trash", role: .destructive) {
+                                        store.perform { try $0.library.forgetRemovedAlternative(entryID: entryID, chapterID: chapter.id) }
+                                    }
+                                } label: { Image(systemName: "ellipsis.circle").padding(.leading, 8) }
+                                    .accessibilityLabel("More options for removed chapter")
                             }
                         }
                     }
@@ -174,7 +187,7 @@ struct MCEntrySourcesView: View {
                             Section(store.sourceName(record.identity.connectionID)) {
                                 Text(record.details.title)
                                 Button("Open original listing", systemImage: "arrow.up.forward.app") { listing = MCID(id: record.id) }
-                                Toggle("Follow new chapters", isOn: Binding(get: { link.followsNewChapters }, set: { value in
+                                Toggle("Get new chapters", isOn: Binding(get: { link.followsNewChapters }, set: { value in
                                     store.perform { state in
                                         let baseline = Set(state.library.chapters.filter { $0.identity.listing == record.identity }.map(\.id))
                                         try state.library.editEntry(entryID) { entry in

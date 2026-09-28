@@ -54,6 +54,7 @@ struct MangaDetailsHeaderView: View {
     @State private var isTracking = false
     @State private var hasAvailableTrackers = false
     @State private var showLibraryRemoveConfirm = false
+    @State private var changingBookmark = false
 
     static let coverWidth: CGFloat = 114
 
@@ -231,7 +232,7 @@ struct MangaDetailsHeaderView: View {
                         Task { await toggleBookmarked() }
                     }
                 } label: {
-                    Label(bookmarked ? "Unsave" : "Save", systemImage: bookmarked ? "bookmark.slash" : "bookmark")
+                    Label(bookmarked ? "Saved" : "Save", systemImage: bookmarked ? "bookmark.fill" : "bookmark")
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
@@ -358,7 +359,7 @@ struct MangaDetailsHeaderView: View {
                     }
                 }
             } label: {
-                Image(systemName: "bookmark.fill")
+                Image(systemName: bookmarked ? "bookmark.fill" : "bookmark")
             }
             .buttonStyle(MangaActionButtonStyle(selected: bookmarked))
             .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
@@ -446,19 +447,22 @@ struct MangaDetailsHeaderView: View {
     }
 
     func toggleBookmarked() async {
+        guard !changingBookmark else { return }
+        changingBookmark = true
+        defer { changingBookmark = false }
         let mangaId = manga.identifier
+        let store = MCCollectionStore.shared
         let inLibrary = await CoreDataManager.shared.container.performBackgroundTask { context in
             CoreDataManager.shared.hasLibraryManga(
                 mangaId: mangaId,
                 context: context
             )
         }
-        if inLibrary {
+        if inLibrary || store.entryID(for: manga) != nil {
             // remove from library
             await MangaManager.shared.removeFromLibrary(mangaId: mangaId)
             bookmarked = false
         } else {
-            let store = MCCollectionStore.shared
             await store.importLegacyCategories()
             let categories: Set<UUID> = if let name = AppSettings.library.defaultCategory.get(),
                 let category = store.snapshot.categories.first(where: { $0.name == name }) {

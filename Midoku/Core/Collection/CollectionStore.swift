@@ -401,7 +401,9 @@ final class MCCollectionStore {
         isRefreshing = true
         defer { isRefreshing = false }
         let entries = library.entries.filter { entryID == nil || $0.id == entryID }
-        let listingIDs = Set(entries.flatMap(\.links).map(\.listingID))
+        let listingIDs = Set(entries.flatMap(\.links)
+            .filter { $0.followsNewChapters || $0.needsInitialImport == true }
+            .map(\.listingID))
         var failures: [String] = []
         for listingID in listingIDs {
             guard let listing = library.listing(listingID),

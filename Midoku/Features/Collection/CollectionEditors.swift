@@ -32,6 +32,7 @@ struct MCEntryEditor: View {
     @State private var artist = ""
     @State private var summary = ""
     @State private var status = MCPersonalStatus.planned
+    @State private var getNewChapters = true
     @State private var categories = Set<UUID>()
     @State private var cover: MCLibraryCover?
     @State private var coverURL = ""
@@ -51,6 +52,9 @@ struct MCEntryEditor: View {
                     TextField("Author", text: $author)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
+                    if store.library.entry(entryID)?.primaryListingID != nil {
+                        Toggle("Get new chapters", isOn: $getNewChapters)
+                    }
                 }
                 Section("Cover") {
                     if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 100, height: 150)).frame(width: 100, height: 150) }
@@ -84,6 +88,7 @@ struct MCEntryEditor: View {
                     author = entry.authorOverride ?? store.library.listing(entry.primaryListingID)?.details.authors?.joined(separator: ", ") ?? ""
                     artist = entry.artistOverride ?? store.library.listing(entry.primaryListingID)?.details.artists?.joined(separator: ", ") ?? ""
                     status = entry.status; categories = entry.categoryIDs; clearCover = entry.hidesCover
+                    getNewChapters = entry.links.first(where: { $0.listingID == entry.primaryListingID })?.followsNewChapters ?? true
                 }
             }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
@@ -119,6 +124,7 @@ struct MCEntryEditor: View {
         if store.perform({ state in
             guard let original = state.library.entry(entryID) else { throw MCLibraryFailure.missing }
             let listing = state.library.listing(original.primaryListingID)
+            let knownChapters = Set(state.library.chapters.filter { $0.identity.listing == listing?.identity }.map(\.id))
             if let cover { state.library.covers.append(cover) }
             let validCategories = categories.intersection(Set(state.categories.map(\.id)))
             try state.library.editEntry(entryID) { entry in
@@ -127,6 +133,13 @@ struct MCEntryEditor: View {
                 if author != (original.authorOverride ?? listing?.details.authors?.joined(separator: ", ") ?? "") { entry.authorOverride = author }
                 if artist != (original.artistOverride ?? listing?.details.artists?.joined(separator: ", ") ?? "") { entry.artistOverride = artist }
                 entry.status = status; entry.categoryIDs = validCategories; entry.hidesCover = clearCover
+                if let index = entry.links.firstIndex(where: { $0.listingID == entry.primaryListingID }),
+                   entry.links[index].followsNewChapters != getNewChapters {
+                    if getNewChapters && entry.links[index].needsInitialImport != true {
+                        entry.links[index].followBaseline = knownChapters
+                    }
+                    entry.links[index].followsNewChapters = getNewChapters
+                }
                 if restoreCover { entry.coverID = nil }
                 if let cover { entry.coverID = cover.id }
                 if clearCover { entry.coverID = nil }
@@ -305,7 +318,7 @@ struct MCAddSourceView: View {
                     TextField("Author", text: $author)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
-                    Toggle("Follow new chapters", isOn: $follow)
+                    Toggle("Get new chapters", isOn: $follow)
                 }
                 Section("Cover") {
                     if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 94, height: 140)).frame(width: 94, height: 140) }

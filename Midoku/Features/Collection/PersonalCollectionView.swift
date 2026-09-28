@@ -76,6 +76,7 @@ struct MCCollectionRootView: View {
     @State private var showAddPreview = false
     @State private var readingMode = false
     @State private var showReadingAdd = false
+    @State private var reader: MCReaderSheet?
     @State private var confirmResetReading = false
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
@@ -252,7 +253,25 @@ struct MCCollectionRootView: View {
             .navigationTitle(readingMode ? "Reading" : "Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if selecting && !readingMode {
+                if readingMode {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button { readingMode = false } label: { Image(systemName: "xmark") }
+                            .accessibilityLabel("Exit Reading Mode")
+                        Button { confirmResetReading = true } label: { Image(systemName: "arrow.counterclockwise") }
+                            .accessibilityLabel("Reset Reading")
+                            .disabled(store.library.readingIDs.isEmpty)
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button { showReadingAdd = true } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("Add to Reading")
+                        Button { openRandomEntry(from: store.readingEntries) } label: { Image(systemName: "shuffle") }
+                            .accessibilityLabel("Open random Reading entry; hold for entire library")
+                            .disabled(store.library.entries.isEmpty)
+                            .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                openRandomEntry(from: store.library.entries)
+                            })
+                    }
+                } else if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { selecting = false; selected.removeAll() } label: {
                             Image(systemName: "checkmark.circle.fill")
@@ -292,8 +311,7 @@ struct MCCollectionRootView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if readingMode { readingActions }
-                else if selecting { selectionActions }
+                if selecting && !readingMode { selectionActions }
             }
             .confirmationDialog("Remove \(selected.count) entries from library?", isPresented: $confirmDelete) {
                 Button("Remove entries", role: .destructive) {
@@ -307,6 +325,7 @@ struct MCCollectionRootView: View {
             } message: { Text("Your library entries and reading progress will stay unchanged.") }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
+            .fullScreenCover(item: $reader) { MCReaderView(sequence: $0.sequence).ignoresSafeArea() }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
             .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
@@ -399,33 +418,14 @@ struct MCCollectionRootView: View {
         }
     }
 
-    private var readingActions: some View {
-        HStack(spacing: 24) {
-            Button { readingMode = false } label: { Image(systemName: "xmark") }
-                .accessibilityLabel("Exit Reading Mode")
-            Button { confirmResetReading = true } label: { Image(systemName: "arrow.counterclockwise") }
-                .accessibilityLabel("Reset Reading")
-                .disabled(store.library.readingIDs.isEmpty)
-            Spacer()
-            Button { showReadingAdd = true } label: { Image(systemName: "plus") }
-                .accessibilityLabel("Add to Reading")
-            Button {
-                openRandomEntry(from: store.readingEntries)
-            } label: { Image(systemName: "shuffle") }
-                .accessibilityLabel("Open random Reading entry; hold for entire library")
-                .disabled(store.library.entries.isEmpty)
-                .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                    openRandomEntry(from: store.library.entries)
-                })
-        }
-        .font(.title3)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .background(.regularMaterial)
-    }
-
     private func openRandomEntry(from entries: [MCPersonalEntry]) {
-        if let entry = entries.randomElement() { path.append(entry.id) }
+        guard let entry = entries.filter({ !$0.slots.isEmpty }).randomElement(),
+              let first = entry.slots.first else {
+            store.error = "No chapters are available to read."
+            return
+        }
+        do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: first.id)) }
+        catch { store.error = error.localizedDescription }
     }
 
     private func groupTabs(pages: [MCLibraryGroupPage]) -> some View {

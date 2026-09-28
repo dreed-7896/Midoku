@@ -13,6 +13,24 @@ private struct MCInAppWebView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
+private struct MCEntryMigrationSheet: UIViewControllerRepresentable {
+    let manga: AidokuRunner.Manga
+
+    func makeUIViewController(context: Context) -> UINavigationController {
+        SwiftUINavigationViewController(rootView: MigrateSelectDestinationView(
+            selectedSeries: [manga],
+            selectedSources: SourceManager.shared.store.source(for: manga.sourceKey).map { [$0.toInfo()] } ?? []
+        ))
+    }
+
+    func updateUIViewController(_ controller: UINavigationController, context: Context) {}
+}
+
+private struct MCEntryMigrationTarget: Identifiable {
+    let id = UUID()
+    let manga: AidokuRunner.Manga
+}
+
 private struct MCEntryStatusEditor: View {
     let entryID: UUID
     @Environment(\.dismiss) private var dismiss
@@ -73,6 +91,7 @@ struct MCEntryView: View {
     @State private var showCover = false
     @State private var showSources = false
     @State private var showRemovedChapters = false
+    @State private var migrationTarget: MCEntryMigrationTarget?
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var editingChapter: MCID?
@@ -167,16 +186,31 @@ struct MCEntryView: View {
                                 Button("Removed chapters (\(entry.exclusions.count))", systemImage: "arrow.uturn.backward") { showRemovedChapters = true }
                             }
                             Button("Reset edits", systemImage: "arrow.counterclockwise") { confirmReset = true }
-                            Button("Sources and alternatives", systemImage: "square.stack.3d.up") { showSources = true }
+                            Button("Sources", systemImage: "square.stack.3d.up") { showSources = true }
                             if store.snapshot.manga.contains(where: { $0.listingID == entry.primaryListingID }) {
-                                Button("Migrate to another source", systemImage: "arrow.triangle.branch") {
+                                Button("Migrate", systemImage: "arrow.triangle.branch") {
                                     migrateEntry(entry)
                                 }
                             }
-                            Picker("Chapter layout", selection: chapterGridOverride) {
-                                Text("Use appearance setting").tag(Bool?.none)
-                                Text("Grid").tag(Bool?.some(true))
-                                Text("List").tag(Bool?.some(false))
+                            Menu("Chapter layout", systemImage: "rectangle.split.1x2") {
+                                Button {
+                                    chapterGridOverride.wrappedValue = nil
+                                } label: {
+                                    if entry.chapterGridOverride == nil { Label("Use appearance setting", systemImage: "checkmark") }
+                                    else { Text("Use appearance setting") }
+                                }
+                                Button {
+                                    chapterGridOverride.wrappedValue = true
+                                } label: {
+                                    if entry.chapterGridOverride == true { Label("Grid", systemImage: "checkmark") }
+                                    else { Text("Grid") }
+                                }
+                                Button {
+                                    chapterGridOverride.wrappedValue = false
+                                } label: {
+                                    if entry.chapterGridOverride == false { Label("List", systemImage: "checkmark") }
+                                    else { Text("List") }
+                                }
                             }
                             Button("Reset chapter thumbnails", systemImage: "arrow.counterclockwise") { confirmResetThumbnails = true }
                                 .disabled(entry.slots.isEmpty)
@@ -199,6 +233,7 @@ struct MCEntryView: View {
         .sheet(item: $webPage) { MCInAppWebView(url: $0.url).ignoresSafeArea() }
         .sheet(isPresented: $showSources) { MCEntrySourcesView(entryID: entryID) }
         .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
+        .sheet(item: $migrationTarget) { MCEntryMigrationSheet(manga: $0.manga) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
         .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
         .fullScreenCover(item: $reader) { MCReaderView(sequence: $0.sequence).ignoresSafeArea() }
@@ -243,8 +278,7 @@ struct MCEntryView: View {
 
     private func migrateEntry(_ entry: MCPersonalEntry) {
         guard let manga = store.snapshot.manga.first(where: { $0.listingID == entry.primaryListingID })?.manga else { return }
-        let viewController = SwiftUINavigationViewController(rootView: MigrateSelectDestinationView(selectedSeries: [manga]))
-        UIApplication.shared.appDelegate?.visibleViewController?.present(viewController, animated: true)
+        migrationTarget = MCEntryMigrationTarget(manga: manga)
     }
 
     private var chapterActions: some View {

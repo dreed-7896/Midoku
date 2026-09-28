@@ -567,9 +567,25 @@ extension MangaManager {
 
         let allLoadedSourceKeys = await Set(SourceManager.shared.getLoadedSources().map { $0.key })
 
+        let followPolicy = await MainActor.run { () -> (managed: Set<MangaIdentifier>, following: Set<MangaIdentifier>) in
+            let store = MCCollectionStore.shared
+            var managed = Set<MangaIdentifier>()
+            var following = Set<MangaIdentifier>()
+            for entry in store.library.entries {
+                guard let manga = store.snapshot.manga.first(where: { $0.listingID == entry.primaryListingID })?.manga
+                else { continue }
+                managed.insert(manga.identifier)
+                if entry.links.contains(where: { $0.listingID == entry.primaryListingID && $0.followsNewChapters }) {
+                    following.insert(manga.identifier)
+                }
+            }
+            return (managed, following)
+        }
+
         // filter items that we should skip
         let filteredManga = await CoreDataManager.shared.container.performBackgroundTask { context in
             allManga.filter { manga in
+                (!followPolicy.managed.contains(manga.identifier) || followPolicy.following.contains(manga.identifier)) &&
                 !self.shouldSkip(
                     manga: manga,
                     options: skipOptions,
