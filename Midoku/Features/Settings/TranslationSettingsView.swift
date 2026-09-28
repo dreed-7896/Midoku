@@ -18,7 +18,7 @@ struct TranslationSettingsView: View {
             }
 
             if provider == "openai" {
-                Section("OpenAI compatible API") {
+                Section {
                     TextField("Chat completions URL", text: $endpoint)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -30,6 +30,8 @@ struct TranslationSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onChange(of: apiKey) { TranslationSettings.saveAPIKey($0) }
+                } header: {
+                    Text("OpenAI compatible API")
                 } footer: {
                     Text("Enter the full /v1/chat/completions URL. The key is stored in this device's Keychain. Japanese OCR text is sent to this server when you translate a page.")
                 }
