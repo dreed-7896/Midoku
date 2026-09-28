@@ -1,4 +1,5 @@
 import AidokuRunner
+import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -41,6 +42,19 @@ private struct MCLibraryGroupPage: Identifiable {
     let entryIDs: Set<UUID>
 }
 
+@Observable private final class MCLibrarySwipePosition {
+    var page: CGFloat = 0
+    var requestedID: String?
+}
+
+private struct MCLibraryTabAnchors: PreferenceKey {
+    static let defaultValue: [String: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newer in newer })
+    }
+}
+
 private struct MCLibrarySourceOption: Identifiable, Equatable {
     let id: UUID
     let name: String
@@ -59,6 +73,7 @@ struct MCCollectionRootView: View {
     @State private var searchVisible = false
     @State private var searchFocused: Bool?
     @State private var groupPage: String?
+    @State private var swipePosition = MCLibrarySwipePosition()
     @State private var statuses = Set<MCPersonalStatus>()
     @State private var artists = Set<String>()
     @State private var tags = Set<String>()
@@ -373,19 +388,56 @@ struct MCCollectionRootView: View {
         Group {
             let pages = groupPages
             VStack(spacing: 0) {
-                if grouping != .none { groupTabs(pages: pages) }
+                if grouping != .none {
+                    MCLibraryGroupTabs(pages: pages, selected: groupPage, swipePosition: swipePosition)
+                }
                 GeometryReader { geometry in
                     let visibleEntries = entries(in: nil)
                     if grouping == .none || pages.isEmpty {
                         collectionPage(values: visibleEntries, size: geometry.size)
                     } else {
-                        TabView(selection: $groupPage) {
-                            ForEach(pages) { page in
-                                collectionPage(values: visibleEntries.filter { page.entryIDs.contains($0.id) }, size: geometry.size)
-                                    .tag(Optional(page.id))
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal) {
+                                LazyHStack(spacing: 0) {
+                                    ForEach(pages) { page in
+                                        collectionPage(values: visibleEntries.filter { page.entryIDs.contains($0.id) }, size: geometry.size)
+                                            .frame(width: geometry.size.width, height: geometry.size.height)
+                                            .id(page.id)
+                                    }
+                                }
+                                .scrollTargetLayout()
+                            }
+                            .scrollIndicators(.hidden)
+                            .scrollTargetBehavior(.paging)
+                            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                                guard geometry.containerSize.width > 0 else { return 0 }
+                                return min(CGFloat(pages.count - 1), max(0, geometry.contentOffset.x / geometry.containerSize.width))
+                            } action: { _, page in
+                                swipePosition.page = page
+                            }
+                            .onScrollPhaseChange { _, phase in
+                                guard phase == .idle else { return }
+                                let index = Int(swipePosition.page.rounded())
+                                if pages.indices.contains(index) { groupPage = pages[index].id }
+                                swipePosition.requestedID = nil
+                            }
+                            .onChange(of: swipePosition.requestedID) { _, id in
+                                guard let id, pages.contains(where: { $0.id == id }) else { return }
+                                withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .leading) }
+                            }
+                            .onChange(of: groupPage) { _, id in
+                                guard let id, pages.contains(where: { $0.id == id }) else { return }
+                                let index = Int(swipePosition.page.rounded())
+                                if pages.indices.contains(index), pages[index].id == id { return }
+                                withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .leading) }
+                            }
+                            .onAppear {
+                                if let id = groupPage, let index = pages.firstIndex(where: { $0.id == id }) {
+                                    swipePosition.page = CGFloat(index)
+                                    proxy.scrollTo(id, anchor: .leading)
+                                }
                             }
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
                     }
                 }
             }
@@ -426,22 +478,6 @@ struct MCCollectionRootView: View {
         }
         do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: first.id)) }
         catch { store.error = error.localizedDescription }
-    }
-
-    private func groupTabs(pages: [MCLibraryGroupPage]) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 24) {
-                    ForEach(pages) { page in
-                        groupButton(page.title, count: page.entryIDs.count, id: page.id, active: (groupPage ?? pages.first?.id) == page.id)
-                    }
-                }.padding(.horizontal)
-            }
-            .onChange(of: groupPage) { _, value in
-                if let value { withAnimation { proxy.scrollTo(value, anchor: .center) } }
-            }
-        }.fixedSize(horizontal: false, vertical: true)
-        .overlay(alignment: .bottom) { Divider() }
     }
 
     private var selectionActions: some View {
@@ -515,25 +551,6 @@ struct MCCollectionRootView: View {
                 .padding(.vertical)
             }.refreshable { await store.refresh() }
         }
-    }
-
-    private func groupButton(_ name: String, count: Int, id: String, active: Bool) -> some View {
-        Button { withAnimation { groupPage = id } } label: {
-            HStack(spacing: 6) {
-                Text(name).font(.subheadline.weight(active ? .semibold : .medium))
-                Text("\(count)")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(active ? Color.accentColor : .secondary)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color(uiColor: active ? UIColor.tertiarySystemFill : UIColor.secondarySystemFill), in: Capsule())
-            }
-            .foregroundStyle(active ? Color.accentColor : .secondary)
-            .padding(.vertical, 12)
-            .overlay(alignment: .bottom) {
-                if active { Capsule().fill(Color.accentColor).frame(height: 3) }
-            }
-        }.buttonStyle(.plain).id(id)
-        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private func entryButton(_ entry: MCPersonalEntry) -> some View {
@@ -694,6 +711,70 @@ struct MCCollectionRootView: View {
                 .background(Color.accentColor, in: Capsule())
                 .accessibilityLabel("\(unread) unread chapters")
         }
+    }
+}
+
+private struct MCLibraryGroupTabs: View {
+    let pages: [MCLibraryGroupPage]
+    let selected: String?
+    let swipePosition: MCLibrarySwipePosition
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 24) {
+                    ForEach(pages) { page in
+                        let active = (selected ?? pages.first?.id) == page.id
+                        Button { swipePosition.requestedID = page.id } label: {
+                            HStack(spacing: 6) {
+                                Text(page.title).font(.subheadline.weight(.medium))
+                                Text("\(page.entryIDs.count)")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(active ? Color.accentColor : .secondary)
+                                    .padding(.horizontal, 7).padding(.vertical, 3)
+                                    .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Capsule())
+                            }
+                            .foregroundStyle(active ? Color.accentColor : .secondary)
+                            .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.plain)
+                        .id(page.id)
+                        .accessibilityAddTraits(active ? .isSelected : [])
+                        .anchorPreference(key: MCLibraryTabAnchors.self, value: .bounds) { [page.id: $0] }
+                    }
+                }
+                .padding(.horizontal)
+                .overlayPreferenceValue(MCLibraryTabAnchors.self) { anchors in
+                    GeometryReader { geometry in
+                        if !pages.isEmpty {
+                            let progress = min(CGFloat(pages.count - 1), max(0, swipePosition.page))
+                            let index = Int(progress)
+                            let nextIndex = min(index + 1, pages.count - 1)
+                            if let first = anchors[pages[index].id], let second = anchors[pages[nextIndex].id] {
+                                let start = geometry[first]
+                                let end = geometry[second]
+                                let fraction = progress - CGFloat(index)
+                                let width = start.width + (end.width - start.width) * fraction
+                                let x = start.minX + (end.minX - start.minX) * fraction
+                                Capsule().fill(Color.accentColor)
+                                    .frame(width: width, height: 3)
+                                    .position(x: x + width / 2, y: geometry.size.height - 1.5)
+                            }
+                        }
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: Int(swipePosition.page.rounded())) { _, index in
+                guard pages.indices.contains(index) else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(pages[index].id, anchor: .center) }
+            }
+            .onChange(of: selected) { _, id in
+                if let id { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) } }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .background(alignment: .bottom) { Divider() }
     }
 }
 
