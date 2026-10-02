@@ -9,6 +9,38 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func groupedTitlesPersistAndNestedTitlesRemainIndependentRandomPicks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        let x = try store.add(.init(sourceKey: "group.x", key: "book", title: "X"), chapters: [.init(key: "one", chapterNumber: 1)])
+        let y = try store.add(.init(sourceKey: "group.y", key: "book", title: "Y"), chapters: [.init(key: "two", chapterNumber: 2)])
+        let z = try store.add(.init(sourceKey: "group.z", key: "book", title: "Z"), chapters: [.init(key: "three", chapterNumber: 3)])
+        try store.change { try $0.library.moveEntry(z, into: y) }
+        let zSlot = try #require(store.library.entry(z)?.slots.first)
+        try store.change { _ = try $0.library.setRead(entryID: z, slotIDs: [zSlot.id], read: true) }
+        var group = UUID()
+        try store.change { group = try $0.library.groupEntries([x, y], details: .init(title: "Grouped", author: "Author")) }
+        #expect(store.chapterCount(entryID: group) == 3 && store.unreadCount(entryID: group) == 2)
+        #expect(store.addToReading([group]))
+        #expect(Set(store.library.entriesIncludingDescendants(of: Set(store.library.readingIDs)).map(\.id)) == [group, x, y, z])
+        #expect(store.addRandomToReading(count: 100)) // Exhausting the pool makes this deterministic.
+        #expect(Set(store.library.readingIDs) == [group, x, y, z] && store.library.readingIDs.count == 4)
+        #expect(store.addRandomToReading(count: 100))
+        #expect(store.library.readingIDs.count == 4)
+        let reopened = MCCollectionStore(fileURL: file)
+        #expect(reopened.library.rootEntries.map(\.id) == [group])
+        #expect(reopened.library.entry(z)?.parentEntryID == y)
+        #expect(reopened.library.entry(group)?.authorOverride == "Author")
+        #expect(Set(reopened.library.readingIDs) == [group, x, y, z])
+        let sequence = try MCReaderSequence(entryID: z, slotID: zSlot.id, store: reopened)
+        #expect(sequence.routes.map(\.entryID) == [x, y, z])
+        #expect(sequence.routes.last?.identifier.sourceKey == "group.z")
+        #expect(sequence.initialKey == sequence.chapters.last?.key)
+        #expect(sequence.routes.last?.initiallyRead == true)
+    }
+
     @Test func nestedReaderFreezesOrderAndPreservesPhysicalRoutesAcrossBackup() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

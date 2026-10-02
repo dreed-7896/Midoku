@@ -85,6 +85,8 @@ struct MCCollectionRootView: View {
     @State private var showCategories = false
     @State private var showBatchCategories = false
     @State private var showBatchArtist = false
+    @State private var showGroupTitles = false
+    @State private var groupingEntryIDs: [UUID] = []
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var confirmDelete = false
@@ -351,6 +353,12 @@ struct MCCollectionRootView: View {
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
             .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
+            .sheet(isPresented: $showGroupTitles) {
+                MCEntryEditor(grouping: groupingEntryIDs) { id in
+                    selected.removeAll(); selecting = false
+                    path.append(id)
+                }
+            }
             .sheet(isPresented: $showAddPreview) {
                 if let manga = store.snapshot.manga.first?.manga { MCAddSourceView(manga: manga, chapters: []) }
             }
@@ -488,21 +496,22 @@ struct MCCollectionRootView: View {
         .overlay(alignment: .bottomTrailing) {
             Button { openRandomEntry(from: store.readingEntries) } label: {
                 Image(systemName: "shuffle").font(.title3.weight(.semibold))
-                    .frame(width: 54, height: 54)
-                    .background(.regularMaterial, in: Circle())
-                    .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+                    .frame(width: 38, height: 38)
             }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
             .accessibilityLabel("Open random Reading entry; hold for entire library")
             .disabled(store.library.entries.isEmpty)
             .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                openRandomEntry(from: store.library.rootEntries)
+                openRandomEntry(from: store.library.entries)
             })
             .padding(.trailing, 18).padding(.bottom, 16)
         }
     }
 
     private func openRandomEntry(from entries: [MCPersonalEntry]) {
-        guard let entry = entries.filter({ store.chapterCount(entryID: $0.id) > 0 }).randomElement(),
+        let candidates = store.library.entriesIncludingDescendants(of: Set(entries.map(\.id)))
+        guard let entry = candidates.filter({ store.chapterCount(entryID: $0.id) > 0 }).randomElement(),
               let first = store.library.flattenedChapters(entryID: entry.id).first?.slot else {
             store.error = "No chapters are available to read."
             return
@@ -527,6 +536,12 @@ struct MCCollectionRootView: View {
                 Button("Add to Reading", systemImage: "book") {
                     if store.addToReading(selected) { selected.removeAll(); selecting = false }
                 }
+                Button("Group into new title", systemImage: "rectangle.stack.badge.plus") {
+                    let visible = entries(in: nil).map(\.id).filter { selected.contains($0) }
+                    let visibleIDs = Set(visible)
+                    groupingEntryIDs = visible + store.library.entries.map(\.id).filter { selected.contains($0) && !visibleIDs.contains($0) }
+                    showGroupTitles = true
+                }.disabled(selected.count < 2)
                 Divider()
                 Button("Remove from Library", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 Divider()
@@ -591,7 +606,7 @@ struct MCCollectionRootView: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 entryLabel(entry)
-                if showsFlatResults, let parentPath = store.library.parentPath(of: entry) {
+                if showsFlatResults || readingMode, let parentPath = store.library.parentPath(of: entry) {
                     Text(parentPath).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).clipped()
@@ -862,7 +877,7 @@ private struct MCReadingAddSheet: View {
                 } header: {
                     Text("Surprise me")
                 } footer: {
-                    Text("Random picks come from entries that are not already in Reading.")
+                    Text("Random picks include nested titles at every level that are not already in Reading.")
                 }
                 Section {
                     ForEach(matching) { entry in
@@ -876,6 +891,9 @@ private struct MCReadingAddSheet: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(store.library.title(entry)).font(.body.weight(.medium))
                                         .foregroundStyle(.primary).lineLimit(2)
+                                    if let path = store.library.parentPath(of: entry) {
+                                        Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                    }
                                     Text("\(store.chapterCount(entryID: entry.id)) chapters")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }

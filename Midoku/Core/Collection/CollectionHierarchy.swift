@@ -14,8 +14,68 @@ nonisolated struct MCEntryChapter: Sendable {
     let slot: MCChapterSlot
 }
 
+/// Editable presentation details only: a new parent never inherits source links,
+/// chapter ownership, reading history, or reader settings from a child.
+nonisolated struct MCEntryDetails: Sendable {
+    var title = ""
+    var description = ""
+    var author = ""
+    var artist = ""
+    var status = MCPersonalStatus.planned
+    var categoryIDs: Set<UUID> = []
+    var cover: MCLibraryCover?
+    var hidesCover = false
+}
+
 nonisolated extension MCLibraryState {
     var rootEntries: [MCPersonalEntry] { entries.filter { $0.parentEntryID == nil } }
+
+    func titleDetails(of entry: MCPersonalEntry, sourceKey: String? = nil) -> MCEntryDetails {
+        let source = listing(entry.primaryListingID)?.details
+        let cover = covers.first { $0.id == entry.coverID }
+            ?? source?.coverURL.map { MCLibraryCover(url: $0, sourceKey: sourceKey) }
+        return MCEntryDetails(title: title(entry), description: description(entry),
+            author: entry.authorOverride ?? source?.authors?.joined(separator: ", ") ?? "",
+            artist: entry.artistOverride ?? source?.artists?.joined(separator: ", ") ?? "",
+            status: entry.status, categoryIDs: entry.categoryIDs, cover: cover, hidesCover: entry.hidesCover)
+    }
+
+    @discardableResult
+    mutating func groupEntries(_ ids: [UUID], details: MCEntryDetails) throws -> UUID {
+        var seen = Set<UUID>()
+        let orderedIDs = ids.filter { seen.insert($0).inserted }
+        guard orderedIDs.count >= 2 else { throw MCLibraryFailure.invalid }
+        guard orderedIDs.allSatisfy({ entry($0) != nil }) else { throw MCLibraryFailure.missing }
+        // Selecting both a title and its descendant must not dismantle that subtree.
+        let topLevel = orderedIDs.filter { seen.isDisjoint(with: ancestorIDs(of: $0)) }
+        var candidate = self
+        let id = try candidate.createManual(title: details.title, description: details.description, categories: details.categoryIDs)
+        if let cover = details.cover, !details.hidesCover, !candidate.covers.contains(where: { $0.id == cover.id }) {
+            candidate.covers.append(cover)
+        }
+        try candidate.editEntry(id) {
+            $0.authorOverride = details.author
+            $0.artistOverride = details.artist
+            $0.status = details.status
+            $0.coverID = details.hidesCover ? nil : details.cover?.id
+            $0.hidesCover = details.hidesCover
+        }
+        for child in topLevel { try candidate.moveEntry(child, into: id) }
+        candidate.normalizeContentOrders()
+        self = candidate
+        return id
+    }
+
+    /// Every title is one random candidate, including descendants of Reading titles.
+    /// Overlapping Reading selections never give a nested title extra weight.
+    func entriesIncludingDescendants(of ids: Set<UUID>) -> [MCPersonalEntry] {
+        let children = Dictionary(grouping: entries.filter { $0.parentEntryID != nil }, by: { $0.parentEntryID! })
+        var included = ids, pending = Array(ids)
+        while let next = pending.popLast() {
+            for child in children[next] ?? [] where included.insert(child.id).inserted { pending.append(child.id) }
+        }
+        return entries.filter { included.contains($0.id) }
+    }
 
     func contents(of entry: MCPersonalEntry) -> [MCEntryContent] {
         orderedContents(of: entry, children: entries.filter { $0.parentEntryID == entry.id })
