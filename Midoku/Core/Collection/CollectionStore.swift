@@ -542,14 +542,14 @@ final class MCCollectionStore {
         recentReads[identity] = Date()
         guard let connection = snapshot.connections.first(where: { $0.sourceKey == identity.sourceKey }) else { return }
         let key = MCSourceChapterIdentity(listing: .init(connectionID: connection.id, externalID: identity.mangaKey), externalID: identity.chapterKey)
-        guard library.chapters.contains(where: { $0.identity == key }) else { return }
+        guard let chapterID = library.chapters.first(where: { $0.identity == key })?.id else { return }
         if let completed, completed == library.completed.contains(key) { return }
         perform { state in
             if let completed {
                 if completed { state.library.completed.insert(key) } else { state.library.completed.remove(key) }
             }
             for i in state.library.entries.indices {
-                if state.library.entries[i].slots.contains(where: { slot in slot.preferred.flatMap { state.library.chapter($0.chapterID) }?.identity == key }) {
+                if state.library.entries[i].slots.contains(where: { $0.preferred?.chapterID == chapterID }) {
                     state.library.entries[i].lastReadAt = Date()
                 }
             }
