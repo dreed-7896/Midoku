@@ -298,7 +298,7 @@ struct CollectionIntegrationTests {
         #expect(added.edits.number == "5")
     }
 
-    @Test func readerActionsStayBelowProgressAtPhoneWidths() {
+    @Test func readerActionsStayAboveProgressAtPhoneWidths() {
         for width in [288.0, 370.0, 600.0] {
             let controls = ReaderControlsView()
             controls.titleLabel.text = "Chapter 21"
@@ -317,7 +317,7 @@ struct CollectionIntegrationTests {
             let sliderFrame = slider.convert(slider.bounds, to: controls)
             for button in [controls.closeButton, controls.chaptersButton, controls.settingsButton, controls.webButton] {
                 let frame = button.convert(button.bounds, to: controls)
-                #expect(frame.minY > sliderFrame.maxY)
+                #expect(frame.maxY <= sliderFrame.minY)
                 #expect(frame.height >= 44 && frame.width >= 44)
                 #expect(frame.maxX <= controls.bounds.maxX)
             }
