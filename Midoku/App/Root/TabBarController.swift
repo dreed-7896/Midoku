@@ -18,6 +18,7 @@ class TabBarController: UITabBarController {
     private var settingsPath: NavigationCoordinator?
     private var previousSelectedIndex: Int?
 
+    private weak var collectionViewController: UIViewController?
     private weak var historyNavigationController: UINavigationController?
     private weak var searchNavigationController: UINavigationController?
 
@@ -82,6 +83,7 @@ class TabBarController: UITabBarController {
         delegate = self
 
         let libraryViewController = UIHostingController(rootView: MCCollectionRootView())
+        collectionViewController = libraryViewController
         let browseViewController = NavigationController(rootViewController: BrowseViewController())
         let searchViewController = NavigationController(rootViewController: searchController)
         searchNavigationController = searchViewController
@@ -549,6 +551,7 @@ extension TabBarController: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
         if tab === tabBarController.selectedTab {
             checkForHistoryReselection()
+            checkForLibraryReselection()
         }
         return true
     }
@@ -556,8 +559,14 @@ extension TabBarController: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
         if viewController === selectedViewController {
             checkForHistoryReselection()
+            checkForLibraryReselection()
         }
         return true
+    }
+
+    private func checkForLibraryReselection() {
+        guard selectedViewController === collectionViewController else { return }
+        NotificationCenter.default.post(name: .libraryTabReselected, object: nil)
     }
 
     // when the history tab is selected while it's already showing the top of the history list,

@@ -8,7 +8,7 @@ let package = Package(
     targets: [
         .target(name: "MidokuCollectionCore", path: "Midoku/Core/Collection",
             exclude: ["CollectionStore.swift", "CollectionReader.swift", "CollectionAdoption.swift"],
-            sources: ["CollectionModels.swift", "CollectionIntegrity.swift", "CollectionTypes.swift"]),
+            sources: ["CollectionModels.swift", "CollectionIntegrity.swift", "CollectionTypes.swift", "CollectionHierarchy.swift"]),
         .testTarget(name: "MidokuCollectionCoreTests", dependencies: ["MidokuCollectionCore"], path: "Tests/Collection")
     ]
 )

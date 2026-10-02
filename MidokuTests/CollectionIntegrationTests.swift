@@ -9,6 +9,48 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func nestedReaderFreezesOrderAndPreservesPhysicalRoutesAcrossBackup() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        let x = try store.add(.init(sourceKey: "nested.x", key: "book", title: "X"),
+            chapters: [.init(key: "one", chapterNumber: 1), .init(key: "four", chapterNumber: 4)])
+        let y = try store.add(.init(sourceKey: "nested.y", key: "book", title: "Y"),
+            chapters: [.init(key: "one", chapterNumber: 2), .init(key: "three", chapterNumber: 3)])
+        let z = try store.add(.init(sourceKey: "nested.z", key: "book", title: "Z"), chapters: [.init(key: "one", chapterNumber: 1)])
+        let xs = try #require(store.library.entry(x)).slots, ys = try #require(store.library.entry(y)).slots
+        try store.change { state in
+            try state.library.moveEntry(y, into: x)
+            try state.library.moveEntry(z, into: y)
+            try state.library.reorderContents(entryID: x, order: [.chapter(xs[0].id), .title(y), .chapter(xs[1].id)])
+            try state.library.reorderContents(entryID: y, order: [.chapter(ys[0].id), .title(z), .chapter(ys[1].id)])
+        }
+        // Opening a child still allows the reader to leave it and continue in its parent.
+        let sequence = try MCReaderSequence(entryID: y, slotID: ys[0].id, store: store)
+        #expect(sequence.routes.map(\.entryID) == [x, y, z, y, x])
+        #expect(sequence.routes.map(\.identifier.sourceKey) == ["nested.x", "nested.y", "nested.z", "nested.y", "nested.x"])
+        #expect(sequence.adjacent(to: sequence.chapters[3], offset: 1)?.key == sequence.chapters[4].key)
+        #expect(sequence.adjacent(to: sequence.chapters[1], offset: -1)?.key == sequence.chapters[0].key)
+        let route = sequence.routes[2]
+        let target = try #require(store.coverTarget(identifier: route.identifier, entryID: route.entryID,
+            variantID: UUID(uuidString: route.displayChapter.key)))
+        #expect(target.entryID == z)
+        try store.change { _ = try $0.library.setRead(entryID: x, slotIDs: [xs[0].id, ys[0].id], read: true) }
+        #expect(store.chapterCount(entryID: x) == 5 && store.unreadCount(entryID: x) == 3)
+        #expect(store.chapterCount(entryID: y) == 3 && store.unreadCount(entryID: y) == 2)
+        let backup = try store.backupData()
+        let restored = MCCollectionStore(fileURL: root.appendingPathComponent("restored.json"))
+        try restored.restore(backup)
+        let restoredSequence = try MCReaderSequence(entryID: x, slotID: xs[0].id, store: restored)
+        #expect(restoredSequence.routes.map(\.identifier) == sequence.routes.map(\.identifier))
+        #expect(restored.unreadCount(entryID: x) == 3)
+        try store.change { try $0.library.moveEntry(y, into: nil) }
+        #expect(sequence.routes.count == 5) // In-flight reader sessions never reorder beneath the reader.
+        #expect(store.chapterCount(entryID: x) == 2)
+        #expect(MCCollectionStore(fileURL: file).library.entry(y)?.parentEntryID == nil)
+    }
+
     @Test func libraryReaderLoadsClosesAndReopens() async throws {
         await SourceManager.shared.waitForSourcesLoad()
         let sources = SourceStore.shared.sourcesByKey

@@ -534,10 +534,13 @@ extension ReaderViewController {
             currentPage = forceStartPage
             self.forceStartPage = nil
         } else {
-            let (_, startPage) = CoreDataManager.shared.getProgress(
+            let (completed, startPage) = CoreDataManager.shared.getProgress(
                 chapterId: physicalIdentifier(chapter)
             )
-            if let startPage, startPage > 0 {
+            if completed || collectionSequence?.route(chapter)?.initiallyRead == true {
+                // Zero means start fresh, including saved text/webtoon scroll offsets.
+                currentPage = 0
+            } else if let startPage, startPage > 0 {
                 currentPage = startPage
             } else {
                 currentPage = -1

@@ -7,6 +7,7 @@ struct UpdatesHistoryView: View {
     }
 
     @State private var page = Page.updates
+    @State private var showFollowedTitles = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,15 @@ struct UpdatesHistoryView: View {
                 HistoryView()
             }
         }
+        .toolbar {
+            if page == .updates {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showFollowedTitles = true } label: { Image(systemName: "bell.badge") }
+                        .accessibilityLabel("Manage titles getting new chapters")
+                }
+            }
+        }
+        .sheet(isPresented: $showFollowedTitles) { MCFollowedTitlesView() }
         .navigationTitle("Updates")
         .navigationBarTitleDisplayMode(.inline)
     }

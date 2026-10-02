@@ -1,4 +1,5 @@
 import AidokuRunner
+import CoreData
 import Foundation
 import Testing
 import UIKit
@@ -7,6 +8,31 @@ import UIKit
 @MainActor
 @Suite("Reader resume and resource limits", .serialized)
 struct ReaderReliabilityTests {
+    @Test func completedChaptersRestartWhileUnfinishedChaptersResume() throws {
+        let manga = AidokuRunner.Manga(sourceKey: "mc.restart", key: UUID().uuidString, title: "Restart")
+        let chapter = AidokuRunner.Chapter(key: "chapter", chapterNumber: 1)
+        let identifier = ChapterIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key, chapterKey: chapter.key)
+        let manager = CoreDataManager.shared
+        defer {
+            if let history = manager.getHistory(chapterId: identifier, context: manager.context) {
+                manager.context.delete(history)
+                try? manager.context.save()
+            }
+        }
+        manager.setProgress(18, chapterId: identifier, totalPages: 20, scrollPosition: 0.9, completed: false, context: manager.context)
+        let unfinished = ReaderViewController(source: nil, manga: manga, chapter: chapter)
+        let probe = MCReaderStartProbe()
+        unfinished.reader = probe
+        unfinished.loadCurrentChapter()
+        #expect(probe.startPage == 18)
+        manager.setProgress(20, chapterId: identifier, totalPages: 20, scrollPosition: 1, completed: true, context: manager.context)
+        let finished = ReaderViewController(source: nil, manga: manga, chapter: chapter)
+        finished.reader = probe
+        finished.loadCurrentChapter()
+        #expect(probe.startPage == 0) // Fresh start also bypasses saved text/webtoon offsets.
+        #expect(manager.getProgress(chapterId: identifier).completed)
+    }
+
     @Test func pageViewsAreCreatedOnlyForPagesBeingLoaded() async throws {
         let store = ReaderTemporaryPageStore()
         let page = ReaderPageViewController(type: .page, delegate: nil, temporaryPageStore: store)
@@ -84,4 +110,16 @@ private final class MCSlowRefreshRunner: AidokuRunner.Runner, @unchecked Sendabl
         lock.lock(); let continuation = pending; pending = nil; lock.unlock()
         continuation?.resume(returning: manga)
     }
+}
+
+@MainActor
+private final class MCReaderStartProbe: UIViewController, ReaderReaderDelegate {
+    var readingMode = ReadingMode.rtl
+    weak var delegate: ReaderHoldingDelegate?
+    var startPage: Int?
+    func moveLeft() {}
+    func moveRight() {}
+    func sliderMoved(value: CGFloat) {}
+    func sliderStopped(value: CGFloat) {}
+    func setChapter(_ chapter: AidokuRunner.Chapter, startPage: Int) { self.startPage = startPage }
 }

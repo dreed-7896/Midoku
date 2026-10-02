@@ -61,6 +61,8 @@ extension Notification.Name {
     // browse
     static let filterExternalSources = Self("filterExternalSources")
 
+    static let libraryTabReselected = Self("libraryTabReselected")
+
     // reader
     static let readerShowingBars = Self("readerShowingBars")
     static let readerHidingBars = Self("readerHidingBars")

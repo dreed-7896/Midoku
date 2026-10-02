@@ -13,6 +13,18 @@ nonisolated extension MCLibraryState {
         let listingsByIdentity = Dictionary(uniqueKeysWithValues: listings.map { ($0.identity, $0) })
         let coverIDs = Set(covers.map(\.id)), listingIDs = Set(listings.map(\.id)), entryIDs = Set(entries.map(\.id))
         guard unique(readingIDs), Set(readingIDs).isSubset(of: entryIDs) else { throw MCLibraryFailure.invalid }
+        let parents = Dictionary(uniqueKeysWithValues: entries.compactMap { entry in entry.parentEntryID.map { (entry.id, $0) } })
+        var checked = Set<UUID>()
+        for entry in entries {
+            var path = Set<UUID>()
+            var current: UUID? = entry.id
+            while let id = current, !checked.contains(id) {
+                guard entryIDs.contains(id), path.insert(id).inserted else { throw MCLibraryFailure.invalid }
+                current = parents[id]
+            }
+            checked.formUnion(path)
+            if let order = entry.contentOrder, !unique(order) { throw MCLibraryFailure.invalid }
+        }
         let allSlots = entries.flatMap(\.slots)
         guard unique(allSlots.map(\.id)), unique(allSlots.flatMap(\.variants).map(\.id)) else { throw MCLibraryFailure.invalid }
         for listing in listings {
@@ -111,6 +123,7 @@ nonisolated extension MCLibraryState {
             if !result.updates.contains(where: { $0.entryID == update.entryID && $0.chapterID == update.chapterID }) { result.updates.append(update) }
         }
         result.updates = Array(result.updates.suffix(1000))
+        result.normalizeContentOrders()
         return result
     }
 }

@@ -6,6 +6,8 @@ import SwiftUI
 @MainActor
 final class MCReaderSequence {
     struct Route {
+        let entryID: UUID
+        let initiallyRead: Bool
         let identity: MCSourceChapterIdentity
         let manga: AidokuRunner.Manga
         let chapter: AidokuRunner.Chapter
@@ -24,8 +26,9 @@ final class MCReaderSequence {
 
     init(entryID: UUID, slotID: UUID, store: MCCollectionStore? = nil) throws {
         let store = store ?? .shared
-        guard let entry = store.library.entry(entryID) else { throw MCLibraryFailure.missing }
-        self.entryID = entryID
+        let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
+        guard let entry = store.library.entry(rootID) else { throw MCLibraryFailure.missing }
+        self.entryID = rootID
         title = store.library.title(entry)
         var routes: [Route] = []
         var initial: String?
@@ -33,7 +36,8 @@ final class MCReaderSequence {
         let storedChapters = Dictionary(uniqueKeysWithValues: store.snapshot.chapters.map { ($0.chapterID, $0.chapter) })
         let listings = Dictionary(uniqueKeysWithValues: store.library.listings.map { ($0.identity, $0.id) })
         let manga = Dictionary(uniqueKeysWithValues: store.snapshot.manga.map { ($0.listingID, $0.manga) })
-        for slot in entry.slots {
+        for item in store.library.flattenedChapters(entryID: rootID) {
+            let slot = item.slot
             guard let variant = slot.preferred, let libraryChapter = chapters[variant.chapterID],
                   let original = storedChapters[libraryChapter.id],
                   let listingID = listings[libraryChapter.identity.listing], let physicalManga = manga[listingID]
@@ -44,7 +48,7 @@ final class MCReaderSequence {
                 volumeNumber: variant.edits.volume.flatMap(Float.init) ?? original.volumeNumber,
                 dateUploaded: original.dateUploaded, scanlators: original.scanlators,
                 url: original.url, language: original.language, thumbnail: original.thumbnail, locked: original.locked)
-            routes.append(Route(identity: libraryChapter.identity, manga: physicalManga, chapter: original, displayChapter: display))
+            routes.append(Route(entryID: item.entryID, initiallyRead: store.library.isRead(slot), identity: libraryChapter.identity, manga: physicalManga, chapter: original, displayChapter: display))
             if slot.id == slotID { initial = display.key }
         }
         guard let initial else { throw MCLibraryFailure.missing }
@@ -71,7 +75,7 @@ extension ReaderViewController {
         let store = MCCollectionStore.shared
         let route = collectionSequence?.route(key: chapterKey)
         let identity = route?.identifier ?? ChapterIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key, chapterKey: chapterKey)
-        let target = collectionSequence != nil && route == nil ? nil : store.coverTarget(identifier: identity, entryID: collectionSequence?.entryID,
+        let target = collectionSequence != nil && route == nil ? nil : store.coverTarget(identifier: identity, entryID: route?.entryID,
                                       variantID: collectionSequence == nil ? nil : UUID(uuidString: chapterKey))
         // Freeze the pressed page's target. Infinite scrolling may already be displaying another chapter.
         var actions: [UIAction] = []

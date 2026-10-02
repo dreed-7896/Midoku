@@ -127,7 +127,7 @@ final class MCCollectionStore {
     private(set) var isRefreshing = false
     private(set) var writable = true
     private let fileURL: URL
-    @ObservationIgnored private var unreadCounts: [UUID: Int] = [:]
+    @ObservationIgnored private var entryChapterCounts: [UUID: (total: Int, unread: Int)] = [:]
     @ObservationIgnored private var recentReads: [ChapterIdentifier: Date] = [:]
     @ObservationIgnored private var snapshotRevision = 0
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -170,7 +170,7 @@ final class MCCollectionStore {
             let data = try Data(contentsOf: fileURL)
             let loaded = try JSONDecoder().decode(MCCollectionSnapshot.self, from: data)
             try loaded.validate()
-            unreadCounts = Self.countUnread(in: loaded.library)
+            entryChapterCounts = loaded.library.chapterCounts()
             snapshot = loaded
         } catch {
             writable = false
@@ -182,12 +182,13 @@ final class MCCollectionStore {
         guard writable else { throw MCLibraryFailure.invalid }
         var candidate = snapshot
         try edit(&candidate)
+        candidate.library.normalizeContentOrders()
         try candidate.validate()
         let data = try JSONEncoder().encode(candidate)
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: [.atomic])
         let categoriesChanged = snapshot.categories != candidate.categories
-        unreadCounts = Self.countUnread(in: candidate.library)
+        entryChapterCounts = candidate.library.chapterCounts()
         snapshot = candidate
         snapshotRevision += 1
         if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
@@ -202,6 +203,7 @@ final class MCCollectionStore {
             let revision = snapshotRevision
             var candidate = snapshot
             try edit(&candidate)
+            candidate.library.normalizeContentOrders()
             let frozen = candidate
             let data = try await Task.detached(priority: .utility) {
                 try frozen.validate()
@@ -212,7 +214,7 @@ final class MCCollectionStore {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: fileURL, options: .atomic)
             let categoriesChanged = snapshot.categories != candidate.categories
-            unreadCounts = Self.countUnread(in: candidate.library)
+            entryChapterCounts = candidate.library.chapterCounts()
             snapshot = candidate
             snapshotRevision += 1
             if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
@@ -227,18 +229,8 @@ final class MCCollectionStore {
     }
 
     /// Built once per saved snapshot instead of scanning every chapter on each category swipe.
-    func unreadCount(entryID: UUID) -> Int { unreadCounts[entryID, default: 0] }
-
-    private static func countUnread(in library: MCLibraryState) -> [UUID: Int] {
-        let readChapterIDs = Set(library.chapters.filter { library.completed.contains($0.identity) }.map(\.id))
-        return Dictionary(uniqueKeysWithValues: library.entries.map { entry in
-            let unread = entry.slots.reduce(0) { count, slot in
-                let read = slot.completionOverride ?? slot.preferred.map { readChapterIDs.contains($0.chapterID) } ?? false
-                return count + (read ? 0 : 1)
-            }
-            return (entry.id, unread)
-        })
-    }
+    func unreadCount(entryID: UUID) -> Int { entryChapterCounts[entryID]?.unread ?? 0 }
+    func chapterCount(entryID: UUID) -> Int { entryChapterCounts[entryID]?.total ?? 0 }
 
     func sourceName(_ connectionID: UUID) -> String {
         snapshot.connections.first { $0.id == connectionID }?.name ?? "Unavailable source"
@@ -410,7 +402,11 @@ final class MCCollectionStore {
     }
 
     @discardableResult
-    func removeEntries(_ ids: Set<UUID>) -> Bool {
+    func removeEntries(_ selectedIDs: Set<UUID>, includingDescendants: Bool = false) -> Bool {
+        var ids = selectedIDs
+        if includingDescendants {
+            for id in selectedIDs { ids.formUnion(library.descendantIDs(of: id)) }
+        }
         let removedListings = Set(library.entries.filter { ids.contains($0.id) }.compactMap(\.primaryListingID))
         guard perform({ $0.library.removeEntries(ids) }) else { return false }
         let remainingListings = Set(library.entries.compactMap(\.primaryListingID))
@@ -473,7 +469,7 @@ final class MCCollectionStore {
 
     func resumeSlot(entryID: UUID) async -> UUID? {
         guard let entry = library.entry(entryID) else { return nil }
-        let chapterIDs = Set(entry.slots.compactMap(\.preferred).map(\.chapterID))
+        let chapterIDs = Set(library.flattenedChapters(entryID: entry.id).compactMap(\.slot.preferred).map(\.chapterID))
         let identities = library.chapters.filter { chapterIDs.contains($0.id) }.map(\.identity)
         let connections = Dictionary(uniqueKeysWithValues: snapshot.connections.map { ($0.id, $0.sourceKey) })
         let listingIDs = Set(identities.map(\.listing))
@@ -503,7 +499,7 @@ final class MCCollectionStore {
 
     func setRead(entryIDs: Set<UUID>, read: Bool) {
         let selections = Dictionary(uniqueKeysWithValues: library.entries.filter { entryIDs.contains($0.id) }
-            .map { ($0.id, Set($0.slots.map(\.id))) })
+            .map { ($0.id, Set(library.flattenedChapters(entryID: $0.id).map(\.slot.id))) })
         setRead(selections: selections, read: read)
     }
 
@@ -548,10 +544,11 @@ final class MCCollectionStore {
             if let completed {
                 if completed { state.library.completed.insert(key) } else { state.library.completed.remove(key) }
             }
-            for i in state.library.entries.indices {
-                if state.library.entries[i].slots.contains(where: { $0.preferred?.chapterID == chapterID }) {
-                    state.library.entries[i].lastReadAt = Date()
-                }
+            let owners = state.library.entries.filter { $0.slots.contains { $0.preferred?.chapterID == chapterID } }.map(\.id)
+            var affected = Set(owners)
+            for owner in owners { affected.formUnion(state.library.ancestorIDs(of: owner)) }
+            for i in state.library.entries.indices where affected.contains(state.library.entries[i].id) {
+                state.library.entries[i].lastReadAt = Date()
             }
         }
     }
