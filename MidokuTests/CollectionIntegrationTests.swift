@@ -1,5 +1,7 @@
 import AidokuRunner
 import Foundation
+import Observation
+import SwiftUI
 import Testing
 import UIKit
 @testable import Midoku
@@ -7,6 +9,66 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func libraryReaderLoadsClosesAndReopens() async throws {
+        await SourceManager.shared.waitForSourcesLoad()
+        let sources = SourceStore.shared.sourcesByKey
+        let disabled = SourceStore.shared.disabledSourceKeys
+        defer { SourceStore.shared.update(sourcesByKey: sources, disabledSourceKeys: disabled) }
+        let key = "mc.presentation.\(UUID().uuidString)"
+        var testSources = sources
+        testSources[key] = AidokuRunner.Source(url: nil, key: key, name: "Presentation", version: 1,
+            languages: ["en"], contentRating: .safe, runner: MCPageRoutingRunner())
+        SourceStore.shared.update(sourcesByKey: testSources, disabledSourceKeys: disabled)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("collection.json"))
+        let manga = AidokuRunner.Manga(sourceKey: key, key: "book", title: "Presentation")
+        let id = try store.add(manga, chapters: [.init(key: "one", chapterNumber: 1), .init(key: "two", chapterNumber: 2)])
+        let entry = try #require(store.library.entry(id))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.windows.first(where: \.isKeyWindow)
+        let state = MCReaderPresentationTestState()
+        let host = UIHostingController(rootView: MCReaderPresentationTestHost(state: state))
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            host.dismiss(animated: false)
+            window.isHidden = true
+            window.rootViewController = nil
+            previousWindow?.makeKey()
+        }
+        try #require(await Self.waitForPresentation { host.viewIfLoaded?.window != nil })
+        for slot in entry.slots {
+            let sequence = try MCReaderSequence(entryID: id, slotID: slot.id, store: store)
+            state.sheet = MCReaderSheet(sequence: sequence)
+            try #require(await Self.waitForPresentation { Self.presentedReader(in: host.presentedViewController) != nil })
+            let reader = try #require(Self.presentedReader(in: host.presentedViewController))
+            try #require(await Self.waitForPresentation {
+                reader.viewIfLoaded?.window != nil && reader.transitionCoordinator == nil && !reader.pages.isEmpty
+            })
+            #expect(reader.collectionSequence === sequence)
+            #expect(reader.chapter.key == sequence.initialKey)
+            #expect(reader.pages.first?.sourceId == key)
+            reader.close()
+            try #require(await Self.waitForPresentation { state.sheet == nil && host.presentedViewController == nil })
+        }
+    }
+
+    private static func presentedReader(in controller: UIViewController?) -> ReaderViewController? {
+        guard let controller else { return nil }
+        if let reader = controller as? ReaderViewController { return reader }
+        return controller.children.lazy.compactMap { presentedReader(in: $0) }.first
+    }
+
+    private static func waitForPresentation(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<100 {
+            if condition() { return true }
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
+        }
+        return condition()
+    }
+
     @Test func unreadCountsFollowSavedProgressOverridesAndRestart() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -333,6 +395,18 @@ struct CollectionIntegrationTests {
         #expect(!ReaderNavigationController.shouldCloseReader(translation: .init(x: 50, y: 0), velocity: .zero, width: 390))
     }
 
+}
+
+@MainActor @Observable
+private final class MCReaderPresentationTestState {
+    var sheet: MCReaderSheet?
+}
+
+private struct MCReaderPresentationTestHost: View {
+    @Bindable var state: MCReaderPresentationTestState
+    var body: some View {
+        Color.clear.modifier(MCReaderPresentation(sheet: $state.sheet))
+    }
 }
 
 private struct MCPageRoutingRunner: AidokuRunner.Runner {

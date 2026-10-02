@@ -106,9 +106,6 @@ extension ReaderViewController {
 struct MCReaderView: UIViewControllerRepresentable {
     let sequence: MCReaderSequence
     func makeUIViewController(context: Context) -> ReaderNavigationController {
-        makeReaderController()
-    }
-    func makeReaderController() -> ReaderNavigationController {
         guard let route = sequence.route(key: sequence.initialKey) else { preconditionFailure("Validated reader route missing") }
         let reader = ReaderViewController(source: route.source, manga: route.manga, chapter: route.displayChapter, collectionSequence: sequence)
         #if DEBUG
@@ -130,52 +127,13 @@ struct MCReaderView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ReaderNavigationController, context: Context) {}
 }
 
-/// Present directly through UIKit so drag progress drives the actual dismissal rather
-/// than waiting for a SwiftUI fullScreenCover to close after the swipe has ended.
-struct MCReaderPresentation: UIViewControllerRepresentable {
+/// SwiftUI owns the presentation and clears the binding when the reader closes.
+struct MCReaderPresentation: ViewModifier {
     @Binding var sheet: MCReaderSheet?
 
-    final class Anchor: UIViewController {
-        var updatePresentation: (() -> Void)?
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            updatePresentation?()
+    func body(content: Content) -> some View {
+        content.fullScreenCover(item: $sheet) {
+            MCReaderView(sequence: $0.sequence).ignoresSafeArea()
         }
-    }
-
-    final class Coordinator {
-        var sheet: Binding<MCReaderSheet?>
-        weak var anchor: Anchor?
-        var reader: ReaderNavigationController?
-        init(sheet: Binding<MCReaderSheet?>) { self.sheet = sheet }
-        func update() {
-            guard let anchor, anchor.viewIfLoaded?.window != nil else { return }
-            guard let item = sheet.wrappedValue else {
-                if let reader, !reader.isBeingDismissed { reader.dismiss(animated: true) }
-                return
-            }
-            guard reader == nil, anchor.presentedViewController == nil else { return }
-            let nav = MCReaderView(sequence: item.sequence).makeReaderController()
-            reader = nav
-            nav.onDismissed = { [weak self] in
-                guard let self else { return }
-                reader = nil
-                if sheet.wrappedValue?.id == item.id { sheet.wrappedValue = nil }
-            }
-            anchor.present(nav, animated: true)
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(sheet: $sheet) }
-    func makeUIViewController(context: Context) -> Anchor {
-        let anchor = Anchor()
-        anchor.view.backgroundColor = .clear
-        context.coordinator.anchor = anchor
-        anchor.updatePresentation = { [weak coordinator = context.coordinator] in coordinator?.update() }
-        return anchor
-    }
-    func updateUIViewController(_ controller: Anchor, context: Context) {
-        context.coordinator.sheet = $sheet
-        DispatchQueue.main.async { context.coordinator.update() }
     }
 }

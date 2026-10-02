@@ -236,7 +236,7 @@ struct MCEntryView: View {
         .sheet(item: $migrationTarget) { MCEntryMigrationSheet(manga: $0.manga) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
         .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
-        .background(MCReaderPresentation(sheet: $reader))
+        .modifier(MCReaderPresentation(sheet: $reader))
         .confirmationDialog("Remove this entry from library?", isPresented: $confirmRemove) {
             Button("Remove entry", role: .destructive) { if store.removeEntries([entryID]) { dismiss() } }
         } message: { Text("Reading history and downloaded chapters are kept.") }

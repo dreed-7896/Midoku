@@ -17,9 +17,6 @@ class TabBarController: UITabBarController {
 
     private var settingsPath: NavigationCoordinator?
     private var previousSelectedIndex: Int?
-    private var collectionAtRoot = true
-    private var collectionReadingMode = false
-    private lazy var libraryActionHold = UILongPressGestureRecognizer(target: self, action: #selector(holdLibraryAction(_:)))
 
     private weak var historyNavigationController: UINavigationController?
     private weak var searchNavigationController: UINavigationController?
@@ -195,18 +192,6 @@ class TabBarController: UITabBarController {
         }
 
         applyOpeningTab()
-        libraryActionHold.delegate = self
-        libraryActionHold.minimumPressDuration = 0.5
-        tabBar.addGestureRecognizer(libraryActionHold)
-        NotificationCenter.default.publisher(for: .collectionActionState)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                guard let self else { return }
-                collectionAtRoot = notification.userInfo?["root"] as? Bool ?? true
-                collectionReadingMode = notification.userInfo?["reading"] as? Bool ?? false
-                updateLibraryAction()
-            }.store(in: &cancellables)
-        updateLibraryAction()
 
         let updateCount = AppSettings.browse.updateCount.get()
         #if DEBUG
@@ -552,22 +537,16 @@ extension TabBarController: UITabBarControllerDelegate {
     @available(iOS 18.0, *)
     func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
         checkForSettingsPop()
-        updateLibraryAction()
     }
 
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         if #unavailable(iOS 18.0) {
             checkForSettingsPop()
         }
-        updateLibraryAction()
     }
 
     @available(iOS 18.0, *)
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-        if isLibraryActionActive, tab === tabs.last {
-            NotificationCenter.default.post(name: .collectionAction, object: nil)
-            return false
-        }
         if tab === tabBarController.selectedTab {
             checkForHistoryReselection()
         }
@@ -575,10 +554,6 @@ extension TabBarController: UITabBarControllerDelegate {
     }
 
     func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
-        if isLibraryActionActive, viewController === searchNavigationController {
-            NotificationCenter.default.post(name: .collectionAction, object: nil)
-            return false
-        }
         if viewController === selectedViewController {
             checkForHistoryReselection()
         }
@@ -612,46 +587,6 @@ extension TabBarController: UITabBarControllerDelegate {
             settingsPath?.navigationController?.popToRootViewController(animated: true)
         }
         previousSelectedIndex = selectedIndex
-    }
-}
-
-extension TabBarController: UIGestureRecognizerDelegate {
-    private var isLibraryActionActive: Bool {
-        collectionAtRoot && selectedIndex == 0
-    }
-
-    private func updateLibraryAction() {
-        let title = isLibraryActionActive ? (collectionReadingMode ? "Random" : "Reading") : NSLocalizedString("SEARCH")
-        let icon = isLibraryActionActive ? (collectionReadingMode ? "shuffle" : "book") : "magnifyingglass"
-        if #available(iOS 26.0, *), let searchTab = tabs.last as? UISearchTab {
-            searchTab.title = title
-            searchTab.image = UIImage(systemName: icon)
-            searchTab.automaticallyActivatesSearch = !isLibraryActionActive
-        } else {
-            searchNavigationController?.tabBarItem.title = title
-            searchNavigationController?.tabBarItem.image = UIImage(systemName: icon)
-        }
-    }
-
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === libraryActionHold, isLibraryActionActive else { return false }
-        let point = gestureRecognizer.location(in: tabBar)
-        // Use the actual public control frames so the detached iOS search item and
-        // compact layouts both receive the hold, without capturing other tabs.
-        func controls(in view: UIView) -> [UIControl] {
-            if let control = view as? UIControl { return [control] }
-            return view.subviews.flatMap { controls(in: $0) }
-        }
-        let frames = controls(in: tabBar).filter { !$0.isHidden && $0.alpha > 0 }
-            .map { $0.convert($0.bounds, to: tabBar) }.filter { $0.width > 30 && $0.height > 25 }
-        if let frame = frames.max(by: { $0.midX < $1.midX }) { return frame.contains(point) }
-        return point.x > tabBar.bounds.width - 76
-    }
-
-    @objc private func holdLibraryAction(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, isLibraryActionActive else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        NotificationCenter.default.post(name: .collectionAction, object: nil, userInfo: ["randomLibrary": true])
     }
 }
 
