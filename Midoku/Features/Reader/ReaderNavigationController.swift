@@ -71,7 +71,9 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
         guard !zoomed(in: reader.view) else { return false }
         dismissVertically = velocity.y > abs(velocity.x)
         if dismissVertically {
-            return velocity.y > 0 && origin.y < view.safeAreaInsets.top + 96
+            let scrollingVertically = reader.reader is ReaderWebtoonViewController
+                || reader.reader is ReaderTextViewController || reader.readingMode == .vertical
+            return velocity.y > 0 && (!scrollingVertically || origin.y < view.safeAreaInsets.top + 96)
         }
         return origin.x < 80 && velocity.x > 0 && velocity.x > abs(velocity.y)
     }

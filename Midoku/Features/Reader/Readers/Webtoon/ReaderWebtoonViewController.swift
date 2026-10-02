@@ -959,7 +959,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
                let position = history?.scrollPosition?.doubleValue, position.isFinite,
                let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: IndexPath(row: startPage, section: 0))?.frame {
                 let offset = frame.minY + CGFloat(position) * frame.height
-                collectionNode.contentOffset.y = max(0, min(offset, collectionNode.contentSize.height - collectionNode.bounds.height))
+                collectionNode.contentOffset.y = max(0, min(offset, collectionNode.view.contentSize.height - collectionNode.bounds.height))
             }
             scrollView.contentOffset = collectionNode.contentOffset
             if let next = delegate?.getNextChapter() {

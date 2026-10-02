@@ -55,6 +55,8 @@ class ReaderViewController: BaseObservingViewController {
     private var currentPage = 1
     private var currentPosition: Double?
     private var progressSaveTask: Task<Void, Never>?
+    private var displayedPages: ClosedRange<Int>?
+    private var displayedChapterKey: String?
     private var sessionReadPages: Set<Int> = []
     private var sessionStartDate: Date?
     private var sessionLastInteraction: Date?
@@ -1062,8 +1064,14 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     private func setCurrentPages(_ pages: ClosedRange<Int>, position: Double? = nil) {
         guard let totalPages = toolbarView.totalPages else { return }
 
-        updateDescriptionButton(pages: pages)
-        updateAutoScrollButton()
+        let page = max(1, min(pages.lowerBound, totalPages))
+        let changedPage = displayedPages != pages || displayedChapterKey != chapter.key
+        if changedPage {
+            displayedPages = pages
+            displayedChapterKey = chapter.key
+            updateDescriptionButton(pages: pages)
+            updateAutoScrollButton()
+        }
 
         sessionLastInteraction = Date.now
         for page in pages {
@@ -1071,11 +1079,12 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
             sessionReadPages.insert(page)
         }
 
-        let page = max(1, min(pages.lowerBound, totalPages))
         currentPage = page
         currentPosition = position
-        toolbarView.currentPage = page
-        toolbarView.updateSliderPosition()
+        if changedPage {
+            toolbarView.currentPage = page
+            toolbarView.updateSliderPosition()
+        }
         if progressSaveTask == nil {
             progressSaveTask = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
@@ -1170,9 +1179,10 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     }
 
     func setCompleted() {
-        guard !AppSettings.general.incognitoMode.get() else { return }
+        guard !AppSettings.general.incognitoMode.get(), !chaptersToMark.isEmpty else { return }
 
         let completedRoutes = chaptersToMark.map { (physicalIdentifier($0), physicalChapter($0)) }
+        chaptersToMark.removeAll()
         Task {
             for (identity, chapter) in completedRoutes {
                 await HistoryManager.shared.addHistory(mangaId: identity.mangaIdentifier, chapters: [chapter])
