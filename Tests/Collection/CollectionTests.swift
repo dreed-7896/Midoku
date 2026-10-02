@@ -11,8 +11,10 @@ struct CollectionTests {
             records: [.init(id: "one", title: "One", number: "1", ordinal: 0, language: nil),
                       .init(id: "two", title: "Two", number: "2", ordinal: 1, language: nil)], language: nil)
         let entry = try #require(state.entry(id))
-        let first = try #require(state.chapter(try #require(entry.slots[0].preferred).chapterID)).identity
-        let second = try #require(state.chapter(try #require(entry.slots[1].preferred).chapterID)).identity
+        let firstVariant = try #require(entry.slots[0].preferred)
+        let secondVariant = try #require(entry.slots[1].preferred)
+        let first = try #require(state.chapter(firstVariant.chapterID)).identity
+        let second = try #require(state.chapter(secondVariant.chapterID)).identity
         state.completed.insert(first)
         let now = Date()
         let positions = [MCReadingPosition(id: second, updatedAt: now.addingTimeInterval(-1)),
