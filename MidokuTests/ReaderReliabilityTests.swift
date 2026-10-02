@@ -1,4 +1,5 @@
 import AidokuRunner
+import CoreData
 import Foundation
 import Testing
 import UIKit
