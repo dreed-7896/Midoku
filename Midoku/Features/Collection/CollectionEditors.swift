@@ -24,7 +24,9 @@ private struct MCRemoteCoverField: View {
 }
 
 struct MCEntryEditor: View {
-    let entryID: UUID
+    let entryID: UUID?
+    private let groupingEntryIDs: [UUID]
+    private let onCreated: ((UUID) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var title = ""
@@ -42,17 +44,48 @@ struct MCEntryEditor: View {
     @State private var showCategories = false
     @State private var loaded = false
     @State private var resetConfirm = false
+    @State private var inheritedTitle: String?
+
+    init(entryID: UUID) {
+        self.entryID = entryID
+        groupingEntryIDs = []
+        onCreated = nil
+    }
+
+    init(grouping entryIDs: [UUID], onCreated: @escaping (UUID) -> Void) {
+        entryID = nil
+        groupingEntryIDs = entryIDs
+        self.onCreated = onCreated
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                if entryID == nil {
+                    Section {
+                        Menu("Inherit details from…", systemImage: "doc.on.doc") {
+                            ForEach(groupingEntryIDs, id: \.self) { id in
+                                if let entry = store.library.entry(id) {
+                                    Button(store.library.title(entry)) { inheritDetails(from: entry) }
+                                }
+                            }
+                        }.disabled(loadingCoverURL)
+                        if let inheritedTitle {
+                            Text("Copied from \(inheritedTitle)").font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Group \(groupingEntryIDs.count) titles")
+                    } footer: {
+                        Text("Creates a new parent title. Existing chapters, progress, update settings, and nested titles stay intact. Inheriting replaces the fields below; you can edit them before creating.")
+                    }
+                }
                 Section("Details") {
                     TextField("Title", text: $title)
                     TextField("Artist", text: $artist)
                     TextField("Author", text: $author)
                     TextField("Description", text: $summary, axis: .vertical).lineLimit(4...12)
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
-                    if store.library.entry(entryID)?.primaryListingID != nil {
+                    if let entryID, store.library.entry(entryID)?.primaryListingID != nil {
                         Toggle("Get new chapters", isOn: $getNewChapters)
                     }
                 }
@@ -63,10 +96,10 @@ struct MCEntryEditor: View {
                     }
                     Text("URL covers are cached and fetched again after clearing the image cache.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Hide cover", isOn: $clearCover)
-                    Button("Reset entry cover", systemImage: "arrow.counterclockwise") {
+                    Button(entryID == nil ? "Clear cover" : "Reset entry cover", systemImage: "arrow.counterclockwise") {
                         cover = nil; coverURL = ""; clearCover = false; restoreCover = true
                     }.disabled(loadingCoverURL)
-                    if restoreCover { Text("The original source cover will be restored when you save.").font(.caption).foregroundStyle(.secondary) }
+                    if restoreCover && entryID != nil { Text("The original source cover will be restored when you save.").font(.caption).foregroundStyle(.secondary) }
                 }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { item in
@@ -74,16 +107,21 @@ struct MCEntryEditor: View {
                     }
                     Button("Manage categories") { showCategories = true }
                 }
-                Section { Button("Reset edits", role: .destructive) { resetConfirm = true } }
+                if entryID != nil {
+                    Section { Button("Reset edits", role: .destructive) { resetConfirm = true } }
+                }
             }
-            .navigationTitle("Edit entry").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(entryID == nil ? "Group into new title" : "Edit entry").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(entryID == nil ? "Create" : "Save") { save() }
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || loadingCoverURL)
+                }
             }
             .onAppear {
                 guard !loaded else { return }; loaded = true
-                if let entry = store.library.entry(entryID) {
+                if let entryID, let entry = store.library.entry(entryID) {
                     title = store.library.title(entry); summary = store.library.description(entry)
                     author = entry.authorOverride ?? store.library.listing(entry.primaryListingID)?.details.authors?.joined(separator: ", ") ?? ""
                     artist = entry.artistOverride ?? store.library.listing(entry.primaryListingID)?.details.artists?.joined(separator: ", ") ?? ""
@@ -94,6 +132,7 @@ struct MCEntryEditor: View {
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .confirmationDialog("Reset this entry’s details?", isPresented: $resetConfirm) {
                 Button("Reset edits", role: .destructive) {
+                    guard let entryID else { return }
                     if store.perform({ try $0.library.resetDetails(entryID) }) { dismiss() }
                 }
             } message: { Text("Restores entry details and cover. Chapter edits, categories and progress are kept.") }
@@ -102,9 +141,22 @@ struct MCEntryEditor: View {
     }
 
     private var coverSource: AidokuRunner.Source? {
-        guard let entry = store.library.entry(entryID),
+        guard let entryID, let entry = store.library.entry(entryID),
               let listing = store.library.listing(entry.primaryListingID) else { return nil }
         return store.source(listing.identity.connectionID)
+    }
+
+    private func inheritDetails(from entry: MCPersonalEntry) {
+        let connectionID = store.library.listing(entry.primaryListingID)?.identity.connectionID
+        let sourceKey = store.snapshot.connections.first { $0.id == connectionID }?.sourceKey
+        let details = store.library.titleDetails(of: entry, sourceKey: sourceKey)
+        title = details.title; summary = details.description
+        author = details.author; artist = details.artist
+        status = details.status; categories = details.categoryIDs
+        cover = details.cover; clearCover = details.hidesCover
+        coverURL = details.cover?.url?.absoluteString ?? ""
+        restoreCover = false
+        inheritedTitle = details.title
     }
 
     private func useCoverURL() async {
@@ -121,6 +173,19 @@ struct MCEntryEditor: View {
     }
 
     private func save() {
+        guard let entryID else {
+            var createdID: UUID?
+            if store.perform({ state in
+                let details = MCEntryDetails(title: title, description: summary, author: author, artist: artist,
+                    status: status, categoryIDs: categories.intersection(Set(state.categories.map(\.id))),
+                    cover: cover, hidesCover: clearCover)
+                createdID = try state.library.groupEntries(groupingEntryIDs, details: details)
+            }), let createdID {
+                dismiss()
+                onCreated?(createdID)
+            }
+            return
+        }
         if store.perform({ state in
             guard let original = state.library.entry(entryID) else { throw MCLibraryFailure.missing }
             let listing = state.library.listing(original.primaryListingID)

@@ -4,6 +4,86 @@ import Testing
 
 @Suite("Nested titles")
 struct HierarchyTests {
+    @Test func groupingCopiesEditableDetailsWithoutCopyingChaptersOrSourceLinks() throws {
+        var (state, x, y, z, connection) = try fixture()
+        let other = try state.createManual(title: "Other")
+        let category = UUID()
+        let cover = MCLibraryCover(url: URL(string: "https://example.com/cover.jpg")!, sourceKey: "source")
+        state.covers.append(cover)
+        try state.editEntry(x) {
+            $0.titleOverride = "Personal X"; $0.descriptionOverride = "Summary"
+            $0.authorOverride = "Author"; $0.artistOverride = "Artist"
+            $0.status = .onHold; $0.categoryIDs = [category]; $0.coverID = cover.id
+            $0.links[0].followsNewChapters = false
+        }
+        let before = state.flattenedChapters(entryID: x).map(\.slot.id)
+        let original = try #require(state.entry(x))
+        var details = state.titleDetails(of: original)
+        details.title = "My collection" // Copying is a starting point, not a live link.
+        let group = try state.groupEntries([other, x], details: details)
+        let parent = try #require(state.entry(group))
+        #expect(state.rootEntries.map(\.id) == [group])
+        #expect(state.contents(of: parent) == [.title(other), .title(x)])
+        #expect(parent.titleOverride == "My collection" && parent.descriptionOverride == "Summary")
+        #expect(parent.authorOverride == "Author" && parent.artistOverride == "Artist")
+        #expect(parent.status == .onHold && parent.categoryIDs == [category] && parent.coverID == cover.id)
+        #expect(parent.links.isEmpty && parent.slots.isEmpty && parent.primaryListingID == nil)
+        #expect(state.covers.count == 1)
+        #expect(state.entry(x)?.titleOverride == original.titleOverride)
+        #expect(state.entry(x)?.links.first?.followsNewChapters == false)
+        #expect(state.entry(y)?.parentEntryID == x && state.entry(z)?.parentEntryID == y)
+        #expect(state.flattenedChapters(entryID: group).map(\.slot.id) == before)
+        try state.validate(connections: [connection], categories: [category])
+    }
+
+    @Test func inheritedSourceDetailsBecomeIndependentEditableDetails() throws {
+        var state = MCLibraryState()
+        let connection = UUID(), url = URL(string: "https://example.com/source.jpg")!
+        var source = MCMangaDetails(id: "source", title: "Source title", description: "Source summary", coverURL: url)
+        source.authors = ["Author 1", "Author 2"]; source.artists = ["Artist"]
+        let a = try state.add(details: source, connectionID: connection, records: [], language: nil)
+        let b = try state.createManual(title: "B")
+        let details = state.titleDetails(of: try #require(state.entry(a)), sourceKey: "source.key")
+        #expect(details.title == source.title && details.description == source.description)
+        #expect(details.author == "Author 1, Author 2" && details.artist == "Artist")
+        #expect(details.cover?.url == url && details.cover?.sourceKey == "source.key")
+        let group = try state.groupEntries([a, b], details: details)
+        try state.editEntry(a) { $0.titleOverride = "Changed child" }
+        #expect(state.title(try #require(state.entry(group))) == "Source title")
+        #expect(state.entry(group)?.coverID == details.cover?.id)
+        try state.validate(connections: [connection], categories: [])
+        var hidden = details; hidden.hidesCover = true
+        let hiddenGroup = try state.groupEntries([a, b], details: hidden)
+        #expect(state.entry(hiddenGroup)?.hidesCover == true && state.entry(hiddenGroup)?.coverID == nil)
+    }
+
+    @Test func groupingOverlappingSelectionsKeepsSubtreesAndRejectsInvalidInputAtomically() throws {
+        var (state, x, y, z, connection) = try fixture()
+        let before = try JSONEncoder().encode(state)
+        #expect(throws: MCLibraryFailure.self) { try state.groupEntries([x, UUID()], details: .init(title: "Group")) }
+        #expect(throws: MCLibraryFailure.self) { try state.groupEntries([x, x], details: .init(title: "Group")) }
+        #expect(throws: MCLibraryFailure.self) { try state.groupEntries([x, y], details: .init(title: "  ")) }
+        // JSON key order is unspecified; compare decoded objects to verify no partial creation.
+        #expect(NSDictionary(dictionary: try #require(JSONSerialization.jsonObject(with: before) as? [String: Any])) ==
+            NSDictionary(dictionary: try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])))
+        let group = try state.groupEntries([z, x, y, x], details: .init(title: "Group"))
+        #expect(state.contents(of: try #require(state.entry(group))) == [.title(x)])
+        #expect(state.entry(y)?.parentEntryID == x && state.entry(z)?.parentEntryID == y)
+        #expect(state.flattenedChapters(entryID: group).count == 5)
+        try state.validate(connections: [connection], categories: [])
+    }
+
+    @Test func randomReadingPoolIncludesEveryDepthExactlyOnceWithoutUnrelatedTitles() throws {
+        var (state, x, y, z, _) = try fixture()
+        let other = try state.createManual(title: "Outside Reading")
+        #expect(state.entriesIncludingDescendants(of: []).isEmpty)
+        #expect(state.entriesIncludingDescendants(of: [UUID()]).isEmpty)
+        #expect(state.entriesIncludingDescendants(of: [x]).map(\.id) == [x, y, z])
+        #expect(state.entriesIncludingDescendants(of: [x, y, z]).map(\.id) == [x, y, z])
+        #expect(state.entriesIncludingDescendants(of: [y]).map(\.id) == [y, z])
+        #expect(Set(state.entriesIncludingDescendants(of: Set(state.entries.map(\.id))).map(\.id)) == [x, y, z, other])
+    }
+
     private func fixture() throws -> (MCLibraryState, UUID, UUID, UUID, UUID) {
         var state = MCLibraryState()
         let connection = UUID()
