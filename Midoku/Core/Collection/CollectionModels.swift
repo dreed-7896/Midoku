@@ -93,6 +93,9 @@ nonisolated struct MCPersonalEntry: Codable, Identifiable, Sendable {
     var chapterSort: MCChapterDisplaySort?
     /// nil follows the app-wide Appearance setting; otherwise this entry uses its own layout.
     var chapterGridOverride: Bool?
+    // Optional so existing libraries and backups decode without migration.
+    var parentEntryID: UUID?
+    var contentOrder: [MCEntryContent]?
 }
 
 /// Remote covers keep only their URL. Older imported covers retain their image data for compatibility.
@@ -171,17 +174,18 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     }
     func resumeSlot(_ entry: MCPersonalEntry, positions: [MCReadingPosition]) -> UUID? {
         let identities = Dictionary(uniqueKeysWithValues: chapters.map { ($0.id, $0.identity) })
-        let slots = Dictionary(entry.slots.compactMap { slot -> (MCSourceChapterIdentity, UUID)? in
+        let slots = Dictionary(flattenedChapters(entryID: entry.id).map(\.slot).compactMap { slot -> (MCSourceChapterIdentity, UUID)? in
             guard let variant = slot.preferred, let identity = identities[variant.chapterID] else { return nil }
             return (identity, slot.id)
         }, uniquingKeysWith: { first, _ in first })
-        // Completion does not erase a position: reopening even a finished chapter resumes it.
+        // Choose the most recently opened chapter; completed chapters restart at page one in the reader.
         if let recent = positions.filter({ slots[$0.id] != nil }).max(by: { $0.updatedAt < $1.updatedAt }) {
             return slots[recent.id]
         }
-        return entry.slots.first(where: { slot in
+        let sequence = flattenedChapters(entryID: entry.id).map(\.slot)
+        return sequence.first(where: { slot in
             !(slot.completionOverride ?? slot.preferred.flatMap { identities[$0.chapterID] }.map(completed.contains) ?? false)
-        })?.id ?? entry.slots.first?.id
+        })?.id ?? sequence.first?.id
     }
 
     @discardableResult
@@ -237,19 +241,23 @@ nonisolated struct MCLibraryState: Codable, Sendable {
 
     /// Next means the persisted reading sequence, independent of the current display sort.
     func nextSlotIDs(entryID: UUID, after slotID: UUID) -> Set<UUID> {
-        guard let entry = entry(entryID), let index = entry.slots.firstIndex(where: { $0.id == slotID }) else { return [] }
-        return Set(entry.slots.dropFirst(index + 1).map(\.id))
+        let slots = flattenedChapters(entryID: entryID).map(\.slot)
+        guard let index = slots.firstIndex(where: { $0.id == slotID }) else { return [] }
+        return Set(slots.dropFirst(index + 1).map(\.id))
     }
 
     @discardableResult
     mutating func setRead(entryID: UUID, slotIDs: Set<UUID>, read: Bool) throws -> Set<MCSourceChapterIdentity> {
-        guard let entry = entry(entryID) else { throw MCLibraryFailure.missing }
-        let identities = Set(entry.slots.filter { slotIDs.contains($0.id) }.compactMap(\.preferred)
-            .compactMap { chapter($0.chapterID)?.identity })
+        guard entry(entryID) != nil else { throw MCLibraryFailure.missing }
+        let selected = flattenedChapters(entryID: entryID).filter { slotIDs.contains($0.slot.id) }
+        let identities = Set(selected.compactMap(\.slot.preferred).compactMap { chapter($0.chapterID)?.identity })
         if read { completed.formUnion(identities) } else { completed.subtract(identities) }
-        try editEntry(entryID) { entry in
-            for index in entry.slots.indices where slotIDs.contains(entry.slots[index].id) {
-                entry.slots[index].completionOverride = nil
+        for (owner, values) in Dictionary(grouping: selected, by: \.entryID) {
+            let ids = Set(values.map(\.slot.id))
+            try editEntry(owner) { entry in
+                for index in entry.slots.indices where ids.contains(entry.slots[index].id) {
+                    entry.slots[index].completionOverride = nil
+                }
             }
         }
         return identities
@@ -423,10 +431,19 @@ nonisolated struct MCLibraryState: Codable, Sendable {
             entry.manualOrder = true; entry.slots.swapAt(index, index + offset)
         }
     }
-    mutating func removeEntries(_ ids: Set<UUID>) {
+    mutating func removeEntries(_ selectedIDs: Set<UUID>, includingDescendants: Bool = false) {
+        var ids = selectedIDs
+        if includingDescendants {
+            for id in selectedIDs { ids.formUnion(descendantIDs(of: id)) }
+        }
+        for index in entries.indices where entries[index].parentEntryID.map(ids.contains) == true && !ids.contains(entries[index].id) {
+            entries[index].parentEntryID = nil
+            entries[index].updatedAt = Date()
+        }
         entries.removeAll { ids.contains($0.id) }
         updates.removeAll { ids.contains($0.entryID) }
         readingEntryIDs = readingIDs.filter { !ids.contains($0) }
+        normalizeContentOrders()
         // Shared physical records, downloads, History and progress deliberately survive.
     }
 
@@ -463,9 +480,10 @@ nonisolated struct MCLibraryState: Codable, Sendable {
 }
 
 nonisolated enum MCLibraryFailure: Error, LocalizedError {
-    case missing, invalid, emptyTitle, stalePreview, unresolved, excluded, incomplete, cover, coverURL
+    case missing, invalid, emptyTitle, stalePreview, unresolved, excluded, incomplete, cover, coverURL, nestingCycle
     var errorDescription: String? {
         switch self {
+        case .nestingCycle: "A title cannot be moved into itself or one of its nested titles."
         case .missing: "This item is no longer available. Reopen the entry and try again."
         case .invalid: "The library contains invalid or conflicting references. No changes were saved."
         case .emptyTitle: "Enter a title between 1 and 1,000 characters."

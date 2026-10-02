@@ -40,7 +40,10 @@ struct MCAddChapterToEntryView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(store.library.title(entry)).foregroundStyle(.primary).lineLimit(2)
-                                        Text("\(entry.slots.count) chapters · \(entry.status.title)")
+                                        if let path = store.library.parentPath(of: entry) {
+                                            Text(path).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.status.title)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }

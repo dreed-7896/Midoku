@@ -89,6 +89,7 @@ struct MCCollectionRootView: View {
     @State private var selecting = false
     @State private var confirmDelete = false
     @State private var editingEntry: MCID?
+    @State private var movingEntry: MCID?
     @State private var showAddPreview = false
     @State private var readingMode = false
     @State private var showReadingAdd = false
@@ -115,7 +116,8 @@ struct MCCollectionRootView: View {
                 entryTags(entry).joined(separator: " ")
             ].compactMap { $0 }.joined(separator: " ")
             let sourceIDs = entry.links.compactMap { store.library.listing($0.listingID)?.identity.connectionID }
-            return (query.isEmpty || searchable.localizedCaseInsensitiveContains(query)) &&
+            return (entry.parentEntryID == nil || showsFlatResults) &&
+                (query.isEmpty || searchable.localizedCaseInsensitiveContains(query)) &&
                 (groupPage == nil || groupEntryIDs?.contains(entry.id) == true) &&
                 (statuses.isEmpty || statuses.contains(entry.status)) &&
                 (artists.isEmpty || !artists.isDisjoint(with: Set(artistNames(entry)))) &&
@@ -131,6 +133,8 @@ struct MCCollectionRootView: View {
             }
         }
     }
+
+    private var showsFlatResults: Bool { hasActiveFilters || !query.isEmpty }
 
     private var hasActiveFilters: Bool {
         !statuses.isEmpty || !artists.isEmpty || !tags.isEmpty || !sources.isEmpty || progressFilter != .all
@@ -174,12 +178,13 @@ struct MCCollectionRootView: View {
 
     private func matchesProgress(_ entry: MCPersonalEntry) -> Bool {
         guard progressFilter != .all else { return true }
-        let read = entry.slots.count - store.unreadCount(entryID: entry.id)
+        let total = store.chapterCount(entryID: entry.id)
+        let read = total - store.unreadCount(entryID: entry.id)
         return switch progressFilter {
         case .all: true
         case .notStarted: read == 0
-        case .inProgress: read > 0 && read < entry.slots.count
-        case .completed: !entry.slots.isEmpty && read == entry.slots.count
+        case .inProgress: read > 0 && read < total
+        case .completed: total > 0 && read == total
         }
     }
 
@@ -192,10 +197,10 @@ struct MCCollectionRootView: View {
                 MCLibraryGroupPage(
                     id: "category:\(category.id.uuidString)",
                     title: category.name,
-                    entryIDs: Set(store.library.entries.filter { $0.categoryIDs.contains(category.id) }.map(\.id))
+                    entryIDs: Set(store.library.rootEntries.filter { $0.categoryIDs.contains(category.id) }.map(\.id))
                 )
             }
-            let uncategorized = Set(store.library.entries.filter { $0.categoryIDs.isEmpty }.map(\.id))
+            let uncategorized = Set(store.library.rootEntries.filter { $0.categoryIDs.isEmpty }.map(\.id))
             if !uncategorized.isEmpty {
                 pages.append(.init(id: "category:uncategorized", title: "Uncategorized", entryIDs: uncategorized))
             }
@@ -212,7 +217,7 @@ struct MCCollectionRootView: View {
             }
         case .status:
             return MCPersonalStatus.allCases.compactMap { status in
-                let ids = Set(store.library.entries.filter { $0.status == status }.map(\.id))
+                let ids = Set(store.library.rootEntries.filter { $0.status == status }.map(\.id))
                 return ids.isEmpty ? nil : .init(id: "status:\(status.rawValue)", title: status.title, entryIDs: ids)
             }
         case .tag:
@@ -220,7 +225,7 @@ struct MCCollectionRootView: View {
         case .source:
             var buckets: [UUID: Set<UUID>] = [:]
             var unavailable = Set<UUID>()
-            for entry in store.library.entries {
+            for entry in store.library.rootEntries {
                 let connectionIDs = Set(entry.links.compactMap { store.library.listing($0.listingID)?.identity.connectionID })
                 if connectionIDs.isEmpty { unavailable.insert(entry.id) }
                 for connectionID in connectionIDs { buckets[connectionID, default: []].insert(entry.id) }
@@ -236,7 +241,7 @@ struct MCCollectionRootView: View {
     }
 
     private var activeGroupPage: String? {
-        grouping == .none ? nil : (groupPage ?? groupPages.first?.id)
+        grouping == .none || showsFlatResults ? nil : (groupPage ?? groupPages.first?.id)
     }
 
     private func namedGroupPages(
@@ -245,7 +250,7 @@ struct MCCollectionRootView: View {
         values: (MCPersonalEntry) -> [String]
     ) -> [MCLibraryGroupPage] {
         var buckets: [String: (title: String, entryIDs: Set<UUID>)] = [:]
-        for entry in store.library.entries {
+        for entry in store.library.rootEntries {
             let names = values(entry).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             for name in names.isEmpty ? [emptyTitle] : names {
                 let key = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
@@ -280,12 +285,6 @@ struct MCCollectionRootView: View {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button { showReadingAdd = true } label: { Image(systemName: "plus") }
                             .accessibilityLabel("Add to Reading")
-                        Button { openRandomEntry(from: store.readingEntries) } label: { Image(systemName: "shuffle") }
-                            .accessibilityLabel("Open random Reading entry; hold for entire library")
-                            .disabled(store.library.entries.isEmpty)
-                            .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                openRandomEntry(from: store.library.entries)
-                            })
                     }
                 } else if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -330,8 +329,14 @@ struct MCCollectionRootView: View {
                 if selecting && !readingMode { selectionActions }
             }
             .confirmationDialog("Remove \(selected.count) entries from library?", isPresented: $confirmDelete) {
-                Button("Remove entries", role: .destructive) {
+                let containsNested = selected.contains { !store.library.descendantIDs(of: $0).isEmpty }
+                Button(containsNested ? "Remove titles, keep nested titles in library" : "Remove entries", role: .destructive) {
                     if store.removeEntries(selected) { selected.removeAll(); selecting = false }
+                }
+                if containsNested {
+                    Button("Remove titles and all nested titles", role: .destructive) {
+                        if store.removeEntries(selected, includingDescendants: true) { selected.removeAll(); selecting = false }
+                    }
                 }
             } message: { Text("Reading history and downloaded chapters are kept.") }
             .confirmationDialog("Clear Reading?", isPresented: $confirmResetReading) {
@@ -339,6 +344,7 @@ struct MCCollectionRootView: View {
                     store.removeFromReading(Set(store.library.readingIDs))
                 }
             } message: { Text("Your library entries and reading progress will stay unchanged.") }
+            .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
             .modifier(MCReaderPresentation(sheet: $reader))
@@ -350,6 +356,11 @@ struct MCCollectionRootView: View {
             }
             .mcErrors(store)
             .navigationDestination(for: UUID.self) { MCEntryView(entryID: $0) }
+            .onReceive(NotificationCenter.default.publisher(for: .libraryTabReselected)) { _ in
+                guard !readingMode, !showsFlatResults, grouping != .none, path.isEmpty else { return }
+                groupPage = groupPages.first?.id
+                swipePosition.requestedID = groupPages.first?.id
+            }
             .onChange(of: grouping) { _, value in
                 groupPage = value == .none ? nil : groupPages.first?.id
             }
@@ -394,12 +405,12 @@ struct MCCollectionRootView: View {
         Group {
             let pages = groupPages
             VStack(spacing: 0) {
-                if grouping != .none {
+                if grouping != .none && !showsFlatResults {
                     MCLibraryGroupTabs(pages: pages, selected: groupPage, swipePosition: swipePosition)
                 }
                 GeometryReader { geometry in
                     let visibleEntries = entries(in: nil)
-                    if grouping == .none || pages.isEmpty {
+                    if grouping == .none || pages.isEmpty || showsFlatResults {
                         collectionPage(values: visibleEntries, size: geometry.size)
                     } else {
                         ScrollViewReader { proxy in
@@ -474,11 +485,25 @@ struct MCCollectionRootView: View {
                 }
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            Button { openRandomEntry(from: store.readingEntries) } label: {
+                Image(systemName: "shuffle").font(.title3.weight(.semibold))
+                    .frame(width: 54, height: 54)
+                    .background(.regularMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+            }
+            .accessibilityLabel("Open random Reading entry; hold for entire library")
+            .disabled(store.library.entries.isEmpty)
+            .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                openRandomEntry(from: store.library.rootEntries)
+            })
+            .padding(.trailing, 18).padding(.bottom, 16)
+        }
     }
 
     private func openRandomEntry(from entries: [MCPersonalEntry]) {
-        guard let entry = entries.filter({ !$0.slots.isEmpty }).randomElement(),
-              let first = entry.slots.first else {
+        guard let entry = entries.filter({ store.chapterCount(entryID: $0.id) > 0 }).randomElement(),
+              let first = store.library.flattenedChapters(entryID: entry.id).first?.slot else {
             store.error = "No chapters are available to read."
             return
         }
@@ -564,7 +589,12 @@ struct MCCollectionRootView: View {
             if selecting { if !selected.insert(entry.id).inserted { selected.remove(entry.id) } }
             else { path.append(entry.id) }
         } label: {
-            entryLabel(entry).frame(maxWidth: .infinity, alignment: .leading).clipped()
+            VStack(alignment: .leading, spacing: 4) {
+                entryLabel(entry)
+                if showsFlatResults, let parentPath = store.library.parentPath(of: entry) {
+                    Text(parentPath).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).clipped()
                 .contentShape(Rectangle())
                 .overlay(alignment: .topTrailing) {
                 if selecting {
@@ -575,7 +605,7 @@ struct MCCollectionRootView: View {
                 }
             }
         }.buttonStyle(.plain)
-        .accessibilityLabel("\(store.library.title(entry)), \(entry.slots.count) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
+        .accessibilityLabel("\(store.library.title(entry)), \(store.chapterCount(entryID: entry.id)) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
         .contextMenu {
             if readingMode {
@@ -588,6 +618,12 @@ struct MCCollectionRootView: View {
             Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [entry.id], read: false) }
             if !readingMode {
                 Divider()
+                Button("Move into title", systemImage: "folder") { movingEntry = MCID(id: entry.id) }
+                if entry.parentEntryID != nil {
+                    Button("Move to library", systemImage: "arrow.up.left") {
+                        store.perform { try $0.library.moveEntry(entry.id, into: nil) }
+                    }
+                }
                 Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
                 Button("Select entry", systemImage: "checkmark.circle") { selected.insert(entry.id); selecting = true }
                 Button("Remove from library", systemImage: "trash", role: .destructive) {
@@ -679,7 +715,7 @@ struct MCCollectionRootView: View {
                         if gridStyle == .compact {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(store.library.title(entry)).font(.caption.weight(.semibold)).lineLimit(2)
-                                Text("\(entry.slots.count) chapters").font(.caption2).opacity(0.85).lineLimit(1)
+                                Text("\(store.chapterCount(entryID: entry.id)) chapters").font(.caption2).opacity(0.85).lineLimit(1)
                             }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 8)
@@ -692,7 +728,7 @@ struct MCCollectionRootView: View {
                     .clipShape(RoundedRectangle(cornerRadius: gridStyle == .clean ? 6 : 10))
                 if gridStyle == .standard {
                     Text(store.library.title(entry)).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true).frame(maxWidth: .infinity, alignment: .leading)
-                    Text("\(entry.slots.count) chapters · \(entry.status.title)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.status.title)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         } else {
@@ -702,7 +738,7 @@ struct MCCollectionRootView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(store.library.title(entry)).font(.headline).lineLimit(2)
                     Text(entry.status.title).font(.subheadline).foregroundStyle(.secondary)
-                    Text("\(entry.slots.count) chapters · \(entry.links.count) sources").font(.caption).foregroundStyle(.secondary)
+                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.links.count) sources").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -840,7 +876,7 @@ private struct MCReadingAddSheet: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(store.library.title(entry)).font(.body.weight(.medium))
                                         .foregroundStyle(.primary).lineLimit(2)
-                                    Text("\(entry.slots.count) chapters")
+                                    Text("\(store.chapterCount(entryID: entry.id)) chapters")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()

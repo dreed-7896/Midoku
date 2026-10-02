@@ -937,6 +937,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
                 )
             ]]
 
+            let restorePosition = startPage > 0
             var startPage = startPage
             if startPage < 1 {
                 startPage = 1
@@ -955,7 +956,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
             )
             let history = CoreDataManager.shared.getHistory(
                 chapterId: viewModel.physicalIdentifier(key: chapter.key), context: CoreDataManager.shared.context)
-            if Int(history?.progress ?? 0) == startPage,
+            if restorePosition, Int(history?.progress ?? 0) == startPage,
                let position = history?.scrollPosition?.doubleValue, position.isFinite,
                let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: IndexPath(row: startPage, section: 0))?.frame {
                 let offset = frame.minY + CGFloat(position) * frame.height

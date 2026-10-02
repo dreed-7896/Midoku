@@ -2,8 +2,13 @@ name: Midoku IPA
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/nested-titles]
   workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run collection and simulator regression tests
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,6 +56,7 @@ jobs:
           if-no-files-found: error
 
   checks:
+    if: github.ref == 'refs/heads/codex/nested-titles' || (github.event_name == 'workflow_dispatch' && inputs.run_tests)
     runs-on: xcode-27
     timeout-minutes: 20
     env:

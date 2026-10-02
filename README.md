@@ -11,7 +11,7 @@ Midoku combines the native reader and source engine from [Aidoku-M](https://gith
 
 Open `Midoku.xcodeproj` and select the `Midoku` scheme. The app targets iOS 27, matching the original Midoku project. The `main` branch contains the merged app, and its workflow generates unsigned device IPAs for LiveContainer.
 
-Run the portable composition tests with `swift test`. The iOS workflow also runs `MidokuTests/CollectionIntegrationTests` in the simulator.
+Run the portable composition tests with `swift test`. Normal pushes only build and package the IPA. To run collection core and simulator regression checks, manually run the iOS workflow with `run_tests` enabled.
 
 Collection backups are included in the normal `.aib` backup when collection entries are selected. Collection also supports a standalone JSON export/import with a restore preview. Original Midoku app data is not automatically interpreted as Aidoku data; this branch uses a separate `MidokuCollection.json` file and preserves the original Midoku database.
 
