@@ -2,6 +2,12 @@ import AidokuRunner
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
+import SwiftUIIntrospect
+
+extension Notification.Name {
+    static let collectionActionState = Notification.Name("Midoku.collectionActionState")
+    static let collectionAction = Notification.Name("Midoku.collectionAction")
+}
 
 struct MCID: Identifiable { let id: UUID }
 
@@ -279,12 +285,6 @@ struct MCCollectionRootView: View {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button { showReadingAdd = true } label: { Image(systemName: "plus") }
                             .accessibilityLabel("Add to Reading")
-                        Button { openRandomEntry(from: store.readingEntries) } label: { Image(systemName: "shuffle") }
-                            .accessibilityLabel("Open random Reading entry; hold for entire library")
-                            .disabled(store.library.entries.isEmpty)
-                            .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                openRandomEntry(from: store.library.entries)
-                            })
                     }
                 } else if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -296,14 +296,6 @@ struct MCCollectionRootView: View {
                 } else {
                     ToolbarItem(placement: .topBarLeading) { groupMenu }
                     ToolbarItem(placement: .topBarLeading) { filterMenu }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            query = ""; searchVisible = false; searchFocused = false
-                            selected.removeAll(); selecting = false
-                            readingMode = true
-                        } label: { Image(systemName: "book") }
-                            .accessibilityLabel("Reading mode")
-                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button("Search library", systemImage: "magnifyingglass") {
@@ -340,7 +332,7 @@ struct MCCollectionRootView: View {
             } message: { Text("Your library entries and reading progress will stay unchanged.") }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
-            .fullScreenCover(item: $reader) { MCReaderView(sequence: $0.sequence).ignoresSafeArea() }
+            .background(MCReaderPresentation(sheet: $reader))
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
             .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
@@ -362,6 +354,21 @@ struct MCCollectionRootView: View {
             .onChange(of: store.library.entries.map(\.id)) { _, ids in selected.formIntersection(ids) }
             .onAppear {
                 if grouping != .none, groupPage == nil { groupPage = groupPages.first?.id }
+                publishActionState()
+            }
+            .onChange(of: path) { _, _ in publishActionState() }
+            .onChange(of: readingMode) { _, _ in publishActionState() }
+            .onReceive(NotificationCenter.default.publisher(for: .collectionAction)) { notification in
+                guard path.isEmpty else { return }
+                if notification.userInfo?["randomLibrary"] as? Bool == true {
+                    openRandomEntry(from: store.library.entries)
+                } else if readingMode {
+                    openRandomEntry(from: store.readingEntries)
+                } else {
+                    query = ""; searchVisible = false; searchFocused = false
+                    selected.removeAll(); selecting = false
+                    readingMode = true
+                }
             }
             .task {
                 #if DEBUG
@@ -381,7 +388,17 @@ struct MCCollectionRootView: View {
                 #endif
                 await store.adoptExistingLibrary()
             }
-        }.midokuAccent()
+        }
+        .introspect(.navigationStack, on: .iOS(.v26, .v27)) { navigation in
+            navigation.interactivePopGestureRecognizer?.isEnabled = true
+            navigation.interactiveContentPopGestureRecognizer?.isEnabled = true
+        }
+        .midokuAccent()
+    }
+
+    private func publishActionState() {
+        NotificationCenter.default.post(name: .collectionActionState, object: nil,
+            userInfo: ["root": path.isEmpty, "reading": readingMode])
     }
 
     private var regularLibraryPage: some View {
@@ -457,7 +474,7 @@ struct MCCollectionRootView: View {
         GeometryReader { geometry in
             if store.readingEntries.isEmpty {
                 UnavailableView("Nothing in Reading", systemImage: "books.vertical",
-                    description: Text("Tap + below to add entries from your library."))
+                    description: Text("Tap + to add entries from your library."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {

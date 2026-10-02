@@ -55,6 +55,8 @@ class ReaderPageViewController: BaseObservingViewController {
     private var pageSet = false
     private var didLoadPageSuccessfully = false
     private var sourceId: String?
+    private let temporaryPageStore: ReaderTemporaryPageStore?
+    private var pageLoadTask: Task<Void, Never>?
     private var imageAspectRatio: CGFloat? // Aspect ratio of the image, > 1 means wide image
     private var pageBackground: PageBackground?
 
@@ -82,6 +84,7 @@ class ReaderPageViewController: BaseObservingViewController {
     ) {
         self.type = type
         self.delegate = delegate
+        self.temporaryPageStore = temporaryPageStore
         super.init()
 
         // need this so the page / chapters can be set before the rest of the views are loaded
@@ -89,10 +92,11 @@ class ReaderPageViewController: BaseObservingViewController {
             case .info(let infoPageType):
                 infoView = ReaderInfoPageView(type: infoPageType == .previous ? .previous : .next)
             case .page:
-                guard let temporaryPageStore else {
+                guard temporaryPageStore != nil else {
                     fatalError("ReaderPageViewController with type page requires a temporary page store")
                 }
-                pageView = ReaderPageView(parent: self, temporaryPageStore: temporaryPageStore)
+                // Create page UI only when visible or within the preload window.
+                // Large chapters still have lightweight controller placeholders.
         }
     }
 
@@ -101,6 +105,7 @@ class ReaderPageViewController: BaseObservingViewController {
     }
 
     override func configure() {
+        preparePageView()
         switch type {
             case .info:
                 // info view
@@ -180,6 +185,8 @@ class ReaderPageViewController: BaseObservingViewController {
     }
 
     func setPage(_ page: Page, sourceId: String? = nil, skipProcessing: Bool = false) {
+        guard !pageSet else { return }
+        preparePageView()
         guard !pageSet, let pageView else { return }
         pageSet = true
         self.page = page
@@ -187,9 +194,9 @@ class ReaderPageViewController: BaseObservingViewController {
         updateDoubleTapZoomSetting()
         reloadButton.isHidden = true
         zoomView?.zoomEnabled = false
-        Task {
+        pageLoadTask = Task { [weak self] in
             let result = await pageView.setPage(page, sourceId: sourceId, skipProcessing: skipProcessing)
-            guard self.page == page else { return }
+            guard let self, !Task.isCancelled, self.page == page else { return }
 
             didLoadPageSuccessfully = result
             zoomView?.zoomEnabled = result && !isInDoublePageController
@@ -263,11 +270,18 @@ class ReaderPageViewController: BaseObservingViewController {
     }
 
     func clearPage() {
+        pageLoadTask?.cancel()
+        pageLoadTask = nil
         page = nil
         pageSet = false
-        pageView?.imageView.image = nil
+        pageView?.clearPage()
         zoomView?.zoomEnabled = false
         imageAspectRatio = nil
+    }
+
+    private func preparePageView() {
+        guard case .page = type, pageView == nil, let temporaryPageStore else { return }
+        pageView = ReaderPageView(parent: self, temporaryPageStore: temporaryPageStore)
     }
 
     /// Check if this is a wide image (aspect ratio > 1)

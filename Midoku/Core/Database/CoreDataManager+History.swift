@@ -245,10 +245,10 @@ extension CoreDataManager {
             chapterId: chapterId,
             context: context
         )
-        historyObject.progress = Int16(progress)
+        historyObject.progress = Int16(clamping: progress)
         historyObject.dateRead = dateRead ?? Date()
         if let totalPages {
-            historyObject.total = Int16(totalPages)
+            historyObject.total = Int16(clamping: totalPages)
         }
         if let scrollPosition {
             historyObject.scrollPosition = NSNumber(value: scrollPosition)

@@ -62,14 +62,17 @@ nonisolated struct MCCollectionSnapshot: Codable, Sendable {
               Set(manga.map(\.listingID)).count == manga.count,
               Set(chapters.map(\.chapterID)).count == chapters.count else { throw MCLibraryFailure.invalid }
         try library.validate(connections: Set(connections.map(\.id)), categories: Set(categories.map(\.id)))
+        let mangaByListing = Dictionary(uniqueKeysWithValues: manga.map { ($0.listingID, $0.manga) })
+        let connectionsByID = Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0) })
+        let chaptersByID = Dictionary(uniqueKeysWithValues: chapters.map { ($0.chapterID, $0.chapter) })
         for listing in library.listings {
-            guard let record = manga.first(where: { $0.listingID == listing.id }),
-                  let connection = connections.first(where: { $0.id == listing.identity.connectionID }),
-                  record.manga.sourceKey == connection.sourceKey, record.manga.key == listing.identity.externalID
+            guard let record = mangaByListing[listing.id],
+                  let connection = connectionsByID[listing.identity.connectionID],
+                  record.sourceKey == connection.sourceKey, record.key == listing.identity.externalID
             else { throw MCLibraryFailure.invalid }
         }
         for chapter in library.chapters {
-            guard chapters.first(where: { $0.chapterID == chapter.id })?.chapter.key == chapter.identity.externalID
+            guard chaptersByID[chapter.id]?.key == chapter.identity.externalID
             else { throw MCLibraryFailure.invalid }
         }
     }
@@ -103,10 +106,14 @@ nonisolated struct MCCollectionSnapshot: Codable, Sendable {
         else { manga.append(.init(listingID: listingID, manga: storedManga)) }
         let identity = MCSourceListingIdentity(connectionID: connectionID, externalID: value.key)
         let ids = Dictionary(uniqueKeysWithValues: library.chapters.filter { $0.identity.listing == identity }.map { ($0.record.id, $0.id) })
+        var chapterIndices = Dictionary(uniqueKeysWithValues: chapters.enumerated().map { ($0.element.chapterID, $0.offset) })
         for chapter in incoming {
             guard let id = ids[chapter.key] else { throw MCLibraryFailure.invalid }
-            if let index = chapters.firstIndex(where: { $0.chapterID == id }) { chapters[index].chapter = chapter }
-            else { chapters.append(.init(chapterID: id, chapter: chapter)) }
+            if let index = chapterIndices[id] { chapters[index].chapter = chapter }
+            else {
+                chapterIndices[id] = chapters.count
+                chapters.append(.init(chapterID: id, chapter: chapter))
+            }
         }
         return listingID
     }
@@ -122,6 +129,8 @@ final class MCCollectionStore {
     private let fileURL: URL
     @ObservationIgnored private var unreadCounts: [UUID: Int] = [:]
     @ObservationIgnored private var recentReads: [ChapterIdentifier: Date] = [:]
+    @ObservationIgnored private var snapshotRevision = 0
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
     var library: MCLibraryState { snapshot.library }
 
@@ -180,7 +189,35 @@ final class MCCollectionStore {
         let categoriesChanged = snapshot.categories != candidate.categories
         unreadCounts = Self.countUnread(in: candidate.library)
         snapshot = candidate
+        snapshotRevision += 1
         if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
+    }
+
+    /// Encode and validate large refreshes off the UI thread. Retry against current edits
+    /// if a user changed the collection while encoding; never publish a stale snapshot.
+    func changeAsync(_ edit: (inout MCCollectionSnapshot) throws -> Void) async throws {
+        while true {
+            try Task.checkCancellation()
+            guard writable else { throw MCLibraryFailure.invalid }
+            let revision = snapshotRevision
+            var candidate = snapshot
+            try edit(&candidate)
+            let frozen = candidate
+            let data = try await Task.detached(priority: .utility) {
+                try frozen.validate()
+                return try JSONEncoder().encode(frozen)
+            }.value
+            try Task.checkCancellation()
+            guard revision == snapshotRevision else { continue }
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: fileURL, options: .atomic)
+            let categoriesChanged = snapshot.categories != candidate.categories
+            unreadCounts = Self.countUnread(in: candidate.library)
+            snapshot = candidate
+            snapshotRevision += 1
+            if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
+            return
+        }
     }
 
     @discardableResult
@@ -397,15 +434,23 @@ final class MCCollectionStore {
     }
 
     func refresh(entryID: UUID? = nil) async {
-        guard !isRefreshing else { return }
+        if let refreshTask { await refreshTask.value; return }
         isRefreshing = true
-        defer { isRefreshing = false }
+        let task = Task { await refreshListings(entryID: entryID) }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+        isRefreshing = false
+    }
+
+    private func refreshListings(entryID: UUID?) async {
         let entries = library.entries.filter { entryID == nil || $0.id == entryID }
         let listingIDs = Set(entries.flatMap(\.links)
             .filter { $0.followsNewChapters || $0.needsInitialImport == true }
             .map(\.listingID))
         var failures: [String] = []
         for listingID in listingIDs {
+            guard !Task.isCancelled else { break }
             guard let listing = library.listing(listingID),
                   let stored = snapshot.manga.first(where: { $0.listingID == listingID }) else { continue }
             guard let source = source(listing.identity.connectionID) else {
@@ -413,9 +458,9 @@ final class MCCollectionStore {
                 continue
             }
             do {
-                let updated = try await source.getMangaUpdate(manga: stored.manga, needsDetails: true, needsChapters: true)
+                let updated = try await LibraryRefreshRequest.fetch(source: source, manga: stored.manga, needsDetails: true)
                 guard let chapters = updated.chapters else { throw MCLibraryFailure.incomplete }
-                try change { state in
+                try await changeAsync { state in
                     _ = try state.remember(updated, chapters: chapters, sourceName: source.name, complete: true)
                     guard let current = state.library.listing(listingID) else { throw MCLibraryFailure.missing }
                     let records = state.library.chapters.filter { $0.identity.listing == current.identity && $0.available }.map(\.record)
@@ -424,6 +469,32 @@ final class MCCollectionStore {
             } catch { failures.append("\(source.name): \(error.localizedDescription)") }
         }
         if !failures.isEmpty { error = failures.joined(separator: "\n") }
+    }
+
+    func resumeSlot(entryID: UUID) async -> UUID? {
+        guard let entry = library.entry(entryID) else { return nil }
+        let chapterIDs = Set(entry.slots.compactMap(\.preferred).map(\.chapterID))
+        let identities = library.chapters.filter { chapterIDs.contains($0.id) }.map(\.identity)
+        let connections = Dictionary(uniqueKeysWithValues: snapshot.connections.map { ($0.id, $0.sourceKey) })
+        let listingIDs = Set(identities.map(\.listing))
+        let mangaIDs = listingIDs.compactMap { id -> MangaIdentifier? in
+            guard let sourceKey = connections[id.connectionID] else { return nil }
+            return MangaIdentifier(sourceKey: sourceKey, mangaKey: id.externalID)
+        }
+        let positions = await CoreDataManager.shared.container.performBackgroundTask { context in
+            mangaIDs.flatMap { id -> [MCReadingPosition] in
+                guard let connectionID = listingIDs.first(where: {
+                    connections[$0.connectionID] == id.sourceKey && $0.externalID == id.mangaKey
+                })?.connectionID else { return [] }
+                return CoreDataManager.shared.getHistoryForManga(mangaId: id, context: context).compactMap { history in
+                    guard let date = history.dateRead else { return nil }
+                    return MCReadingPosition(id: .init(listing: .init(connectionID: connectionID, externalID: id.mangaKey),
+                        externalID: history.chapterId), updatedAt: date)
+                }
+            }
+        }
+        guard let current = library.entry(entryID) else { return nil }
+        return library.resumeSlot(current, positions: positions)
     }
 
     func setRead(entryID: UUID, slotIDs: Set<UUID>, read: Bool) {

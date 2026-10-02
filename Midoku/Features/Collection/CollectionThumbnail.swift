@@ -34,7 +34,13 @@ final class MCThumbnailCache {
     private var tasks: [UUID: (id: UUID, task: Task<UIImage?, Never>)] = [:]
     private let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("MidokuChapterThumbnails")
 
-    init() { cache.totalCostLimit = 64 * 1024 * 1024 }
+    init() {
+        cache.totalCostLimit = 16 * 1024 * 1024
+        let directory = directory
+        DispatchQueue.global(qos: .utility).async {
+            ArtworkDiskBudget.trim(directory: directory, limit: 100 * 1024 * 1024)
+        }
+    }
 
     /// Returns an existing generated thumbnail without starting any source or image requests.
     func cachedImage(chapterID: UUID) -> UIImage? {
@@ -42,7 +48,7 @@ final class MCThumbnailCache {
         if let cached = cache.object(forKey: key) { return cached }
         let file = directory.appendingPathComponent(chapterID.uuidString + ".jpg")
         guard let data = try? Data(contentsOf: file), let image = UIImage(data: data) else { return nil }
-        cache.setObject(image, forKey: key, cost: data.count)
+        cache.setObject(image, forKey: key, cost: Int(image.size.width * image.size.height * 4))
         return image
     }
 
@@ -105,9 +111,13 @@ final class MCThumbnailCache {
                 let format = UIGraphicsImageRendererFormat(); format.scale = 1
                 let thumbnail = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(x: 0, y: 0, width: width, height: scaledHeight)) }
                 if let data = thumbnail.jpegData(compressionQuality: 0.72) {
-                    cache.setObject(thumbnail, forKey: key, cost: data.count)
+                    cache.setObject(thumbnail, forKey: key, cost: Int(size.width * size.height * 4))
                     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                     try? data.write(to: file, options: .atomic)
+                    let directory = directory
+                    DispatchQueue.global(qos: .utility).async {
+                        ArtworkDiskBudget.trim(directory: directory, limit: 100 * 1024 * 1024)
+                    }
                 }
                 return thumbnail
             } catch { return nil }

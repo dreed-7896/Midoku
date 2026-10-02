@@ -27,6 +27,7 @@ class ReaderPagedViewModel {
     var preloadedPages: [Page] = []
     private var preloadingChapter: AidokuRunner.Chapter?
     private var preloadTask: Task<Void, Never>?
+    private var loadGeneration = 0
 
     init(
         source: AidokuRunner.Source?,
@@ -39,11 +40,14 @@ class ReaderPagedViewModel {
     }
 
     func loadPages(chapter: AidokuRunner.Chapter) async {
+        loadGeneration += 1
+        let generation = loadGeneration
         let previousChapter = self.chapter
         self.chapter = chapter
         if preloadingChapter == chapter {
             await preload(chapter: chapter)
         }
+        guard generation == loadGeneration, !Task.isCancelled else { return }
         if preloadedChapter == chapter {
             pages = preloadedPages
             preloadedPages = []
@@ -54,7 +58,9 @@ class ReaderPagedViewModel {
                 preloadedPages = pages
             }
             self.chapter = chapter
-            pages = await getPages(chapter: chapter)
+            let loaded = await getPages(chapter: chapter)
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+            pages = loaded
         }
     }
 

@@ -425,6 +425,13 @@ extension MangaManager {
             // spawn new library refresh
             AppSettings.flags.libraryRefreshInProgress.set(true)
             libraryRefreshTask = Task {
+                defer {
+                    libraryRefreshProgressTask?.cancel()
+                    libraryRefreshProgressTask = nil
+                    onLibraryRefreshProgress = nil
+                    libraryRefreshTask = nil
+                    AppSettings.flags.libraryRefreshInProgress.reset()
+                }
                 await doLibraryRefresh(
                     category: category,
                     skipReachabilityCheck: skipReachabilityCheck,
@@ -446,8 +453,6 @@ extension MangaManager {
                         }
                     }
                 )
-                libraryRefreshTask = nil
-                AppSettings.flags.libraryRefreshInProgress.reset()
             }
             await libraryRefreshTask?.value
         }
@@ -585,7 +590,8 @@ extension MangaManager {
         // filter items that we should skip
         let filteredManga = await CoreDataManager.shared.container.performBackgroundTask { context in
             allManga.filter { manga in
-                (!followPolicy.managed.contains(manga.identifier) || followPolicy.following.contains(manga.identifier)) &&
+                // The collection owns refreshes for these titles, including their custom sequence.
+                !followPolicy.managed.contains(manga.identifier) &&
                 !self.shouldSkip(
                     manga: manga,
                     options: skipOptions,
@@ -611,8 +617,8 @@ extension MangaManager {
                 guard !Task.isCancelled else { return results }
 
                 guard
-                    let newManga = try? await SourceManager.shared.source(for: manga.sourceId)?
-                        .getMangaUpdate(manga: manga.toNew(), needsDetails: updateMetadata, needsChapters: true)
+                    let source = await SourceManager.shared.source(for: manga.sourceId),
+                    let newManga = try? await LibraryRefreshRequest.fetch(source: source, manga: manga.toNew(), needsDetails: updateMetadata)
                 else {
                     completed += 1
                     progress.completedUnitCount = Int64(completed)

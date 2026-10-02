@@ -54,6 +54,7 @@ class ReaderViewController: BaseObservingViewController {
     private var forceStartPage: Int?
     private var currentPage = 1
     private var currentPosition: Double?
+    private var progressSaveTask: Task<Void, Never>?
     private var sessionReadPages: Set<Int> = []
     private var sessionStartDate: Date?
     private var sessionLastInteraction: Date?
@@ -408,6 +409,8 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        progressSaveTask?.cancel()
+        progressSaveTask = nil
 
         (reader as? ReaderWebtoonViewController)?.stopAutoScroll()
 
@@ -457,7 +460,9 @@ extension ReaderViewController {
     func updateReadPosition(
         currentPage: Int? = nil,
         totalPages: Int? = nil,
-        chapter: AidokuRunner.Chapter? = nil
+        chapter: AidokuRunner.Chapter? = nil,
+        scrollPosition: Double? = nil,
+        saveSession: Bool = true
     ) async {
         let effectiveTotalPages = totalPages ?? toolbarView.totalPages ?? 0
         let effectiveCurrentPage = currentPage ?? self.currentPage
@@ -471,31 +476,25 @@ extension ReaderViewController {
 
         let currentPage = effectiveCurrentPage
         let chapter = chapter ?? self.chapter
+        let position = scrollPosition ?? currentPosition
 
         let chapterId = physicalIdentifier(chapter)
-        let (completed, progress) = await CoreDataManager.shared.container.performBackgroundTask { @Sendable context in
+        let (completed, _) = await CoreDataManager.shared.container.performBackgroundTask { @Sendable context in
             CoreDataManager.shared.getProgress(
                 chapterId: chapterId,
                 context: context
             )
         }
-        let hasHistory = completed || progress != nil
-
-        // don't add history if there is none and we're at the first page
-        if currentPage == 1 && !hasHistory {
-            return
-        }
-
         MCCollectionStore.shared.recordRead(chapterId)
         await HistoryManager.shared.setProgress(
             chapterId: chapterId,
             chapter: physicalChapter(chapter),
             progress: currentPage,
-            totalPages: totalPages,
-            scrollPosition: currentPosition,
+            totalPages: effectiveTotalPages,
+            scrollPosition: position,
             completed: completed
         )
-        await saveReadingSession(chapter: chapter)
+        if saveSession { await saveReadingSession(chapter: chapter) }
     }
 
     private func saveReadingSession(chapter: AidokuRunner.Chapter? = nil) async {
@@ -533,10 +532,10 @@ extension ReaderViewController {
             currentPage = forceStartPage
             self.forceStartPage = nil
         } else {
-            let (completed, startPage) = CoreDataManager.shared.getProgress(
+            let (_, startPage) = CoreDataManager.shared.getProgress(
                 chapterId: physicalIdentifier(chapter)
             )
-            if !completed, let startPage {
+            if let startPage, startPage > 0 {
                 currentPage = startPage
             } else {
                 currentPage = -1
@@ -631,9 +630,10 @@ extension ReaderViewController {
     }
 
     @objc func close() {
-        Task {
-            await temporaryPageStore.removeAll()
-        }
+        progressSaveTask?.cancel()
+        progressSaveTask = nil
+        // viewWillDisappear saves the final position; temporary files are removed on deinit,
+        // after page requests have released them (including cancelled interactive dismissals).
         dismiss(animated: true)
     }
 
@@ -1026,14 +1026,18 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         let currentPage = currentPage
         let totalPages = toolbarView.totalPages
         let oldChapter = self.chapter
+        let position = currentPosition
+        progressSaveTask?.cancel()
+        progressSaveTask = nil
         Task {
-            await updateReadPosition(currentPage: currentPage, totalPages: totalPages, chapter: oldChapter)
+            await updateReadPosition(currentPage: currentPage, totalPages: totalPages, chapter: oldChapter, scrollPosition: position ?? 0)
             sessionReadPages = [self.currentPage]
             sessionStartDate = Date.now
             sessionLastInteraction = nil
         }
 
         self.chapter = chapter
+        currentPosition = nil
         updateChapterButtons()
         self.chaptersToMark = [chapter]
         configureBarToggleTapGestures()
@@ -1072,6 +1076,14 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         currentPosition = position
         toolbarView.currentPage = page
         toolbarView.updateSliderPosition()
+        if progressSaveTask == nil {
+            progressSaveTask = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                guard let self else { return }
+                await updateReadPosition(saveSession: false)
+                progressSaveTask = nil
+            }
+        }
         // Mark as completed when reaching the last page
         // Exception: Don't mark for the pre-pagination placeholder (single text page before
         // ReaderPagedTextViewController has paginated it). Once paginated, even single-page

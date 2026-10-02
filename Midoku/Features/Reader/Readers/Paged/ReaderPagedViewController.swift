@@ -42,7 +42,7 @@ class ReaderPagedViewController: BaseObservingViewController {
     private var splitWideImages = UserDefaults.standard.bool(forKey: "Reader.splitWideImages")
     private var isolatedPages: Set<Int> = []
     private var manuallyIsolatedPages: Set<Int> = []
-    private lazy var pagesToPreload = UserDefaults.standard.integer(forKey: "Reader.pagesToPreload")
+    private lazy var pagesToPreload = max(0, min(8, UserDefaults.standard.integer(forKey: "Reader.pagesToPreload")))
     private let pagePrefetcher = ReaderPagePrefetcher()
     private var nextChapterPreloadTask: Task<Void, Never>?
 
@@ -100,8 +100,8 @@ class ReaderPagedViewController: BaseObservingViewController {
             self.move(toPage: self.currentPage, animated: false)
         }
         addObserver(forName: "Reader.pagesToPreload") { [weak self] notification in
-            self?.pagesToPreload = notification.object as? Int
-                ?? UserDefaults.standard.integer(forKey: "Reader.pagesToPreload")
+            self?.pagesToPreload = max(0, min(8, notification.object as? Int
+                ?? UserDefaults.standard.integer(forKey: "Reader.pagesToPreload")))
         }
         addObserver(forName: UIApplication.didReceiveMemoryWarningNotification.rawValue) { [weak self] _ in
             // clear pages that aren't in the preload range if we get a memory warning
@@ -447,6 +447,12 @@ extension ReaderPagedViewController {
     }
 
     func loadPages(in range: ClosedRange<Int>) {
+        guard !pageViewControllers.isEmpty else { return }
+        let offset = previousChapter != nil ? 1 : 0
+        let keep = max(0, range.lowerBound + offset - 2)...min(pageViewControllers.count - 1, range.upperBound + offset + 2)
+        for (index, controller) in pageViewControllers.enumerated() where !keep.contains(index) {
+            controller.clearPage()
+        }
         for i in range {
             guard i > 0 else { continue }
             guard i <= displayPageCount else { break }
@@ -916,6 +922,7 @@ extension ReaderPagedViewController: ReaderReaderDelegate {
     func loadChapter(startPage: Int, isChapterChange: Bool = true) async {
         guard let chapter else { return }
         await viewModel.loadPages(chapter: chapter)
+        guard self.chapter == chapter, !Task.isCancelled else { return }
         delegate?.setPages(viewModel.pages)
         if !viewModel.pages.isEmpty {
             await MainActor.run {
@@ -1456,6 +1463,20 @@ extension ReaderPagedViewController {
     private func cacheSplitPages(_ pages: [Page], at pageIndex: Int) {
         guard let key = splitPageCacheKey, pageIndex >= 1, pageIndex <= viewModel.pages.count else { return }
         Self.splitStore[key, default: [:]][pageIndex] = pages
+        let store = viewModel.temporaryPageStore
+        Task { [weak self] in
+            var stored = pages
+            for index in stored.indices {
+                guard let image = stored[index].image,
+                      let url = await store?.store(image, chapterKey: "\(key)-split-\(pageIndex)", pageIndex: index)
+                else { continue }
+                stored[index].image = nil
+                stored[index].imageURL = url.absoluteString
+            }
+            guard let self, splitPageCacheKey == key else { return }
+            splitPages[pageIndex] = stored
+            Self.splitStore[key, default: [:]][pageIndex] = stored
+        }
     }
 
     private func restoreCachedSplitPages() {
@@ -1464,7 +1485,7 @@ extension ReaderPagedViewController {
             let cached = Self.splitStore[key]
         else { return }
         for (pageIndex, pages) in cached where splitPages[pageIndex] == nil {
-            guard pages.allSatisfy({ $0.image != nil }) else { continue }
+            guard pages.allSatisfy({ $0.image != nil || $0.imageURL.flatMap(URL.init(string:))?.exists == true }) else { continue }
             splitPages[pageIndex] = pages
         }
     }

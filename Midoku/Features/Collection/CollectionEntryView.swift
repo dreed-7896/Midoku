@@ -236,7 +236,7 @@ struct MCEntryView: View {
         .sheet(item: $migrationTarget) { MCEntryMigrationSheet(manga: $0.manga) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
         .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
-        .fullScreenCover(item: $reader) { MCReaderView(sequence: $0.sequence).ignoresSafeArea() }
+        .background(MCReaderPresentation(sheet: $reader))
         .confirmationDialog("Remove this entry from library?", isPresented: $confirmRemove) {
             Button("Remove entry", role: .destructive) { if store.removeEntries([entryID]) { dismiss() } }
         } message: { Text("Reading history and downloaded chapters are kept.") }
@@ -363,9 +363,14 @@ struct MCEntryView: View {
     private func readingActions(_ entry: MCPersonalEntry) -> some View {
         HStack(spacing: 8) {
             Button {
-                if let slot = entry.slots.first(where: { !store.library.isRead($0) }) ?? entry.slots.first { open(slot) }
+                Task {
+                    guard let slotID = await store.resumeSlot(entryID: entryID),
+                          let slot = store.library.entry(entryID)?.slots.first(where: { $0.id == slotID }) else { return }
+                    open(slot)
+                }
             } label: {
-                Label("Read", systemImage: "book.pages").font(.subheadline.weight(.semibold))
+                Label(entry.lastReadAt != nil || store.unreadCount(entryID: entryID) < entry.slots.count ? "Resume" : "Read",
+                    systemImage: "book.pages").font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 8).padding(.vertical, 3)
             }
             .buttonStyle(.borderedProminent).controlSize(.small)

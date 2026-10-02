@@ -22,6 +22,35 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Test collection core
+        run: swift test
+      - name: Test reader and collection on simulator
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build
+          simulator_id=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          ids = [d["udid"] for runtime, items in devices.items() if "iOS-27" in runtime for d in items if d.get("isAvailable") and "iPhone" in d["name"]]
+          print(ids[0] if ids else "")')
+          if [ -n "$simulator_id" ]; then
+            xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
+              -destination "platform=iOS Simulator,id=$simulator_id" -derivedDataPath build/Simulator \
+              -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+              CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+              -parallel-testing-enabled NO \
+              -only-testing:MidokuTests/CollectionIntegrationTests \
+              -only-testing:MidokuTests/ArtworkCacheTests \
+              -only-testing:MidokuTests/ReaderReliabilityTests test 2>&1 | tee build/tests.log
+          else
+            echo '::warning::No iOS 27 simulator runtime is installed; compiling the integration tests instead.'
+            xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
+              -destination 'generic/platform=iOS Simulator' -derivedDataPath build/Simulator \
+              -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+              CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+              build-for-testing 2>&1 | tee build/tests.log
+          fi
       - name: Build unsigned device app
         shell: bash
         run: |

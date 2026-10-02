@@ -19,6 +19,7 @@ final class MCReaderSequence {
     let title: String
     let routes: [Route]
     let initialKey: String
+    private let indices: [String: Int]
     var chapters: [AidokuRunner.Chapter] { routes.map(\.displayChapter) }
 
     init(entryID: UUID, slotID: UUID, store: MCCollectionStore? = nil) throws {
@@ -28,28 +29,34 @@ final class MCReaderSequence {
         title = store.library.title(entry)
         var routes: [Route] = []
         var initial: String?
+        let chapters = Dictionary(uniqueKeysWithValues: store.library.chapters.map { ($0.id, $0) })
+        let storedChapters = Dictionary(uniqueKeysWithValues: store.snapshot.chapters.map { ($0.chapterID, $0.chapter) })
+        let listings = Dictionary(uniqueKeysWithValues: store.library.listings.map { ($0.identity, $0.id) })
+        let manga = Dictionary(uniqueKeysWithValues: store.snapshot.manga.map { ($0.listingID, $0.manga) })
         for slot in entry.slots {
-            guard let variant = slot.preferred, let libraryChapter = store.library.chapter(variant.chapterID),
-                  let record = store.physical(libraryChapter.identity) else { throw MCLibraryFailure.missing }
-            let original = record.chapter
+            guard let variant = slot.preferred, let libraryChapter = chapters[variant.chapterID],
+                  let original = storedChapters[libraryChapter.id],
+                  let listingID = listings[libraryChapter.identity.listing], let physicalManga = manga[listingID]
+            else { throw MCLibraryFailure.missing }
             let display = AidokuRunner.Chapter(key: variant.id.uuidString,
                 title: variant.edits.title ?? original.title,
                 chapterNumber: variant.edits.number.flatMap(Float.init) ?? original.chapterNumber,
                 volumeNumber: variant.edits.volume.flatMap(Float.init) ?? original.volumeNumber,
                 dateUploaded: original.dateUploaded, scanlators: original.scanlators,
                 url: original.url, language: original.language, thumbnail: original.thumbnail, locked: original.locked)
-            routes.append(Route(identity: libraryChapter.identity, manga: record.manga, chapter: original, displayChapter: display))
+            routes.append(Route(identity: libraryChapter.identity, manga: physicalManga, chapter: original, displayChapter: display))
             if slot.id == slotID { initial = display.key }
         }
         guard let initial else { throw MCLibraryFailure.missing }
         self.routes = routes
+        indices = Dictionary(uniqueKeysWithValues: routes.enumerated().map { ($0.element.displayChapter.key, $0.offset) })
         initialKey = initial
     }
 
-    func route(_ chapter: AidokuRunner.Chapter) -> Route? { routes.first { $0.displayChapter.key == chapter.key } }
-    func route(key: String) -> Route? { routes.first { $0.displayChapter.key == key } }
+    func route(_ chapter: AidokuRunner.Chapter) -> Route? { route(key: chapter.key) }
+    func route(key: String) -> Route? { indices[key].map { routes[$0] } }
     func adjacent(to chapter: AidokuRunner.Chapter, offset: Int) -> AidokuRunner.Chapter? {
-        guard let index = routes.firstIndex(where: { $0.displayChapter.key == chapter.key }), routes.indices.contains(index + offset) else { return nil }
+        guard let index = indices[chapter.key], routes.indices.contains(index + offset) else { return nil }
         return routes[index + offset].displayChapter
     }
 }
@@ -99,6 +106,9 @@ extension ReaderViewController {
 struct MCReaderView: UIViewControllerRepresentable {
     let sequence: MCReaderSequence
     func makeUIViewController(context: Context) -> ReaderNavigationController {
+        makeReaderController()
+    }
+    func makeReaderController() -> ReaderNavigationController {
         guard let route = sequence.route(key: sequence.initialKey) else { preconditionFailure("Validated reader route missing") }
         let reader = ReaderViewController(source: route.source, manga: route.manga, chapter: route.displayChapter, collectionSequence: sequence)
         #if DEBUG
@@ -118,4 +128,54 @@ struct MCReaderView: UIViewControllerRepresentable {
         return ReaderNavigationController(readerViewController: reader)
     }
     func updateUIViewController(_ uiViewController: ReaderNavigationController, context: Context) {}
+}
+
+/// Present directly through UIKit so drag progress drives the actual dismissal rather
+/// than waiting for a SwiftUI fullScreenCover to close after the swipe has ended.
+struct MCReaderPresentation: UIViewControllerRepresentable {
+    @Binding var sheet: MCReaderSheet?
+
+    final class Anchor: UIViewController {
+        var updatePresentation: (() -> Void)?
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            updatePresentation?()
+        }
+    }
+
+    final class Coordinator {
+        var sheet: Binding<MCReaderSheet?>
+        weak var anchor: Anchor?
+        var reader: ReaderNavigationController?
+        init(sheet: Binding<MCReaderSheet?>) { self.sheet = sheet }
+        func update() {
+            guard let anchor, anchor.viewIfLoaded?.window != nil else { return }
+            guard let item = sheet.wrappedValue else {
+                if let reader, !reader.isBeingDismissed { reader.dismiss(animated: true) }
+                return
+            }
+            guard reader == nil, anchor.presentedViewController == nil else { return }
+            let nav = MCReaderView(sequence: item.sequence).makeReaderController()
+            reader = nav
+            nav.onDismissed = { [weak self] in
+                guard let self else { return }
+                reader = nil
+                if sheet.wrappedValue?.id == item.id { sheet.wrappedValue = nil }
+            }
+            anchor.present(nav, animated: true)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(sheet: $sheet) }
+    func makeUIViewController(context: Context) -> Anchor {
+        let anchor = Anchor()
+        anchor.view.backgroundColor = .clear
+        context.coordinator.anchor = anchor
+        anchor.updatePresentation = { [weak coordinator = context.coordinator] in coordinator?.update() }
+        return anchor
+    }
+    func updateUIViewController(_ controller: Anchor, context: Context) {
+        context.coordinator.sheet = $sheet
+        DispatchQueue.main.async { context.coordinator.update() }
+    }
 }

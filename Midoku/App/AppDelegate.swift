@@ -159,6 +159,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         _ = CoreDataManager.shared
 
         DataLoader.sharedUrlCache.diskCapacity = 0
+        // Reader sessions are disposable; a crash or force quit can leave them behind.
+        ReaderTemporaryPageStore.removeAllSessions()
 
         let pipeline = ImagePipeline(delegate: self) {
             let dataLoader: DataLoader = {
@@ -168,12 +170,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }()
             let dataCache = try? DataCache(name: "com.raahat.Midoku.datacache") // disk cache
             let imageCache = Nuke.ImageCache() // memory cache
-            dataCache?.sizeLimit = 500 * 1024 * 1024
-            imageCache.costLimit = 100 * 1024 * 1024
+            dataCache?.sizeLimit = 150 * 1024 * 1024
+            imageCache.costLimit = 48 * 1024 * 1024
+            if let dataCache {
+                DispatchQueue.global(qos: .utility).async { dataCache.sweep() }
+            }
             $0.dataCache = dataCache
             $0.imageCache = imageCache
             $0.dataLoader = dataLoader
-            $0.dataCachePolicy = .storeAll
+            $0.dataCachePolicy = .storeOriginalData
             $0.isStoringPreviewsInMemoryCache = false
         }
 

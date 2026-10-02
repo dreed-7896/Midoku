@@ -4,6 +4,43 @@ import Testing
 
 @Suite("Midoku mixed-source composition")
 struct CollectionTests {
+    @Test func resumeKeepsTheLatestPositionIncludingCompletedChapters() throws {
+        var state = MCLibraryState()
+        let connection = UUID()
+        let id = try state.add(details: .init(id: "resume", title: "Resume", description: "", coverURL: nil), connectionID: connection,
+            records: [.init(id: "one", title: "One", number: "1", ordinal: 0, language: nil),
+                      .init(id: "two", title: "Two", number: "2", ordinal: 1, language: nil)], language: nil)
+        let entry = try #require(state.entry(id))
+        let first = try #require(state.chapter(try #require(entry.slots[0].preferred).chapterID)).identity
+        let second = try #require(state.chapter(try #require(entry.slots[1].preferred).chapterID)).identity
+        state.completed.insert(first)
+        let now = Date()
+        let positions = [MCReadingPosition(id: second, updatedAt: now.addingTimeInterval(-1)),
+                         MCReadingPosition(id: first, updatedAt: now)]
+        #expect(state.resumeSlot(entry, positions: positions) == entry.slots[0].id)
+        #expect(state.resumeSlot(entry, positions: []) == entry.slots[1].id)
+        let other = MCSourceChapterIdentity(listing: .init(connectionID: UUID(), externalID: "resume"), externalID: "two")
+        #expect(state.resumeSlot(entry, positions: [.init(id: other, updatedAt: now.addingTimeInterval(1))]) == entry.slots[1].id)
+    }
+
+    @Test func largeTitleRefreshKeepsPhysicalIDsAndPersonalEdits() throws {
+        var state = MCLibraryState()
+        let connection = UUID()
+        let details = MCMangaDetails(id: "large", title: "Large", description: "", coverURL: nil)
+        let chapters = (1...5000).map { MCChapterRecord(id: String($0), title: "Chapter \($0)", number: String($0), ordinal: $0, language: nil) }
+        let id = try state.add(details: details, connectionID: connection, records: Array(chapters.reversed()), language: nil)
+        let before = try #require(state.entry(id))
+        let first = try #require(before.slots.first?.preferred)
+        try state.editEntry(id) { $0.slots[0].variants[0].edits.title = "Keep this title" }
+        try state.refresh(details: details, connectionID: connection,
+            records: chapters + [.init(id: "5001", title: "Last", number: "5001", ordinal: 5001, language: nil)], language: nil)
+        let after = try #require(state.entry(id))
+        #expect(after.slots.count == 5001)
+        #expect(after.slots.first?.preferred?.chapterID == first.chapterID)
+        #expect(after.slots.first?.preferred?.edits.title == "Keep this title")
+        #expect(after.slots.last?.preferred.flatMap { state.chapter($0.chapterID)?.record.id } == "5001")
+        try state.validate(connections: [connection], categories: [])
+    }
     let a = UUID(), b = UUID()
     func details(_ id: String = "same-key") -> MCMangaDetails { .init(id: id, title: "Original", description: "Source text", coverURL: nil) }
     func records(_ numbers: [Int]) -> [MCChapterRecord] {

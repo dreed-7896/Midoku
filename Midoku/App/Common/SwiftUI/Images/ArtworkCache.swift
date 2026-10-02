@@ -2,7 +2,7 @@ import CryptoKit
 import UIKit
 
 /// Keeps the final, decoded artwork independently of source headers and Cloudflare state.
-/// Disk entries have no expiry: they are removed only by a thumbnail reset or Clear cache.
+/// Artwork survives source/header changes, with a bounded disk cache.
 @MainActor
 final class MCArtworkCache {
     static let shared = MCArtworkCache()
@@ -26,7 +26,8 @@ final class MCArtworkCache {
     init(directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("MidokuArtworkCache")) {
         self.directory = directory
-        memory.totalCostLimit = 100 * 1024 * 1024
+        memory.totalCostLimit = 32 * 1024 * 1024
+        diskQueue.async { ArtworkDiskBudget.trim(directory: directory, limit: 100 * 1024 * 1024) }
     }
 
     static func key(url: String, sourceKey: String?, pageImage: Bool = false, width: CGFloat? = nil) -> String {
@@ -61,9 +62,10 @@ final class MCArtworkCache {
         // Atomic writes ensure reset and cache reads can never see a partial image.
         let directory = directory
         diskQueue.async {
-            if let data = animatedData ?? image.pngData() {
+            if let data = animatedData ?? image.jpegData(compressionQuality: 0.85) ?? image.pngData() {
                 try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 try? data.write(to: directory.appendingPathComponent(key), options: .atomic)
+                ArtworkDiskBudget.trim(directory: directory, limit: 100 * 1024 * 1024)
             }
         }
         return artwork

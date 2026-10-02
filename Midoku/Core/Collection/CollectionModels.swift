@@ -170,10 +170,18 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         return nil
     }
     func resumeSlot(_ entry: MCPersonalEntry, positions: [MCReadingPosition]) -> UUID? {
-        if let recent = positions.sorted(by: { $0.updatedAt > $1.updatedAt }).first(where: { position in
-            entry.slots.contains { slot in slot.preferred.flatMap { chapter($0.chapterID) }?.identity == position.id && !isRead(slot) }
-        }), let slot = entry.slots.first(where: { $0.preferred.flatMap { chapter($0.chapterID) }?.identity == recent.id }) { return slot.id }
-        return entry.slots.first(where: { !isRead($0) })?.id ?? entry.slots.first?.id
+        let identities = Dictionary(uniqueKeysWithValues: chapters.map { ($0.id, $0.identity) })
+        let slots = Dictionary(entry.slots.compactMap { slot -> (MCSourceChapterIdentity, UUID)? in
+            guard let variant = slot.preferred, let identity = identities[variant.chapterID] else { return nil }
+            return (identity, slot.id)
+        }, uniquingKeysWith: { first, _ in first })
+        // Completion does not erase a position: reopening even a finished chapter resumes it.
+        if let recent = positions.filter({ slots[$0.id] != nil }).max(by: { $0.updatedAt < $1.updatedAt }) {
+            return slots[recent.id]
+        }
+        return entry.slots.first(where: { slot in
+            !(slot.completionOverride ?? slot.preferred.flatMap { identities[$0.chapterID] }.map(completed.contains) ?? false)
+        })?.id ?? entry.slots.first?.id
     }
 
     @discardableResult
@@ -196,11 +204,15 @@ nonisolated struct MCLibraryState: Codable, Sendable {
                 chapters[index].available = incoming.contains(chapters[index].record.id)
             }
         }
+        var chapterIndices = Dictionary(uniqueKeysWithValues: chapters.enumerated().map { ($0.element.identity, $0.offset) })
         for record in records {
             let key = MCSourceChapterIdentity(listing: identity, externalID: record.id)
-            if let index = chapters.firstIndex(where: { $0.identity == key }) {
+            if let index = chapterIndices[key] {
                 chapters[index].record = record; chapters[index].available = true
-            } else { chapters.append(MCLibraryChapter(identity: key, record: record)) }
+            } else {
+                chapterIndices[key] = chapters.count
+                chapters.append(MCLibraryChapter(identity: key, record: record))
+            }
         }
         return listingID
     }
@@ -420,10 +432,16 @@ nonisolated struct MCLibraryState: Codable, Sendable {
 
     func sortSequence(_ entry: inout MCPersonalEntry) {
         let positions = Dictionary(uniqueKeysWithValues: entry.slots.enumerated().map { ($0.element.id, $0.offset) })
+        let chaptersByID = Dictionary(uniqueKeysWithValues: chapters.map { ($0.id, $0) })
+        let numbers = Dictionary(uniqueKeysWithValues: entry.slots.compactMap { slot -> (UUID, String)? in
+            guard let variant = slot.preferred else { return nil }
+            return (slot.id, variant.edits.number ?? chaptersByID[variant.chapterID]?.record.number ?? "")
+        })
+        let numericNumbers = numbers.compactMapValues(Self.numeric)
         entry.slots.sort { lhs, rhs in
-            guard let left = lhs.preferred, let right = rhs.preferred else { return lhs.id.uuidString < rhs.id.uuidString }
-            let ln = number(left) ?? "", rn = number(right) ?? ""
-            let a = Self.numeric(ln), b = Self.numeric(rn)
+            guard lhs.preferred != nil, rhs.preferred != nil else { return lhs.id.uuidString < rhs.id.uuidString }
+            let ln = numbers[lhs.id] ?? "", rn = numbers[rhs.id] ?? ""
+            let a = numericNumbers[lhs.id], b = numericNumbers[rhs.id]
             if let a, let b, a != b { return a < b }
             if (a != nil) != (b != nil) { return a != nil }
             if a == nil && b == nil && ln != rn {

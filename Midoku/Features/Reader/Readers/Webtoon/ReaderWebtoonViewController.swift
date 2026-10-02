@@ -369,10 +369,13 @@ extension ReaderWebtoonViewController {
 
         // update page number
         let page = getCurrentPage()
-        if previousPage != page {
-            previousPage = page
-            delegate?.setCurrentPage(page, position: nil)
+        previousPage = page
+        let position = getCurrentPagePath().flatMap { path -> Double? in
+            guard let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: path)?.frame,
+                  frame.height > 0 else { return nil }
+            return Double((collectionNode.contentOffset.y - frame.minY) / frame.height)
         }
+        delegate?.setCurrentPage(page, position: position)
     }
 
     // disable slider movement while zooming
@@ -649,17 +652,19 @@ extension ReaderWebtoonViewController {
     /// Prepend the previous chapter's pages
     func prependPreviousChapter() async {
         guard let prevChapter = delegate?.getPreviousChapter() else { return }
+        guard !chapters.contains(prevChapter) else { return }
         await viewModel.preload(chapter: prevChapter)
 
         // check if pages failed to load
-        if viewModel.preloadedPages.isEmpty {
+        if viewModel.preloadedPages.isEmpty || viewModel.preloadedChapter != prevChapter {
             return
         }
 
         // wait until zooming and scrolling stops
         while isZooming || isScrolling {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
         }
+        guard !chapters.contains(prevChapter), viewModel.preloadedChapter == prevChapter else { return }
 
         // queue remove last section if we have three already
 //        let removeLast = chapters.count >= 3
@@ -697,6 +702,7 @@ extension ReaderWebtoonViewController {
         self.scrollView.contentOffset = self.collectionNode.contentOffset
         self.zoomView.adjustContentSize()
         CATransaction.commit()
+        await trimLoadedChapters()
     }
 
     /// Append the next chapter's pages
@@ -706,14 +712,15 @@ extension ReaderWebtoonViewController {
         await viewModel.preload(chapter: nextChapter)
 
         // check if pages failed to load
-        if viewModel.preloadedPages.isEmpty {
+        if viewModel.preloadedPages.isEmpty || viewModel.preloadedChapter != nextChapter {
             return
         }
 
         // wait until zooming and scrolling stops
         while isZooming || isScrolling {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
         }
+        guard !chapters.contains(nextChapter), viewModel.preloadedChapter == nextChapter else { return }
 
         // queue remove first section if we have three already
 //        let removeFirst = chapters.count >= 3
@@ -743,6 +750,32 @@ extension ReaderWebtoonViewController {
         scrollView.contentOffset = self.collectionNode.contentOffset
         zoomView.adjustContentSize()
         CATransaction.commit()
+        await trimLoadedChapters()
+    }
+
+    /// Keep the current chapter, neighbours, and any still-visible sections. The layout
+    /// preserves the offset when removing sections above, just as it does for insertion.
+    private func trimLoadedChapters() async {
+        guard chapters.count > 3, !isZooming, let chapter,
+              let current = chapters.firstIndex(of: chapter) else { return }
+        let firstVisible = getCurrentPagePath(pos: .top)?.section ?? current
+        let lastVisible = getCurrentPagePath(pos: .bottom)?.section ?? current
+        let first = max(0, min(current - 1, firstVisible))
+        let last = min(chapters.count - 1, max(current + 1, lastVisible))
+        let below = IndexSet(integersIn: (last + 1)..<chapters.count)
+        if !below.isEmpty {
+            for index in below.reversed() { chapters.remove(at: index); pages.remove(at: index) }
+            await collectionNode.performBatch(animated: false) { collectionNode.deleteSections(below) }
+        }
+        let above = IndexSet(integersIn: 0..<first)
+        guard !above.isEmpty else { zoomView.adjustContentSize(); return }
+        if first > 0 {
+            (collectionNode.collectionViewLayout as? VerticalContentOffsetPreservingLayout)?.isInsertingCellsAbove = true
+        }
+        for index in above.reversed() { chapters.remove(at: index); pages.remove(at: index) }
+        await collectionNode.performBatch(animated: false) { collectionNode.deleteSections(above) }
+        scrollView.contentOffset = collectionNode.contentOffset
+        zoomView.adjustContentSize()
     }
 
     /// Switch current chapter to previous
@@ -880,6 +913,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
 
         Task {
             await viewModel.loadPages(chapter: chapter)
+            guard self.chapter == chapter, !Task.isCancelled else { return }
             delegate?.setPages(viewModel.pages)
             if viewModel.pages.isEmpty {
                 pages = []
@@ -919,6 +953,14 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
                 at: .top,
                 animated: false
             )
+            let history = CoreDataManager.shared.getHistory(
+                chapterId: viewModel.physicalIdentifier(key: chapter.key), context: CoreDataManager.shared.context)
+            if Int(history?.progress ?? 0) == startPage,
+               let position = history?.scrollPosition?.doubleValue, position.isFinite,
+               let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: IndexPath(row: startPage, section: 0))?.frame {
+                let offset = frame.minY + CGFloat(position) * frame.height
+                collectionNode.contentOffset.y = max(0, min(offset, collectionNode.contentSize.height - collectionNode.bounds.height))
+            }
             scrollView.contentOffset = collectionNode.contentOffset
             if let next = delegate?.getNextChapter() {
                 Task { await viewModel.preload(chapter: next) }

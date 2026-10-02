@@ -137,6 +137,18 @@ class ReaderPageView: UIView {
 }
 
 extension ReaderPageView {
+    func clearPage() {
+        imageTask?.cancel()
+        imageTask = nil
+        cancelLiveTextAnalysis()
+        cancelDictionaryTextAnalysis()
+        imageView.prepareForReuse()
+        imageView.image = nil
+        currentPage = nil
+        currentImageRequest = nil
+        clearDictionaryOverlays()
+    }
+
     func setPage(_ page: Page, sourceId: String? = nil, skipProcessing: Bool = false) async -> Bool {
         // Store current page data for reload functionality
         self.currentPage = page

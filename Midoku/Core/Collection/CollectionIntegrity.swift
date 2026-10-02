@@ -9,6 +9,8 @@ nonisolated extension MCLibraryState {
               unique(chapters.map(\.id)), unique(chapters.map(\.identity)), unique(covers.map(\.id)),
               unique(updates.map(\.id)) else { throw MCLibraryFailure.invalid }
         let listingKeys = Set(listings.map(\.identity)), chapterIDs = Set(chapters.map(\.id))
+        let chaptersByID = Dictionary(uniqueKeysWithValues: chapters.map { ($0.id, $0) })
+        let listingsByIdentity = Dictionary(uniqueKeysWithValues: listings.map { ($0.identity, $0) })
         let coverIDs = Set(covers.map(\.id)), listingIDs = Set(listings.map(\.id)), entryIDs = Set(entries.map(\.id))
         guard unique(readingIDs), Set(readingIDs).isSubset(of: entryIDs) else { throw MCLibraryFailure.invalid }
         let allSlots = entries.flatMap(\.slots)
@@ -55,7 +57,7 @@ nonisolated extension MCLibraryState {
             for slot in entry.slots {
                 guard !slot.variants.isEmpty, slot.variants.contains(where: { $0.id == slot.preferredID }), slot.variants.allSatisfy({ valid($0.edits) }) else { throw MCLibraryFailure.invalid }
                 for variant in slot.variants {
-                    guard let source = chapter(variant.chapterID), let listing = listings.first(where: { $0.identity == source.identity.listing }), entry.links.contains(where: { $0.listingID == listing.id }) else { throw MCLibraryFailure.invalid }
+                    guard let source = chaptersByID[variant.chapterID], let listing = listingsByIdentity[source.identity.listing], entry.links.contains(where: { $0.listingID == listing.id }) else { throw MCLibraryFailure.invalid }
                 }
             }
             if let reader = entry.readerOverride {

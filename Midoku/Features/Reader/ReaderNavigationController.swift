@@ -11,12 +11,17 @@ import AidokuRunner
 class ReaderNavigationController: UINavigationController, UIGestureRecognizerDelegate {
     let readerViewController: ReaderViewController
     let mangaInfo: MangaInfo?
-    private(set) lazy var readerBackGesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleReaderBack(_:)))
+    var onDismissed: (() -> Void)?
+    private var interactiveDismissal: UIPercentDrivenInteractiveTransition?
+    private var dismissVertically = false
+    private(set) lazy var readerBackGesture = UIPanGestureRecognizer(target: self, action: #selector(handleReaderBack(_:)))
 
     init(readerViewController: ReaderViewController, mangaInfo: MangaInfo? = nil) {
         self.readerViewController = readerViewController
         self.mangaInfo = mangaInfo
         super.init(rootViewController: readerViewController)
+        modalPresentationStyle = .fullScreen
+        transitioningDelegate = self
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -25,9 +30,14 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        readerBackGesture.edges = .left
+        readerBackGesture.maximumNumberOfTouches = 1
         readerBackGesture.delegate = self
         view.addGestureRecognizer(readerBackGesture)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed || presentingViewController == nil { onDismissed?() }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -51,18 +61,49 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
               let reader = topViewController as? ReaderViewController,
               reader.presentedViewController == nil else { return false }
         let velocity = readerBackGesture.velocity(in: view)
-        return velocity.x > 0 && velocity.x > abs(velocity.y)
+        let translation = readerBackGesture.translation(in: view)
+        let point = readerBackGesture.location(in: view)
+        let origin = CGPoint(x: point.x - translation.x, y: point.y - translation.y)
+        func zoomed(in view: UIView) -> Bool {
+            if let scroll = view as? UIScrollView, scroll.zoomScale > scroll.minimumZoomScale + 0.01 { return true }
+            return view.subviews.contains { !$0.isHidden && zoomed(in: $0) }
+        }
+        guard !zoomed(in: reader.view) else { return false }
+        dismissVertically = velocity.y > abs(velocity.x)
+        if dismissVertically {
+            return velocity.y > 0 && origin.y < view.safeAreaInsets.top + 96
+        }
+        return origin.x < 80 && velocity.x > 0 && velocity.x > abs(velocity.y)
     }
 
     static func shouldCloseReader(translation: CGPoint, velocity: CGPoint, width: CGFloat) -> Bool {
         translation.x > max(80, width * 0.2) || (translation.x > 16 && velocity.x > 600)
     }
 
-    @objc private func handleReaderBack(_ gesture: UIScreenEdgePanGestureRecognizer) {
-        guard gesture.state == .ended,
-              Self.shouldCloseReader(translation: gesture.translation(in: view), velocity: gesture.velocity(in: view), width: view.bounds.width)
-        else { return }
-        (topViewController as? ReaderViewController)?.close()
+    @objc private func handleReaderBack(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: view)
+        let velocity = gesture.velocity(in: view)
+        let distance = dismissVertically ? translation.y : translation.x
+        let extent = dismissVertically ? view.bounds.height : view.bounds.width
+        let progress = max(0, min(1, distance / max(1, extent)))
+        switch gesture.state {
+        case .began:
+            interactiveDismissal = UIPercentDrivenInteractiveTransition()
+            interactiveDismissal?.completionCurve = .easeOut
+            dismiss(animated: true)
+        case .changed:
+            interactiveDismissal?.update(progress)
+        case .ended:
+            let finish = dismissVertically
+                ? distance > max(100, extent * 0.18) || (distance > 16 && velocity.y > 600)
+                : Self.shouldCloseReader(translation: translation, velocity: velocity, width: extent)
+            if finish { interactiveDismissal?.finish() } else { interactiveDismissal?.cancel() }
+            interactiveDismissal = nil
+        case .cancelled, .failed:
+            interactiveDismissal?.cancel()
+            interactiveDismissal = nil
+        default: break
+        }
     }
 
     override var childForStatusBarHidden: UIViewController? {
@@ -79,6 +120,51 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
             case "portrait": .portrait
             case "landscape": .landscape
             default: .all
+        }
+    }
+}
+
+extension ReaderNavigationController: UIViewControllerTransitioningDelegate {
+    func animationController(forPresented presented: UIViewController, presenting: UIViewController,
+                             source: UIViewController) -> (any UIViewControllerAnimatedTransitioning)? {
+        ReaderDismissAnimator(presenting: true, vertical: false)
+    }
+
+    func animationController(forDismissed dismissed: UIViewController) -> (any UIViewControllerAnimatedTransitioning)? {
+        ReaderDismissAnimator(presenting: false, vertical: interactiveDismissal != nil && dismissVertically)
+    }
+
+    func interactionControllerForDismissal(using animator: any UIViewControllerAnimatedTransitioning)
+        -> (any UIViewControllerInteractiveTransitioning)? { interactiveDismissal }
+}
+
+private final class ReaderDismissAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+    let presenting: Bool
+    let vertical: Bool
+    init(presenting: Bool, vertical: Bool) { self.presenting = presenting; self.vertical = vertical; super.init() }
+    func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval { 0.3 }
+    func animateTransition(using context: any UIViewControllerContextTransitioning) {
+        guard let from = context.view(forKey: .from), let to = context.view(forKey: .to) else {
+            context.completeTransition(false); return
+        }
+        let container = context.containerView
+        if let controller = context.viewController(forKey: .to) { to.frame = context.finalFrame(for: controller) }
+        if presenting {
+            container.addSubview(to)
+            to.alpha = 0
+        } else {
+            container.insertSubview(to, belowSubview: from)
+        }
+        UIView.animate(withDuration: transitionDuration(using: context), delay: 0, options: .curveEaseOut) {
+            if self.presenting { to.alpha = 1 }
+            else {
+                from.transform = CGAffineTransform(translationX: self.vertical ? 0 : container.bounds.width,
+                    y: self.vertical ? container.bounds.height : 0)
+            }
+        } completion: { _ in
+            from.transform = .identity
+            to.alpha = 1
+            context.completeTransition(!context.transitionWasCancelled)
         }
     }
 }
