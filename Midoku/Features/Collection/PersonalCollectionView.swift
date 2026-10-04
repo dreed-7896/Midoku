@@ -365,7 +365,11 @@ struct MCCollectionRootView: View {
             .mcErrors(store)
             .navigationDestination(for: UUID.self) { MCEntryView(entryID: $0) }
             .onReceive(NotificationCenter.default.publisher(for: .libraryTabReselected)) { _ in
-                guard !readingMode, !showsFlatResults, grouping != .none, path.isEmpty else { return }
+                if !path.isEmpty {
+                    path.removeAll()
+                    return
+                }
+                guard !readingMode, !showsFlatResults, grouping != .none else { return }
                 groupPage = groupPages.first?.id
                 swipePosition.requestedID = groupPages.first?.id
             }

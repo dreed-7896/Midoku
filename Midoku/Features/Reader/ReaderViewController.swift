@@ -215,6 +215,7 @@ class ReaderViewController: BaseObservingViewController {
         controlsView.chaptersButton.addTarget(self, action: #selector(openChapterList), for: .touchUpInside)
         controlsView.settingsButton.addTarget(self, action: #selector(openReaderSettings), for: .touchUpInside)
         controlsView.webButton.addTarget(self, action: #selector(openWebView), for: .touchUpInside)
+        controlsView.autoScrollSwitch.addTarget(self, action: #selector(autoScrollSwitchChanged), for: .valueChanged)
         loadNavbarTitle()
 
         toolbarView.sliderView.addTarget(self, action: #selector(sliderMoved(_:)), for: .valueChanged)
@@ -818,6 +819,19 @@ extension ReaderViewController {
 
 // MARK: - Auto Scroll
 extension ReaderViewController {
+    @objc private func autoScrollSwitchChanged() {
+        guard let webtoonReader = reader as? ReaderWebtoonViewController else { return }
+        if controlsView.autoScrollSwitch.isOn {
+            // Enable the fullscreen shortcut too, even when disabled in settings.
+            UserDefaults.standard.set(true, forKey: "Reader.autoScroll")
+            updateAutoScrollButton()
+            if !webtoonReader.isAutoScrolling { webtoonReader.toggleAutoScroll() }
+        } else {
+            webtoonReader.stopAutoScroll()
+        }
+        updateAutoScrollButtonIcon()
+    }
+
     @objc private func toggleAutoScroll() {
         guard let webtoonReader = reader as? ReaderWebtoonViewController else { return }
         webtoonReader.toggleAutoScroll()
@@ -838,6 +852,7 @@ extension ReaderViewController {
             self?.setAutoScrollButtonDimmed(isScrolling)
         }
 
+        controlsView.autoScrollSwitch.isEnabled = webtoonReader != nil
         autoScrollButton.isHidden = !visible
         updateAutoScrollButtonPosition(visible: visible)
         updateAutoScrollButtonIcon()
@@ -879,6 +894,8 @@ extension ReaderViewController {
     private func updateAutoScrollButtonIcon() {
         let isAutoScrolling = (reader as? ReaderWebtoonViewController)?.isAutoScrolling == true
         autoScrollButton.configuration?.image = UIImage(systemName: isAutoScrolling ? "pause.fill" : "play.fill")
+        autoScrollButton.accessibilityLabel = isAutoScrolling ? "Pause auto scroll" : "Start auto scroll"
+        controlsView.autoScrollSwitch.setOn(isAutoScrolling, animated: false)
     }
 
     @objc private func autoScrollButtonTouchDown() {

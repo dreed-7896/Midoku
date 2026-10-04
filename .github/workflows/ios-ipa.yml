@@ -56,7 +56,7 @@ jobs:
           if-no-files-found: error
 
   checks:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_tests
+    if: github.event_name == 'push' || inputs.run_tests
     runs-on: xcode-27
     timeout-minutes: 20
     env:

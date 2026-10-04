@@ -31,6 +31,8 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
     var text: String?
     var ratio: CGFloat?
 
+    private var hasDisplayedContent = false
+
     private var pageLoadTask: Task<Void, Never>?
     private var imageTask: ImageTask?
     private var imageProcessingTask: Task<UIImage?, Never>?
@@ -139,6 +141,9 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
     override func didExitPreloadState() {
         super.didExitPreloadState()
         cancelPageLoad()
+        if !isVisible, delegate?.isZooming != true {
+            releasePageResources()
+        }
     }
 
     override func didEnterVisibleState() {
@@ -162,11 +167,15 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
 
         cancelLiveTextAnalysis()
         cancelDictionaryTextAnalysis()
-        clearDisplayedImage()
         clearDictionaryOverlays()
         hasScheduledDictionaryTextAnalysis = false
         needsDictionaryOverlayRender = false
+        // Keep decoded pages within the preload range for quick direction changes.
+        // Release them when they leave that range, or on a memory warning.
+    }
 
+    private func releasePageResources() {
+        clearDisplayedImage()
         text = nil
         imageNode.alpha = 0
         textNode.alpha = 0
@@ -174,45 +183,30 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
     }
 
     override func animateLayoutTransition(_ context: ASContextTransitioning) {
-        UIView.animate(
-            withDuration: 0.3,
-            delay: 0,
-            options: [
-                .transitionCrossDissolve,
-                .allowUserInteraction,
-                .curveEaseInOut
-            ]
-        ) {
-            if self.image != nil {
-                self.imageNode.alpha = 1
-            } else if self.text != nil {
-                self.textNode.alpha = 1
-            } else {
-                self.imageNode.alpha = 0
-                self.textNode.alpha = 0
-            }
-        } completion: { [weak self] _ in
-            guard let self = self else { return }
-            self.imageNode.frame = context.finalFrame(for: self.imageNode)
-            self.textNode.frame = context.finalFrame(for: self.textNode)
-            if let delegate = self.delegate {
-                Task { @MainActor in
-                    delegate.scrollView.contentOffset = delegate.collectionNode.contentOffset
-                    delegate.zoomView.adjustContentSize()
-                }
-            }
-            context.completeTransition(true)
+        // Record the old content size before Texture commits a changed page height.
+        if let indexPath,
+           let collectionNode = owningNode as? ASCollectionNode,
+           let layout = collectionNode.collectionViewLayout as? VerticalContentOffsetPreservingLayout,
+           let oldFrame = layout.layoutAttributesForItem(at: indexPath)?.frame,
+           oldFrame.maxY <= collectionNode.contentOffset.y {
+            layout.isInsertingCellsAbove = true
         }
 
-        // handle inserting cell above
-        guard
-            let indexPath,
-            let collectionNode = owningNode as? ASCollectionNode,
-            let layout = collectionNode.collectionViewLayout as? VerticalContentOffsetPreservingLayout,
-            let yOffset = collectionNode.collectionViewLayout.layoutAttributesForItem(at: indexPath)?.frame.origin.y
-        else { return }
-        layout.isInsertingCellsAbove = yOffset < collectionNode.contentOffset.y
+        // Position the image before revealing it. Fading it in with its old frame
+        // made newly loaded pages appear to jump in from the left.
+        UIView.performWithoutAnimation {
+            super.animateLayoutTransition(context)
+            imageNode.alpha = image == nil ? 0 : 1
+            textNode.alpha = text == nil ? 0 : 1
+        }
+        Task { @MainActor [weak self] in
+            guard let delegate = self?.delegate else { return }
+            delegate.collectionNode.view.layoutIfNeeded()
+            delegate.zoomView.adjustContentSize()
+            delegate.scrollView.contentOffset = delegate.collectionNode.contentOffset
+        }
     }
+
 }
 
 extension ReaderWebtoonPageNode {
@@ -522,14 +516,15 @@ extension ReaderWebtoonPageNode {
 
         if let image {
             progressNode.isHidden = true
-            imageNode.image = image
+            if imageNode.image !== image {
+                imageNode.image = image
+                hasDisplayedContent = false
+            }
 
             Task { @MainActor in
                 imageNode.isUserInteractionEnabled = true
-                imageNode.view.interactions
-                    .filter { $0 is UIContextMenuInteraction }
-                    .forEach { imageNode.view.removeInteraction($0) }
-                if let delegate {
+                if let delegate,
+                   !imageNode.view.interactions.contains(where: { $0 is UIContextMenuInteraction }) {
                     imageNode.addInteraction(UIContextMenuInteraction(delegate: delegate))
                 }
 
@@ -552,29 +547,32 @@ extension ReaderWebtoonPageNode {
             }
         } else if let text {
             progressNode.isHidden = true
-            textNode.content = MarkdownView(text)
+            if !hasDisplayedContent {
+                textNode.content = MarkdownView(text)
+            }
             clearDictionaryOverlays()
         }
 
-        transition()
+        if !hasDisplayedContent {
+            hasDisplayedContent = true
+            transition()
+        }
     }
 
     private func clearDisplayedImage() {
+        hasDisplayedContent = false
         imageNode.reset()
         image = nil
     }
 
     private func transition() {
-        let width = pageWidth
-        guard width > 0 else { return }
-        let ratio = if let image, image.size.width > 0 {
-            image.size.height / image.size.width
-        } else {
-            ratio ?? Self.defaultRatio
+        // The collection owns the cell frame. Resetting it to .zero here fights
+        // scrolling and zoom transforms, and forces synchronous remeasurement.
+        guard pageWidth > 0 else {
+            hasDisplayedContent = false
+            return
         }
-        let size = CGSize(width: width, height: width * ratio)
-        frame = CGRect(origin: .zero, size: size)
-        transitionLayout(with: ASSizeRange(min: .zero, max: size), animated: true, shouldMeasureAsync: false)
+        transitionLayout(withAnimation: false, shouldMeasureAsync: true)
     }
 
     @MainActor

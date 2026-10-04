@@ -1,4 +1,5 @@
 import AidokuRunner
+import AsyncDisplayKit
 import CoreData
 import Foundation
 import Testing
@@ -8,6 +9,58 @@ import UIKit
 @MainActor
 @Suite("Reader resume and resource limits", .serialized)
 struct ReaderReliabilityTests {
+    @Test func webtoonPagesKeepTheirCollectionPositionWhenAnImageLoads() {
+        let node = ReaderWebtoonPageNode(
+            source: nil,
+            page: Page(sourceId: "test", chapterId: "one"),
+            temporaryPageStore: ReaderTemporaryPageStore(),
+            pillarboxLayoutState: ReaderPillarboxLayoutState()
+        )
+        node.pillarbox = false
+        let size = CGSize(width: 320, height: 640)
+        _ = node.layoutThatFits(ASSizeRange(min: size, max: size))
+        node.frame = CGRect(origin: CGPoint(x: 24, y: 900), size: size)
+        node.image = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        node.displayPage()
+        #expect(node.frame.origin == CGPoint(x: 24, y: 900))
+        node.displayPage()
+        #expect(node.frame.origin == CGPoint(x: 24, y: 900))
+
+        // Scrolling just outside the display range must not discard a preloaded page.
+        node.didExitDisplayState()
+        #expect(node.image != nil)
+        node.didExitPreloadState()
+        #expect(node.image == nil)
+        #expect(node.imageNode.image == nil)
+        #expect(node.getHeight(for: size) == 640) // Unloading preserves page geometry.
+    }
+
+    @Test func readerPanelPlacesProgressAboveOrderedActions() {
+        for width: CGFloat in [288, 358, 600] {
+            let panel = ReaderControlsView()
+            let height = panel.systemLayoutSizeFitting(
+                CGSize(width: width, height: 0),
+                withHorizontalFittingPriority: .required,
+                verticalFittingPriority: .fittingSizeLevel
+            ).height
+            panel.frame = CGRect(x: 0, y: 0, width: width, height: height)
+            panel.layoutIfNeeded()
+            let controls: [UIView] = [panel.webButton, panel.chaptersButton, panel.autoScrollSwitch, panel.settingsButton]
+            let frames = controls.map { $0.convert($0.bounds, to: panel) }
+            let progressFrame = panel.toolbar.convert(panel.toolbar.bounds, to: panel)
+            for frame in frames {
+                #expect(frame.minY >= progressFrame.maxY)
+                #expect(frame.minX >= 0 && frame.maxX <= width)
+            }
+            for index in 1..<frames.count {
+                #expect(frames[index - 1].maxX <= frames[index].minX)
+            }
+        }
+    }
+
     @Test func completedChaptersRestartWhileUnfinishedChaptersResume() throws {
         let manga = AidokuRunner.Manga(sourceKey: "mc.restart", key: UUID().uuidString, title: "Restart")
         let chapter = AidokuRunner.Chapter(key: "chapter", chapterNumber: 1)
