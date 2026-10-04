@@ -1,6 +1,7 @@
 import AidokuRunner
 import AsyncDisplayKit
 import CoreData
+import Combine
 import Foundation
 import Testing
 import UIKit
@@ -97,6 +98,74 @@ struct ReaderReliabilityTests {
         #expect(layout.collectionViewContentSize.height == 400_000)
         #expect(layout.indexPath(at: CGPoint(x: 10, y: 450))?.item == 1)
         #expect(layout.shouldInvalidateLayout(forBoundsChange: CGRect(x: 0, y: 0, width: 600, height: 320)))
+    }
+
+    @Test func backGestureDoesNotMakeVerticalReaderPansWait() {
+        let manga = AidokuRunner.Manga(sourceKey: "gesture", key: "book", title: "Book")
+        let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))
+        let navigation = ReaderNavigationController(readerViewController: reader)
+        navigation.loadViewIfNeeded()
+        reader.loadViewIfNeeded()
+        let scroll = UIScrollView()
+        reader.view.addSubview(scroll)
+        let back = navigation.readerBackGesture
+        let pan = scroll.panGestureRecognizer
+
+        for mode: ReadingMode in [.webtoon, .continuous, .vertical] {
+            reader.readingMode = mode
+            #expect(navigation.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
+            #expect(!navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: pan))
+        }
+        for mode: ReadingMode in [.rtl, .ltr] {
+            reader.readingMode = mode
+            #expect(!navigation.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
+            #expect(navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: pan))
+        }
+        // Switching back from horizontal paging must not leave a permanent failure dependency.
+        reader.readingMode = .webtoon
+        #expect(!navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: pan))
+        #expect(!back.delaysTouchesBegan && !back.delaysTouchesEnded && !back.cancelsTouchesInView)
+        #expect(back.maximumNumberOfTouches == 1)
+        let unrelatedScroll = UIScrollView()
+        #expect(!navigation.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: unrelatedScroll.panGestureRecognizer))
+        #expect(!navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: unrelatedScroll.panGestureRecognizer))
+    }
+
+    @Test func backGestureRejectsControlsInteriorTouchesAndVerticalMotion() {
+        let manga = AidokuRunner.Manga(sourceKey: "gesture", key: "book", title: "Book")
+        let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))
+        let navigation = ReaderNavigationController(readerViewController: reader)
+        navigation.loadViewIfNeeded()
+        reader.loadViewIfNeeded()
+        #expect(navigation.acceptsReaderBackTouch(at: .init(x: 12, y: 200), touchedView: reader.view))
+        #expect(!navigation.acceptsReaderBackTouch(at: .init(x: 150, y: 200), touchedView: reader.view))
+        #expect(!navigation.acceptsReaderBackTouch(at: .init(x: 12, y: 200), touchedView: reader.controlsView.closeButton))
+        #expect(!navigation.acceptsReaderBackTouch(at: .init(x: 12, y: 200), touchedView: reader.controlsView.toolbar.sliderView))
+        #expect(ReaderNavigationController.shouldBeginReaderBack(velocity: .init(x: 200, y: 20)))
+        for velocity in [CGPoint.zero, .init(x: -200, y: 0), .init(x: 20, y: 200), .init(x: 20, y: -200), .init(x: 100, y: 100)] {
+            #expect(!ReaderNavigationController.shouldBeginReaderBack(velocity: velocity))
+        }
+        #expect(!ReaderNavigationController.shouldCloseReader(translation: .init(x: 120, y: 400), velocity: .zero, width: 390))
+    }
+
+    @Test func repeatedSwipeToHideDoesNotRetriggerReaderTransitions() {
+        let manga = AidokuRunner.Manga(sourceKey: "controls", key: "book", title: "Book")
+        let reader = ReaderViewController(source: nil, manga: manga, chapter: .init(key: "one"))
+        reader.loadViewIfNeeded()
+        var hidingEvents = 0
+        var showingEvents = 0
+        let hiding = NotificationCenter.default.publisher(for: .readerHidingBars).sink { _ in hidingEvents += 1 }
+        let showing = NotificationCenter.default.publisher(for: .readerShowingBars).sink { _ in showingEvents += 1 }
+        defer { hiding.cancel(); showing.cancel() }
+
+        reader.setReaderControlsVisible(false, animated: false)
+        for _ in 0..<20 { reader.setReaderControlsVisible(false, animated: false) }
+        #expect(hidingEvents == 1)
+        #expect(!reader.readerControlsVisible)
+        reader.setReaderControlsVisible(true, animated: false)
+        for _ in 0..<20 { reader.setReaderControlsVisible(true, animated: false) }
+        #expect(showingEvents == 1)
+        #expect(reader.readerControlsVisible)
     }
 
     @Test func completedChaptersRestartWhileUnfinishedChaptersResume() throws {
@@ -231,4 +300,11 @@ private final class MCWebtoonLayoutDataSource: NSObject, UICollectionViewDataSou
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         collectionView.dequeueReusableCell(withReuseIdentifier: "page", for: indexPath)
     }
+}
+
+@MainActor
+private final class MCReaderGestureProbe: ReaderViewController {
+    override func configure() { view.addSubview(controlsView) }
+    override func constrain() {}
+    override func observe() {}
 }

@@ -350,7 +350,6 @@ class ReaderViewController: BaseObservingViewController {
         navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.isToolbarHidden = true
         view.bringSubviewToFront(controlsView)
-        (navigationController as? ReaderNavigationController)?.prioritizeReaderBackGesture()
 
         disableSwipeGestures()
         configureNavigationBarDismissTapGesture(enabled: isDictionarySingleTapLookupActiveForCurrentChapter)
@@ -708,7 +707,6 @@ extension ReaderViewController {
         updateAutoScrollButton()
         disableSwipeGestures()
         view.bringSubviewToFront(controlsView)
-        (navigationController as? ReaderNavigationController)?.prioritizeReaderBackGesture()
         updateTextThemeOverride()
     }
 
@@ -1467,6 +1465,9 @@ extension ReaderViewController {
     func hideBars() { setReaderControlsVisible(false) }
 
     func setReaderControlsVisible(_ visible: Bool, animated: Bool = true) {
+        // Swipe-to-hide is requested on every drag end. Reapplying the same state
+        // used to rebuild constraints and animate a layout pass during deceleration.
+        guard visible != readerControlsVisible else { return }
         readerControlsVisible = visible
         statusBarHidden = !visible
         navigationController?.setNavigationBarHidden(true, animated: false)

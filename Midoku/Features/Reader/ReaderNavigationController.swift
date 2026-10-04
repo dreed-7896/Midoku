@@ -26,36 +26,90 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
     override func viewDidLoad() {
         super.viewDidLoad()
         readerBackGesture.edges = .left
+        readerBackGesture.maximumNumberOfTouches = 1
+        readerBackGesture.cancelsTouchesInView = false
+        readerBackGesture.delaysTouchesBegan = false
+        readerBackGesture.delaysTouchesEnded = false
         readerBackGesture.delegate = self
         view.addGestureRecognizer(readerBackGesture)
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        prioritizeReaderBackGesture()
+    private var usesVerticalScrolling: Bool {
+        guard let reader = topViewController as? ReaderViewController else { return false }
+        // Paginated novels always turn horizontally, regardless of the manga preference.
+        if reader.reader is ReaderPagedTextViewController { return false }
+        return reader.reader is ReaderWebtoonViewController
+            || reader.reader is ReaderTextViewController
+            || [.webtoon, .continuous, .vertical].contains(reader.readingMode)
     }
 
-    func prioritizeReaderBackGesture() {
-        guard isViewLoaded, let reader = topViewController as? ReaderViewController, reader.isViewLoaded else { return }
-        func visit(_ view: UIView) {
-            for gesture in view.gestureRecognizers ?? [] where gesture is UIPanGestureRecognizer && gesture !== readerBackGesture {
-                gesture.require(toFail: readerBackGesture)
-            }
-            for child in view.subviews { visit(child) }
+    private func isReaderScrollPan(_ gesture: UIGestureRecognizer) -> Bool {
+        guard let reader = topViewController as? ReaderViewController,
+              reader.isViewLoaded,
+              let scrollView = gesture.view as? UIScrollView,
+              gesture === scrollView.panGestureRecognizer else { return false }
+        return scrollView.isDescendant(of: reader.view)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // Vertical pans must start immediately, including drags near the left edge.
+        // The back gesture independently rejects vertical motion in shouldBegin.
+        gestureRecognizer === readerBackGesture
+            && usesVerticalScrolling
+            && isReaderScrollPan(otherGestureRecognizer)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // Only horizontal page turns compete with a horizontal back swipe. Resolve
+        // that conflict per gesture; never install permanent waits on every pan.
+        gestureRecognizer === readerBackGesture
+            && !usesVerticalScrolling
+            && isReaderScrollPan(otherGestureRecognizer)
+    }
+
+    func acceptsReaderBackTouch(at point: CGPoint, touchedView: UIView?) -> Bool {
+        guard point.x >= 0, point.x <= 32,
+              let reader = topViewController as? ReaderViewController,
+              presentedViewController == nil, reader.presentedViewController == nil else { return false }
+        if let webtoon = reader.reader as? ReaderWebtoonViewController,
+           webtoon.scrollView.zoomScale > webtoon.scrollView.minimumZoomScale + 0.01 {
+            return false
         }
-        visit(reader.view)
+        var candidate = touchedView
+        while let current = candidate {
+            if current is UIControl || current === reader.controlsView { return false }
+            if let scroll = current as? UIScrollView,
+               scroll.zoomScale > scroll.minimumZoomScale + 0.01 { return false }
+            candidate = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === readerBackGesture else { return true }
+        return acceptsReaderBackTouch(at: touch.location(in: view), touchedView: touch.view)
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === readerBackGesture, presentedViewController == nil,
               let reader = topViewController as? ReaderViewController,
               reader.presentedViewController == nil else { return false }
-        let velocity = readerBackGesture.velocity(in: view)
-        return velocity.x > 0 && velocity.x > abs(velocity.y)
+        return Self.shouldBeginReaderBack(velocity: readerBackGesture.velocity(in: view))
+    }
+
+    static func shouldBeginReaderBack(velocity: CGPoint) -> Bool {
+        velocity.x > 0 && velocity.x > abs(velocity.y) * 1.5
     }
 
     static func shouldCloseReader(translation: CGPoint, velocity: CGPoint, width: CGFloat) -> Bool {
-        translation.x > max(80, width * 0.2) || (translation.x > 16 && velocity.x > 600)
+        guard translation.x > abs(translation.y) else { return false }
+        return translation.x > max(80, width * 0.2) || (translation.x > 16 && velocity.x > 600)
     }
 
     @objc private func handleReaderBack(_ gesture: UIScreenEdgePanGestureRecognizer) {
