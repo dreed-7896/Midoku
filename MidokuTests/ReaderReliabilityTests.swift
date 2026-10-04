@@ -48,9 +48,11 @@ struct ReaderReliabilityTests {
             ).height
             panel.frame = CGRect(x: 0, y: 0, width: width, height: height)
             panel.layoutIfNeeded()
-            let controls: [UIView] = [panel.webButton, panel.chaptersButton, panel.autoScrollSwitch, panel.settingsButton]
+            let controls: [UIView] = [panel.closeButton, panel.webButton, panel.chaptersButton, panel.autoScrollButton, panel.settingsButton]
             let frames = controls.map { $0.convert($0.bounds, to: panel) }
             let progressFrame = panel.toolbar.convert(panel.toolbar.bounds, to: panel)
+            #expect(height <= 120)
+            #expect(frames.allSatisfy { $0.minY == frames.first?.minY })
             for frame in frames {
                 #expect(frame.minY >= progressFrame.maxY)
                 #expect(frame.minX >= 0 && frame.maxX <= width)
@@ -59,6 +61,42 @@ struct ReaderReliabilityTests {
                 #expect(frames[index - 1].maxX <= frames[index].minX)
             }
         }
+    }
+
+    @Test func scrollingLongChaptersReusesGeometryAndFindsOnlyVisiblePages() {
+        let layout = MCMeasuredWebtoonLayout()
+        let dataSource = MCWebtoonLayoutDataSource()
+        let collection = UICollectionView(frame: CGRect(x: 0, y: 0, width: 320, height: 600), collectionViewLayout: layout)
+        collection.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "page")
+        collection.dataSource = dataSource
+        collection.reloadData()
+        collection.layoutIfNeeded()
+        layout.prepare()
+        let initialMeasurements = layout.measurements
+        #expect(initialMeasurements >= 1_000)
+
+        for page in stride(from: 10, through: 900, by: 10) {
+            let viewport = CGRect(x: 0, y: CGFloat(page * 100), width: 320, height: 600)
+            #expect(!layout.shouldInvalidateLayout(forBoundsChange: viewport))
+            layout.prepare()
+            let rect = viewport.insetBy(dx: 0, dy: 1)
+            let attributes = layout.layoutAttributesForElements(in: rect) ?? []
+            #expect(attributes.map(\.indexPath.item) == Array(page..<(page + 6)))
+            #expect(layout.indexPath(at: CGPoint(x: 10, y: rect.minY + 50))?.item == page)
+        }
+        #expect(layout.measurements == initialMeasurements)
+
+        // Loaded image dimensions and zoom must still invalidate cached geometry.
+        layout.pageHeight = 200
+        layout.invalidateLayout()
+        layout.prepare()
+        #expect(layout.collectionViewContentSize.height == 200_000)
+        #expect(layout.indexPath(at: CGPoint(x: 10, y: 250))?.item == 1)
+        layout.setScale(2)
+        layout.prepare()
+        #expect(layout.collectionViewContentSize.height == 400_000)
+        #expect(layout.indexPath(at: CGPoint(x: 10, y: 450))?.item == 1)
+        #expect(layout.shouldInvalidateLayout(forBoundsChange: CGRect(x: 0, y: 0, width: 600, height: 320)))
     }
 
     @Test func completedChaptersRestartWhileUnfinishedChaptersResume() throws {
@@ -175,4 +213,22 @@ private final class MCReaderStartProbe: UIViewController, ReaderReaderDelegate {
     func sliderMoved(value: CGFloat) {}
     func sliderStopped(value: CGFloat) {}
     func setChapter(_ chapter: AidokuRunner.Chapter, startPage: Int) { self.startPage = startPage }
+}
+
+@MainActor
+private final class MCMeasuredWebtoonLayout: VerticalContentOffsetPreservingLayout {
+    var measurements = 0
+    var pageHeight: CGFloat = 100
+    override func getHeight(for indexPath: IndexPath) -> CGFloat {
+        measurements += 1
+        return pageHeight
+    }
+}
+
+@MainActor
+private final class MCWebtoonLayoutDataSource: NSObject, UICollectionViewDataSource {
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { 1_000 }
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        collectionView.dequeueReusableCell(withReuseIdentifier: "page", for: indexPath)
+    }
 }

@@ -16,6 +16,7 @@ class ZoomableCollectionView: ASDisplayNode {
     let scrollNode = ASScrollNode()
     let layout: UICollectionViewLayout
     private let dummyZoomView: UIView
+    private var contentSizeUpdateScheduled = false
 
     var onZoomScaleChanged: ((CGFloat) -> Void)?
     var doubleTapEnabled: Bool {
@@ -66,15 +67,34 @@ class ZoomableCollectionView: ASDisplayNode {
     override func layoutDidFinish() {
         super.layoutDidFinish()
         Task { @MainActor in
-            adjustContentSize()
+            scheduleContentSizeUpdate()
+        }
+    }
+
+    @MainActor
+    func scheduleContentSizeUpdate() {
+        guard !contentSizeUpdateScheduled else { return }
+        contentSizeUpdateScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.contentSizeUpdateScheduled = false
+            self.collectionNode.view.layoutIfNeeded()
+            let offset = self.collectionNode.contentOffset
+            self.adjustContentSize()
+            if self.scrollNode.view.contentOffset != offset {
+                self.scrollNode.view.contentOffset = offset
+            }
         }
     }
 
     @MainActor
     func adjustContentSize() {
         let size = layout.collectionViewContentSize
-        scrollNode.view.contentSize = size
-        dummyZoomView.frame = CGRect(origin: .zero, size: size)
+        if scrollNode.view.contentSize != size {
+            scrollNode.view.contentSize = size
+        }
+        let frame = CGRect(origin: .zero, size: size)
+        if dummyZoomView.frame != frame { dummyZoomView.frame = frame }
     }
 
     private var allowNextTouchPassThrough = false
@@ -144,7 +164,9 @@ class ZoomableCollectionView: ASDisplayNode {
 extension ZoomableCollectionView: UIScrollViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        collectionNode.contentOffset = scrollView.contentOffset
+        if collectionNode.contentOffset != scrollView.contentOffset {
+            collectionNode.contentOffset = scrollView.contentOffset
+        }
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {

@@ -201,9 +201,7 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
         }
         Task { @MainActor [weak self] in
             guard let delegate = self?.delegate else { return }
-            delegate.collectionNode.view.layoutIfNeeded()
-            delegate.zoomView.adjustContentSize()
-            delegate.scrollView.contentOffset = delegate.collectionNode.contentOffset
+            delegate.zoomView.scheduleContentSizeUpdate()
         }
     }
 

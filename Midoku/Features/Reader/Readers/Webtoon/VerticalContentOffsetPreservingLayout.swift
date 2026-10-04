@@ -33,6 +33,24 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
     }
 
     private var currentAttributes: [IndexPath: UICollectionViewLayoutAttributes] = [:]
+    private var orderedAttributes: [UICollectionViewLayoutAttributes] = []
+    private var needsRebuild = true
+    private var preparedSize = CGSize.zero
+
+    override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+        // Moving the viewport doesn't change any page geometry.
+        newBounds.size != collectionView?.bounds.size
+    }
+
+    override func invalidateLayout() {
+        needsRebuild = true
+        super.invalidateLayout()
+    }
+
+    override func invalidateLayout(with context: UICollectionViewLayoutInvalidationContext) {
+        needsRebuild = true
+        super.invalidateLayout(with: context)
+    }
 
     override init() {
         super.init()
@@ -49,9 +67,14 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
 
     override func prepare() {
         guard let collectionView else { return }
+        let boundsSize = collectionView.bounds.size
+        guard needsRebuild || preparedSize != boundsSize else { return }
+        needsRebuild = false
+        preparedSize = boundsSize
 
-        // calculate collection view size
-        currentAttributes = [:]
+        // Rebuild only after a page size, chapter, viewport size or zoom change.
+        currentAttributes.removeAll(keepingCapacity: true)
+        orderedAttributes.removeAll(keepingCapacity: true)
 
         var origin: CGFloat = 0
         let width = collectionView.bounds.size.width
@@ -64,6 +87,7 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
                 let size = CGSize(width: width, height: getHeight(for: indexPath))
                 attributes.frame = CGRect(origin: CGPoint(x: 0, y: origin), size: size)
                 currentAttributes[indexPath] = attributes
+                orderedAttributes.append(attributes)
 
                 origin += attributes.frame.size.height + minimumLineSpacing
             }
@@ -142,12 +166,40 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
     }
 
     override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
-        var attributes: [UICollectionViewLayoutAttributes] = []
-        for item in currentAttributes where rect.intersects(item.value.frame) {
-            attributes.append(item.value)
+        // Pages are vertically ordered. Binary search skips all preceding chapters
+        // instead of scanning the entire reader on every display/preload query.
+        var index = firstAttributeIndex(endingAfter: rect.minY)
+        var result: [UICollectionViewLayoutAttributes] = []
+        while index < orderedAttributes.count {
+            let attributes = orderedAttributes[index]
+            if attributes.frame.minY > rect.maxY { break }
+            if attributes.frame.intersects(rect) { result.append(attributes) }
+            index += 1
         }
-        return attributes
+        return result
     }
+
+    func indexPath(at point: CGPoint) -> IndexPath? {
+        let index = firstAttributeIndex(endingAfter: point.y)
+        guard index < orderedAttributes.count else { return nil }
+        let attributes = orderedAttributes[index]
+        return attributes.frame.contains(point) ? attributes.indexPath : nil
+    }
+
+    private func firstAttributeIndex(endingAfter y: CGFloat) -> Int {
+        var lower = 0
+        var upper = orderedAttributes.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if orderedAttributes[middle].frame.maxY <= y {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
+    }
+
 }
 
 // MARK: - Zoom Support
@@ -157,6 +209,8 @@ extension VerticalContentOffsetPreservingLayout: @MainActor ZoomableLayoutProtoc
     }
 
     func setScale(_ scale: CGFloat) {
+        guard self.scale != scale else { return }
         self.scale = scale
+        invalidateLayout()
     }
 }

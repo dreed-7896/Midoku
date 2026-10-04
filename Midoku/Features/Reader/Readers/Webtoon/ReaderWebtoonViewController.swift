@@ -191,16 +191,21 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
             case .bottom: additional = collectionNode.bounds.height
         }
         let currentPoint = CGPoint(x: collectionNode.contentOffset.x, y: collectionNode.contentOffset.y + additional)
-        return collectionNode.indexPathForItem(at: currentPoint)
+        let layout = collectionNode.collectionViewLayout as? VerticalContentOffsetPreservingLayout
+        return layout?.indexPath(at: currentPoint)
     }
 
     func getCurrentPage() -> Int {
+        currentPage(at: getCurrentPagePath())
+    }
+
+    private func currentPage(at path: IndexPath?) -> Int {
         guard
             let chapter = chapter,
             let chapterIndex = chapters.firstIndex(of: chapter),
             let currentPages = pages[safe: chapterIndex]
         else { return 0 }
-        let pageRow = getCurrentPagePath()?.row ?? 0
+        let pageRow = path?.row ?? 0
         let hasStartInfo = currentPages.first?.type != .imagePage
         return min(
             max(pageRow + (hasStartInfo ? 0 : 1), 0),
@@ -339,6 +344,9 @@ extension ReaderWebtoonViewController {
 
     // Update current page when scrolling
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // The outer scroll view drives the collection. Its forwarded offset also
+        // invokes the collection delegate; don't process the same frame twice.
+        guard scrollView === self.scrollView else { return }
         super.scrollViewDidScroll(scrollView)
 
         isScrolling = true
@@ -368,9 +376,9 @@ extension ReaderWebtoonViewController {
         }
 
         // update page number
-        let page = getCurrentPage()
+        let page = currentPage(at: pagePath)
         previousPage = page
-        let position = getCurrentPagePath().flatMap { path -> Double? in
+        let position = pagePath.flatMap { path -> Double? in
             guard let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: path)?.frame,
                   frame.height > 0 else { return nil }
             return Double((collectionNode.contentOffset.y - frame.minY) / frame.height)
@@ -903,7 +911,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
 
     func sliderStopped(value: CGFloat) {
         isSliding = false
-        scrollViewDidScroll(collectionNode.view)
+        scrollViewDidScroll(scrollView)
     }
 
     func setChapter(_ chapter: AidokuRunner.Chapter, startPage: Int) {

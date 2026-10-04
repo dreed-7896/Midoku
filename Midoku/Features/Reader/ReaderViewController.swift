@@ -92,43 +92,6 @@ class ReaderViewController: BaseObservingViewController {
     private let doubleSqueezeInterval: TimeInterval = 0.3
     private let longSqueezeThreshold: TimeInterval = 0.5
 
-    private lazy var autoScrollButton: UIButton = {
-        var configuration = UIButton.Configuration.filled()
-        if #available(iOS 26.0, *) {
-            configuration = .glass()
-        } else {
-            configuration = .filled()
-            configuration.baseBackgroundColor = .secondarySystemBackground
-            configuration.baseForegroundColor = .label
-        }
-        configuration.cornerStyle = .capsule
-        configuration.image = UIImage(systemName: "play.fill")
-        configuration.contentInsets = .init(top: 10, leading: 10, bottom: 10, trailing: 10)
-
-        let button = UIButton(configuration: configuration)
-        button.addTarget(self, action: #selector(toggleAutoScroll), for: .touchUpInside)
-        button.addTarget(self, action: #selector(autoScrollButtonTouchDown), for: .touchDown)
-        button.addTarget(
-            self,
-            action: #selector(autoScrollButtonTouchEnded),
-            for: [.touchUpInside, .touchUpOutside, .touchCancel]
-        )
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.isHidden = true
-        return button
-    }()
-    private var isInteractingWithAutoScrollButton = false
-    private lazy var autoScrollButtonLeadingConstraint =
-        autoScrollButton.leadingAnchor.constraint(
-            equalTo: view.safeAreaLayoutGuide.leadingAnchor,
-            constant: 16
-        )
-    private lazy var autoScrollButtonTrailingConstraint =
-        autoScrollButton.trailingAnchor.constraint(
-            equalTo: view.safeAreaLayoutGuide.trailingAnchor,
-            constant: -16
-        )
-
     private lazy var descriptionButtonController: UIHostingController<ReaderPageDescriptionButtonView> = {
         let buttonView = ReaderPageDescriptionButtonView(source: source, pages: [])
         let hostingController = UIHostingController(rootView: buttonView)
@@ -143,19 +106,11 @@ class ReaderViewController: BaseObservingViewController {
             equalTo: view.safeAreaLayoutGuide.trailingAnchor,
             constant: -16
         )
-    private lazy var descriptionTrailingToAutoScrollConstraint =
-        descriptionButtonController.view.trailingAnchor.constraint(
-            equalTo: autoScrollButton.leadingAnchor,
-            constant: -16
-        )
-
     private lazy var accessoryBottomWithControls = [
-        descriptionButtonController.view.bottomAnchor.constraint(equalTo: controlsView.topAnchor, constant: -8),
-        autoScrollButton.bottomAnchor.constraint(equalTo: controlsView.topAnchor, constant: -8)
+        descriptionButtonController.view.bottomAnchor.constraint(equalTo: controlsView.topAnchor, constant: -8)
     ]
     private lazy var accessoryBottomFullscreen = [
-        descriptionButtonController.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-        autoScrollButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+        descriptionButtonController.view.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
     ]
 
     private var barToggleTapGesture: UITapGestureRecognizer?
@@ -215,7 +170,7 @@ class ReaderViewController: BaseObservingViewController {
         controlsView.chaptersButton.addTarget(self, action: #selector(openChapterList), for: .touchUpInside)
         controlsView.settingsButton.addTarget(self, action: #selector(openReaderSettings), for: .touchUpInside)
         controlsView.webButton.addTarget(self, action: #selector(openWebView), for: .touchUpInside)
-        controlsView.autoScrollSwitch.addTarget(self, action: #selector(autoScrollSwitchChanged), for: .valueChanged)
+        controlsView.autoScrollButton.addTarget(self, action: #selector(toggleAutoScroll), for: .touchUpInside)
         loadNavbarTitle()
 
         toolbarView.sliderView.addTarget(self, action: #selector(sliderMoved(_:)), for: .valueChanged)
@@ -224,7 +179,6 @@ class ReaderViewController: BaseObservingViewController {
         toolbarView.nextChapterButton.addTarget(self, action: #selector(nextChapter), for: .touchUpInside)
         updateChapterButtons()
         add(child: descriptionButtonController)
-        view.addSubview(autoScrollButton)
         controlsView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controlsView)
 
@@ -285,6 +239,7 @@ class ReaderViewController: BaseObservingViewController {
             activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
+        descriptionTrailingConstraint.isActive = true
         NSLayoutConstraint.activate(accessoryBottomWithControls)
 
         updateAutoScrollButton()
@@ -382,11 +337,7 @@ class ReaderViewController: BaseObservingViewController {
         addObserver(forName: "Reader.autoScroll") { [weak self] _ in
             self?.updateAutoScrollButton()
         }
-        addObserver(forName: AppSettings.reader.autoScrollPosition.key) { [weak self] _ in
-            guard let self else { return }
-            let visible = self.reader is ReaderWebtoonViewController && UserDefaults.standard.bool(forKey: "Reader.autoScroll")
-            self.updateAutoScrollButtonPosition(visible: visible, animated: true)
-        }
+
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -568,7 +519,6 @@ extension ReaderViewController {
             }
 
         navigationItem.setTitle(upper: volume, lower: title)
-        controlsView.titleLabel.text = [volume, title].compactMap { $0 }.joined(separator: " · ")
         controlsView.webButton.isEnabled = chapter.url != nil
         // re-apply theme title colors, since setTitle recreates the title view
         updateTextThemeOverride()
@@ -819,108 +769,31 @@ extension ReaderViewController {
 
 // MARK: - Auto Scroll
 extension ReaderViewController {
-    @objc private func autoScrollSwitchChanged() {
-        guard let webtoonReader = reader as? ReaderWebtoonViewController else { return }
-        if controlsView.autoScrollSwitch.isOn {
-            // Enable the fullscreen shortcut too, even when disabled in settings.
-            UserDefaults.standard.set(true, forKey: "Reader.autoScroll")
-            updateAutoScrollButton()
-            if !webtoonReader.isAutoScrolling { webtoonReader.toggleAutoScroll() }
-        } else {
-            webtoonReader.stopAutoScroll()
-        }
-        updateAutoScrollButtonIcon()
-    }
-
     @objc private func toggleAutoScroll() {
         guard let webtoonReader = reader as? ReaderWebtoonViewController else { return }
+        if !webtoonReader.isAutoScrolling {
+            UserDefaults.standard.set(true, forKey: "Reader.autoScroll")
+        }
         webtoonReader.toggleAutoScroll()
+        updateAutoScrollButtonIcon()
     }
 
     private func updateAutoScrollButton() {
         let webtoonReader = reader as? ReaderWebtoonViewController
-        let visible = webtoonReader != nil && UserDefaults.standard.bool(forKey: "Reader.autoScroll")
-
-        if !visible {
+        if !UserDefaults.standard.bool(forKey: "Reader.autoScroll") {
             webtoonReader?.stopAutoScroll()
         }
-
         webtoonReader?.onAutoScrollStateChange = { [weak self] _ in
             self?.updateAutoScrollButtonIcon()
         }
-        webtoonReader?.onContentScrollingChange = { [weak self] isScrolling in
-            self?.setAutoScrollButtonDimmed(isScrolling)
-        }
-
-        controlsView.autoScrollSwitch.isEnabled = webtoonReader != nil
-        autoScrollButton.isHidden = !visible
-        updateAutoScrollButtonPosition(visible: visible)
+        controlsView.autoScrollButton.isEnabled = webtoonReader != nil
         updateAutoScrollButtonIcon()
-    }
-
-    private func updateAutoScrollButtonPosition(
-        visible: Bool,
-        animated: Bool = false
-    ) {
-        let position = AppSettings.reader.autoScrollPosition.get()
-        let isRightAligned = position == .right
-
-        let applyPosition = {
-            self.autoScrollButtonLeadingConstraint.isActive = !isRightAligned
-            self.autoScrollButtonTrailingConstraint.isActive = isRightAligned
-
-            // when auto scroll button is on the right, the description button needs to be shifted to the left of it
-            self.descriptionTrailingConstraint.isActive = !visible || !isRightAligned
-            self.descriptionTrailingToAutoScrollConstraint.isActive = visible && isRightAligned
-        }
-
-        guard animated else {
-            applyPosition()
-            return
-        }
-
-        view.layoutIfNeeded()
-        applyPosition()
-
-        UIView.animate(
-            withDuration: 0.2,
-            delay: 0,
-            options: [.beginFromCurrentState, .curveEaseInOut]
-        ) {
-            self.view.layoutIfNeeded()
-        }
     }
 
     private func updateAutoScrollButtonIcon() {
         let isAutoScrolling = (reader as? ReaderWebtoonViewController)?.isAutoScrolling == true
-        autoScrollButton.configuration?.image = UIImage(systemName: isAutoScrolling ? "pause.fill" : "play.fill")
-        autoScrollButton.accessibilityLabel = isAutoScrolling ? "Pause auto scroll" : "Start auto scroll"
-        controlsView.autoScrollSwitch.setOn(isAutoScrolling, animated: false)
-    }
-
-    @objc private func autoScrollButtonTouchDown() {
-        isInteractingWithAutoScrollButton = true
-        setAutoScrollButtonDimmed(false)
-    }
-
-    @objc private func autoScrollButtonTouchEnded() {
-        isInteractingWithAutoScrollButton = false
-        let isScrolling = (reader as? ReaderWebtoonViewController)?.isContentScrolling ?? false
-        setAutoScrollButtonDimmed(isScrolling)
-    }
-
-    private func setAutoScrollButtonDimmed(_ dimmed: Bool) {
-        let alpha: CGFloat = dimmed && !isInteractingWithAutoScrollButton ? 0.5 : 1
-
-        guard autoScrollButton.alpha != alpha else { return }
-
-        UIView.animate(
-            withDuration: 0.2,
-            delay: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]
-        ) {
-            self.autoScrollButton.alpha = alpha
-        }
+        controlsView.autoScrollButton.configuration?.image = UIImage(systemName: isAutoScrolling ? "pause.fill" : "play.fill")
+        controlsView.autoScrollButton.accessibilityLabel = isAutoScrolling ? "Pause auto scroll" : "Start auto scroll"
     }
 }
 

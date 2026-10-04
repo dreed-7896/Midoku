@@ -437,7 +437,6 @@ struct CollectionIntegrationTests {
     @Test func readerActionsStayBelowProgressAtPhoneWidths() {
         for width in [288.0, 370.0, 600.0] {
             let controls = ReaderControlsView()
-            controls.titleLabel.text = "Chapter 21"
             controls.toolbar.totalPages = 25
             controls.toolbar.currentPage = 1
             let host = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 800))
@@ -451,13 +450,10 @@ struct CollectionIntegrationTests {
             host.layoutIfNeeded()
             let slider = controls.toolbar.sliderView
             let sliderFrame = slider.convert(slider.bounds, to: controls)
-            for button in [controls.closeButton, controls.chaptersButton, controls.settingsButton, controls.webButton] {
+            for button in [controls.closeButton, controls.webButton, controls.chaptersButton, controls.autoScrollButton, controls.settingsButton] {
                 let frame = button.convert(button.bounds, to: controls)
-                if button === controls.closeButton {
-                    #expect(frame.maxY <= sliderFrame.minY)
-                } else {
-                    #expect(frame.minY >= sliderFrame.maxY)
-                }
+                #expect(frame.minY >= sliderFrame.maxY)
+                #expect(button.configuration?.title == nil)
                 #expect(frame.height >= 44 && frame.width >= 44)
                 #expect(frame.maxX <= controls.bounds.maxX)
             }
