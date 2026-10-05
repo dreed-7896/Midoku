@@ -418,6 +418,10 @@ struct MCCollectionRootView: View {
             }
         }
         .introspect(.navigationStack, on: .iOS(.v26, .v27)) { navigation in
+            func containsReader(_ controller: UIViewController) -> Bool {
+                controller is ReaderViewController || controller.children.contains(where: containsReader)
+            }
+            guard navigation.topViewController.map(containsReader) != true else { return }
             navigation.interactivePopGestureRecognizer?.isEnabled = true
             navigation.interactiveContentPopGestureRecognizer?.isEnabled = true
         }

@@ -133,6 +133,7 @@ class ReaderViewController: BaseObservingViewController {
     private var previousContentPopEnabled = true
     private var previousInterfaceStyle = UIUserInterfaceStyle.unspecified
     private var capturedNavigationState = false
+    private var hasExited = false
 
     weak var reader: ReaderReaderDelegate?
 
@@ -483,6 +484,8 @@ class ReaderViewController: BaseObservingViewController {
             if navigation.viewControllers.contains(where: { $0 === current }) { return }
             ancestor = current.parent
         }
+        hasExited = true
+        chapterLoadTask?.cancel()
         // Restore the library's gesture and appearance settings after a completed
         // pop, never during a cancelled back swipe or a reader sheet presentation.
         if navigation.interactivePopGestureRecognizer?.delegate === self {
@@ -632,7 +635,7 @@ extension ReaderViewController {
             let (_, historyPage) = await CoreDataManager.shared.container.performBackgroundTask { context in
                 CoreDataManager.shared.getProgress(chapterId: identifier, context: context)
             }
-            guard let self, !Task.isCancelled, chapter == requestedChapter else { return }
+            guard let self, !hasExited, !Task.isCancelled, chapter == requestedChapter else { return }
             let local = ReaderProgressStore.position(for: identifier)
             currentPage = max(1, explicitPage ?? local?.page ?? historyPage ?? 1)
             currentPosition = explicitPage == nil ? local?.scrollPosition : nil
@@ -725,6 +728,8 @@ extension ReaderViewController {
     }
 
     @objc func close() {
+        hasExited = true
+        chapterLoadTask?.cancel()
         progressSaveTask?.cancel()
         progressSaveTask = nil
         ReaderProgressStore.flush()
@@ -1098,7 +1103,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     }
 
     private func setCurrentPages(_ pages: ClosedRange<Int>, position: Double? = nil) {
-        guard let totalPages = toolbarView.totalPages else { return }
+        guard !hasExited, let totalPages = toolbarView.totalPages, totalPages > 0 else { return }
 
         let page = max(1, min(pages.lowerBound, totalPages))
         let changedPage = displayedPages != pages || displayedChapterKey != chapter.key
@@ -1164,6 +1169,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     }
 
     func setPages(_ pages: [Page]) {
+        guard !hasExited else { return }
         // If already in a text reader with text pages, just update toolbar - don't trigger any switches
         if
             reader is ReaderPagedTextViewController || reader is ReaderTextViewController,
