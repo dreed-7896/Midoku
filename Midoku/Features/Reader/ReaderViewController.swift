@@ -10,6 +10,69 @@ import SafariServices
 import SwiftUI
 import UIKit
 
+/// The lazy grid creates image views only as their rows enter the sheet. Each
+/// thumbnail uses the reader's page loader and shared Nuke pipeline, so a page
+/// loaded here is available from the same cache when the reader displays it.
+private struct ReaderPanelGrid: View {
+    let pages: [Page]
+    let temporaryPageStore: ReaderTemporaryPageStore
+    let select: (Int) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                    ForEach(pages.indices, id: \.self) { index in
+                        Button { select(index + 1) } label: {
+                            VStack(spacing: 4) {
+                                ReaderPanelThumbnail(page: pages[index], temporaryPageStore: temporaryPageStore)
+                                    .frame(height: 150).clipped()
+                                    .background(Color(uiColor: .secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text("\(index + 1)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                }.padding(12)
+            }
+            .navigationTitle("View panels")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+private struct ReaderPanelThumbnail: UIViewRepresentable {
+    let page: Page
+    let temporaryPageStore: ReaderTemporaryPageStore
+
+    final class Coordinator {
+        var task: Task<Void, Never>?
+        var pageKey: String?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> ReaderPageView {
+        ReaderPageView(temporaryPageStore: temporaryPageStore)
+    }
+
+    func updateUIView(_ view: ReaderPageView, context: Context) {
+        let key = "\(page.chapterId):\(page.index)"
+        guard context.coordinator.pageKey != key else { return }
+        context.coordinator.task?.cancel()
+        view.clearPage()
+        context.coordinator.pageKey = key
+        context.coordinator.task = Task {
+            _ = await view.setPage(page, sourceId: page.sourceId)
+        }
+    }
+
+    static func dismantleUIView(_ view: ReaderPageView, coordinator: Coordinator) {
+        coordinator.task?.cancel()
+        view.clearPage()
+    }
+}
+
 class ReaderViewController: BaseObservingViewController {
     enum Reader {
         case paged
@@ -60,6 +123,7 @@ class ReaderViewController: BaseObservingViewController {
     private var sessionReadPages: Set<Int> = []
     private var sessionStartDate: Date?
     private var sessionLastInteraction: Date?
+    var showPanelsOnOpen = false
 
     weak var reader: ReaderReaderDelegate?
 
@@ -168,6 +232,7 @@ class ReaderViewController: BaseObservingViewController {
         navigationController?.isToolbarHidden = true
         controlsView.closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
         controlsView.chaptersButton.addTarget(self, action: #selector(openChapterList), for: .touchUpInside)
+        controlsView.panelsButton.addTarget(self, action: #selector(openPanels), for: .touchUpInside)
         controlsView.settingsButton.addTarget(self, action: #selector(openReaderSettings), for: .touchUpInside)
         controlsView.webButton.addTarget(self, action: #selector(openWebView), for: .touchUpInside)
         controlsView.autoScrollButton.addTarget(self, action: #selector(toggleAutoScroll), for: .touchUpInside)
@@ -351,6 +416,11 @@ class ReaderViewController: BaseObservingViewController {
         navigationController?.isToolbarHidden = true
         view.bringSubviewToFront(controlsView)
 
+        if showPanelsOnOpen && !pages.isEmpty {
+            showPanelsOnOpen = false
+            openPanels()
+        }
+
         disableSwipeGestures()
         configureNavigationBarDismissTapGesture(enabled: isDictionarySingleTapLookupActiveForCurrentChapter)
 
@@ -386,9 +456,27 @@ class ReaderViewController: BaseObservingViewController {
 }
 
 extension ReaderViewController {
-    func disableSwipeGestures() {
-        let isVerticalReader = reader is ReaderWebtoonViewController || readingMode == .vertical
+    @objc func openPanels() {
+        guard !pages.isEmpty else { return }
+        (reader as? ReaderWebtoonViewController)?.stopAutoScroll()
+        let grid = ReaderPanelGrid(pages: pages, temporaryPageStore: temporaryPageStore) { [weak self] page in
+            guard let self else { return }
+            self.dismiss(animated: true) {
+                if let webtoon = self.reader as? ReaderWebtoonViewController {
+                    webtoon.jumpToPage(page)
+                } else if let paged = self.reader as? ReaderPagedViewController {
+                    paged.jumpToActualPage(page)
+                } else {
+                    self.reader?.setChapter(self.chapter, startPage: page)
+                }
+            }
+        }
+        let controller = UIHostingController(rootView: grid)
+        if let sheet = controller.sheetPresentationController { sheet.detents = [.medium(), .large()] }
+        present(controller, animated: true)
+    }
 
+    func disableSwipeGestures() {
         // the view with the target gesture recognizers changes based on if it was presented from uikit or swiftui
         let gestureRecognizers = (parent?.view.gestureRecognizers ?? []) + (parent?.view.superview?.superview?.gestureRecognizers ?? [])
 
@@ -398,8 +486,7 @@ extension ReaderViewController {
                     recognizer.isEnabled = false // The reader owns a left-edge gesture for every reading mode.
 
                 case "_UIContentSwipeDismissGestureRecognizer": // swipe down gesture
-                    recognizer.isEnabled = !isVerticalReader
-                    recognizer.delegate = self // ensure gesture only activates on swipe down, not swipe right
+                    recognizer.isEnabled = false
 
 //                case "_UITransformGestureRecognizer": // pinch gesture
 //                    recognizer.isEnabled = true
@@ -488,11 +575,11 @@ extension ReaderViewController {
             let (completed, startPage) = CoreDataManager.shared.getProgress(
                 chapterId: physicalIdentifier(chapter)
             )
-            if completed || collectionSequence?.route(chapter)?.initiallyRead == true {
-                // Zero means start fresh, including saved text/webtoon scroll offsets.
-                currentPage = 0
-            } else if let startPage, startPage > 0 {
+            if let startPage, startPage > 0 {
                 currentPage = startPage
+            } else if completed || collectionSequence?.route(chapter)?.initiallyRead == true {
+                // Only start fresh when there is no saved page for this physical chapter.
+                currentPage = 0
             } else {
                 currentPage = -1
             }
@@ -1031,6 +1118,11 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         self.pages = pages
         toolbarView.totalPages = pages.count
         activityIndicator.stopAnimating()
+        if showPanelsOnOpen && !pages.isEmpty && view.window != nil {
+            showPanelsOnOpen = false
+            // Present after the reader's current load/layout transaction finishes.
+            DispatchQueue.main.async { [weak self] in self?.openPanels() }
+        }
         if pages.isEmpty {
             // no pages, show error
             showLoadFailAlert()

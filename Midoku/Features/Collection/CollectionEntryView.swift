@@ -99,6 +99,9 @@ struct MCEntryView: View {
     @State private var editingChapter: MCID?
     @State private var resettingChapter: MCID?
     @State private var reader: MCReaderSheet?
+    @State private var showBookmarks = false
+    @State private var bookmarkedPanels: [MCPanelBookmark] = []
+    @State private var selectedBookmark: MCPanelBookmark?
     @State private var showReorder = false
     @State private var showStatusEditor = false
     @State private var didLongPressSave = false
@@ -215,26 +218,6 @@ struct MCEntryView: View {
                                     migrateEntry(entry)
                                 }
                             }
-                            Menu("Chapter layout", systemImage: "rectangle.split.1x2") {
-                                Button {
-                                    chapterGridOverride.wrappedValue = nil
-                                } label: {
-                                    if entry.chapterGridOverride == nil { Label("Use appearance setting", systemImage: "checkmark") }
-                                    else { Text("Use appearance setting") }
-                                }
-                                Button {
-                                    chapterGridOverride.wrappedValue = true
-                                } label: {
-                                    if entry.chapterGridOverride == true { Label("Grid", systemImage: "checkmark") }
-                                    else { Text("Grid") }
-                                }
-                                Button {
-                                    chapterGridOverride.wrappedValue = false
-                                } label: {
-                                    if entry.chapterGridOverride == false { Label("List", systemImage: "checkmark") }
-                                    else { Text("List") }
-                                }
-                            }
                             Button("Reset chapter thumbnails", systemImage: "arrow.counterclockwise") { confirmResetThumbnails = true }
                                 .disabled(entry.slots.isEmpty)
                             Button("Reorder chapters and titles", systemImage: "line.3.horizontal") { selecting = false; showReorder = true }
@@ -261,6 +244,44 @@ struct MCEntryView: View {
         .sheet(item: $migrationTarget) { MCEntryMigrationSheet(manga: $0.manga) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
         .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
+        .sheet(isPresented: $showBookmarks, onDismiss: {
+            if let bookmark = selectedBookmark { selectedBookmark = nil; openBookmark(bookmark) }
+        }) {
+            NavigationStack {
+                List {
+                    ForEach(bookmarkedPanels) { bookmark in
+                        Button {
+                            selectedBookmark = bookmark
+                            showBookmarks = false
+                        } label: {
+                            HStack(spacing: 12) {
+                                if let data = bookmark.preview, let image = UIImage(data: data) {
+                                    Image(uiImage: image).resizable().scaledToFit()
+                                        .frame(width: 64, height: 88).clipped()
+                                } else {
+                                    Image(systemName: "photo").frame(width: 64, height: 88)
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(bookmark.chapterTitle).font(.headline).lineLimit(2)
+                                    if let number = bookmark.chapterNumber {
+                                        Text("Chapter \(number.formatted()) · Panel \(bookmark.page)")
+                                            .font(.subheadline).foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Panel \(bookmark.page)").font(.subheadline).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }.buttonStyle(.plain)
+                    }.onDelete { offsets in
+                        for index in offsets { MCPanelBookmarks.remove(bookmarkedPanels[index].id) }
+                        bookmarkedPanels.remove(atOffsets: offsets)
+                    }
+                }
+                .overlay { if bookmarkedPanels.isEmpty { ContentUnavailableView("No bookmarked panels", systemImage: "bookmark") } }
+                .navigationTitle("Bookmarked panels")
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showBookmarks = false } } }
+            }
+        }
         .modifier(MCReaderPresentation(sheet: $reader))
         .confirmationDialog("Remove this entry from library?", isPresented: $confirmRemove) {
             if !store.library.descendantIDs(of: entryID).isEmpty {
@@ -413,6 +434,15 @@ struct MCEntryView: View {
                 Button { selecting.toggle(); selected.removeAll() } label: {
                     Image(systemName: selecting ? "checkmark.circle.fill" : "checkmark.circle").frame(width: 24, height: 24)
                 }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
+                Button {
+                    let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
+                    bookmarkedPanels = MCPanelBookmarks.forTitle(rootID.uuidString)
+                    showBookmarks = true
+                } label: { Image(systemName: "bookmark").frame(width: 24, height: 24) }
+                    .accessibilityLabel("View bookmarked panels")
+                Button { chapterGridOverride.wrappedValue = !grid } label: {
+                    Image(systemName: grid ? "list.bullet" : "square.grid.2x2").frame(width: 24, height: 24)
+                }.accessibilityLabel(grid ? "List view" : "Grid view")
                 Menu {
                     Picker("Sort chapters", selection: Binding(
                         get: { self.entry?.chapterSort ?? .custom },
@@ -553,6 +583,7 @@ struct MCEntryView: View {
         .contextMenu {
 
                 Button("Read chapter", systemImage: "book") { open(slot) }
+                Button("View panels", systemImage: "square.grid.3x3") { open(slot, showPanels: true) }
                 if let url = chapterWebURL(slot) {
                     Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
                 }
@@ -660,8 +691,19 @@ struct MCEntryView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func open(_ slot: MCChapterSlot) {
-        do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: entryID, slotID: slot.id)) }
+    private func open(_ slot: MCChapterSlot, startPage: Int? = nil, showPanels: Bool = false) {
+        do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: entryID, slotID: slot.id),
+                                    startPage: startPage, showPanels: showPanels) }
+        catch { store.error = error.localizedDescription }
+    }
+
+    private func openBookmark(_ bookmark: MCPanelBookmark) {
+        let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
+        guard let slotID = bookmark.slotID,
+              store.library.flattenedChapters(entryID: rootID).contains(where: { $0.slot.id == slotID })
+        else { return }
+        do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: rootID, slotID: slotID),
+                                    startPage: bookmark.page) }
         catch { store.error = error.localizedDescription }
     }
     private func resetChapterThumbnails(slotIDs: Set<UUID>? = nil) {

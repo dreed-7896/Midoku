@@ -424,6 +424,11 @@ extension ReaderPagedViewController {
         }
     }
 
+    func jumpToActualPage(_ page: Int) {
+        guard displayPageCount > 0 else { return }
+        move(toPage: firstDisplayPage(forActual: max(1, min(page, viewModel.pages.count))), animated: false)
+    }
+
     func loadPage(at index: Int) {
         guard index > 0, index <= displayPageCount else { return }
 
@@ -1275,8 +1280,7 @@ extension ReaderPagedViewController: UIContextMenuInteractionDelegate {
     ) -> UIContextMenuConfiguration? {
         guard
             let pageView = interaction.view as? UIImageView,
-            pageView.image != nil,
-            !AppSettings.dictionary.isReaderQuickActionsDisabled(language: pageLanguage(for: pageView))
+            pageView.image != nil
         else {
             return nil
         }
@@ -1330,7 +1334,14 @@ extension ReaderPagedViewController: UIContextMenuInteractionDelegate {
                 }, at: 0)
             }
             if let image = pageView.image,
-               let page = self.pageViewControllers.first(where: { $0.pageView?.imageView == pageView })?.page {
+               let index = self.pageViewControllers.firstIndex(where: { $0.pageView?.imageView == pageView }),
+               let page = self.pageViewControllers[index].page {
+                if page.type == .imagePage {
+                    if let bookmark = self.delegate?.bookmarkPanelAction(image: image, chapterKey: page.chapterId,
+                                                       page: self.actualPageIndex(from: self.pageIndex(from: index))) {
+                        actions.insert(bookmark, at: 0)
+                    }
+                }
                 actions += self.delegate?.collectionCoverActions(
                     image: image,
                     chapterKey: page.chapterId,

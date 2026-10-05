@@ -57,6 +57,7 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
 
     // Stores the last calculated page number
     private var previousPage = 0
+    private var lastPositionUpdate = CFTimeInterval(0)
 
     private var autoScrollDisplayLink: CADisplayLink?
     private var autoScrollLastTimestamp: CFTimeInterval?
@@ -378,12 +379,30 @@ extension ReaderWebtoonViewController {
         // update page number
         let page = currentPage(at: pagePath)
         previousPage = page
+        // The scroll view emits several callbacks per display frame. Page changes
+        // must be immediate, while the fractional offset only needs a few samples
+        // per second for restoring the exact webtoon position.
+        let now = CACurrentMediaTime()
+        guard page != lastReportedPage || now - lastPositionUpdate >= 0.1 else { return }
+        lastReportedPage = page
+        lastPositionUpdate = now
         let position = pagePath.flatMap { path -> Double? in
             guard let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: path)?.frame,
                   frame.height > 0 else { return nil }
             return Double((collectionNode.contentOffset.y - frame.minY) / frame.height)
         }
         delegate?.setCurrentPage(page, position: position)
+    }
+
+    private var lastReportedPage = -1
+
+    func jumpToPage(_ page: Int) {
+        guard let chapter, let section = chapters.firstIndex(of: chapter),
+              let chapterPages = pages[safe: section], chapterPages.count > 2 else { return }
+        let row = max(1, min(page, chapterPages.count - 2))
+        collectionNode.scrollToItem(at: IndexPath(row: row, section: section), at: .top, animated: false)
+        scrollView.contentOffset = collectionNode.contentOffset
+        scrollViewDidScroll(scrollView)
     }
 
     // disable slider movement while zooming
@@ -426,8 +445,7 @@ extension ReaderWebtoonViewController: UIContextMenuInteractionDelegate {
             case let point = interaction.location(in: collectionNode.view),
             let indexPath = collectionNode.indexPathForItem(at: point),
             let node = collectionNode.nodeForItem(at: indexPath) as? ReaderWebtoonPageNode,
-            let image = node.imageNode.image,
-            !AppSettings.dictionary.isReaderQuickActionsDisabled(language: node.page.language)
+            let image = node.imageNode.image
         else {
             return nil
         }
@@ -481,7 +499,9 @@ extension ReaderWebtoonViewController: UIContextMenuInteractionDelegate {
                 self.stopAutoScroll()
                 self.present(UIHostingController(rootView: TranslationModalView(images: [image], webtoon: true)), animated: true)
             }
-            return UIMenu(title: "", children: [translateAction, shareAction, saveToPhotosAction, reloadAction] + coverActions)
+            let bookmark = self.delegate?.bookmarkPanelAction(image: image, chapterKey: node.page.chapterId,
+                                                               page: indexPath.row)
+            return UIMenu(title: "", children: [bookmark].compactMap { $0 } + [translateAction, shareAction, saveToPhotosAction, reloadAction] + coverActions)
         })
     }
 
@@ -584,6 +604,8 @@ extension ReaderWebtoonViewController {
         guard !decelerate else {
             return
         }
+        lastReportedPage = -1
+        scrollViewDidScroll(self.scrollView)
         setLiveTextButtonHidden(false)
 
         if infinite {
@@ -595,6 +617,8 @@ extension ReaderWebtoonViewController {
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        lastReportedPage = -1
+        scrollViewDidScroll(self.scrollView)
         setLiveTextButtonHidden(false)
         if infinite {
             isScrolling = false
@@ -916,6 +940,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
 
     func setChapter(_ chapter: AidokuRunner.Chapter, startPage: Int) {
         self.chapter = chapter
+        lastReportedPage = -1
         updateDoubleTapZoomSetting()
         chapters = [chapter]
 

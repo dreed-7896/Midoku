@@ -5,6 +5,7 @@ final class ReaderControlsView: UIVisualEffectView {
     let toolbar = ReaderToolbarView()
     let closeButton = UIButton(type: .system)
     let chaptersButton = UIButton(type: .system)
+    let panelsButton = UIButton(type: .system)
     let settingsButton = UIButton(type: .system)
     let webButton = UIButton(type: .system)
     let autoScrollButton = UIButton(type: .system)
@@ -18,6 +19,7 @@ final class ReaderControlsView: UIVisualEffectView {
             (closeButton, "xmark", "Close reader"),
             (webButton, "safari", "Webview"),
             (chaptersButton, "list.bullet", "Chapters"),
+            (panelsButton, "square.grid.3x3", "View panels"),
             (autoScrollButton, "play.fill", "Start auto scroll"),
             (settingsButton, "slider.horizontal.3", "Settings")
         ] {
@@ -29,7 +31,7 @@ final class ReaderControlsView: UIVisualEffectView {
             button.accessibilityLabel = label
             button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         }
-        let actions = UIStackView(arrangedSubviews: [closeButton, webButton, chaptersButton, autoScrollButton, settingsButton])
+        let actions = UIStackView(arrangedSubviews: [closeButton, webButton, chaptersButton, panelsButton, autoScrollButton, settingsButton])
         actions.axis = .horizontal
         actions.alignment = .center
         actions.distribution = .fillEqually

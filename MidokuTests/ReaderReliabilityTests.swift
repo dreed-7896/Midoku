@@ -49,7 +49,8 @@ struct ReaderReliabilityTests {
             ).height
             panel.frame = CGRect(x: 0, y: 0, width: width, height: height)
             panel.layoutIfNeeded()
-            let controls: [UIView] = [panel.closeButton, panel.webButton, panel.chaptersButton, panel.autoScrollButton, panel.settingsButton]
+            let controls: [UIView] = [panel.closeButton, panel.webButton, panel.chaptersButton,
+                                      panel.panelsButton, panel.autoScrollButton, panel.settingsButton]
             let frames = controls.map { $0.convert($0.bounds, to: panel) }
             let progressFrame = panel.toolbar.convert(panel.toolbar.bounds, to: panel)
             #expect(height <= 120)

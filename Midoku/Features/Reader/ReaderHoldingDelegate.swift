@@ -18,6 +18,7 @@ protocol ReaderHoldingDelegate: AnyObject {
     func getPreviousChapter() -> AidokuRunner.Chapter?
     func setChapter(_ chapter: AidokuRunner.Chapter)
     func collectionCoverActions(image: UIImage, chapterKey: String, imageURL: String?) -> [UIAction]
+    func bookmarkPanelAction(image: UIImage, chapterKey: String, page: Int) -> UIAction
 
     func setCurrentPage(_ page: Int, position: Double?)
     func setCurrentPages(_ pages: ClosedRange<Int>)
