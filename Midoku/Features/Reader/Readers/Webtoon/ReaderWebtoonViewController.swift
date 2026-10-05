@@ -58,6 +58,7 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
     // Stores the last calculated page number
     private var previousPage = 0
     private var lastPositionUpdate = CFTimeInterval(0)
+    private var lastReportedPage = -1
 
     private var autoScrollDisplayLink: CADisplayLink?
     private var autoScrollLastTimestamp: CFTimeInterval?
@@ -393,8 +394,6 @@ extension ReaderWebtoonViewController {
         }
         delegate?.setCurrentPage(page, position: position)
     }
-
-    private var lastReportedPage = -1
 
     func jumpToPage(_ page: Int) {
         guard let chapter, let section = chapters.firstIndex(of: chapter),
