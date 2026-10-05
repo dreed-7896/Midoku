@@ -419,6 +419,7 @@ class ReaderViewController: BaseObservingViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         capturePageNavigationState()
+        if isNavigationPage { navigationController?.tabBarController?.isTabBarHidden = true }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -495,6 +496,7 @@ class ReaderViewController: BaseObservingViewController {
         navigation.interactiveContentPopGestureRecognizer?.isEnabled = previousContentPopEnabled
         navigation.overrideUserInterfaceStyle = previousInterfaceStyle
         navigation.setNavigationBarHidden(false, animated: false)
+        navigation.tabBarController?.isTabBarHidden = false
         capturedNavigationState = false
     }
 
