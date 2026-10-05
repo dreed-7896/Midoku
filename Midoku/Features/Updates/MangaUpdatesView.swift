@@ -7,6 +7,8 @@
 
 import AidokuRunner
 import SwiftUI
+import SwiftUIIntrospect
+import UIKit
 
 struct MangaUpdatesView: View {
     struct UpdateSection: Hashable {
@@ -34,6 +36,8 @@ struct MangaUpdatesView: View {
     @State private var reachedEnd = false
     @State private var hasNoUpdates = false
     @State private var loadingTask: Task<(), Never>?
+    @State private var refreshing = false
+    @State private var refreshControl = UpdatesRefreshControl()
 
     @EnvironmentObject private var path: NavigationCoordinator
 
@@ -45,7 +49,7 @@ struct MangaUpdatesView: View {
                 if !reachedEnd {
                     loadingView
                         .onAppear {
-                            if !loadingMore {
+                            if !loadingMore && !refreshing {
                                 reachedEnd = true
                                 loadingMore = true
                                 loadingTask = Task {
@@ -59,15 +63,31 @@ struct MangaUpdatesView: View {
             }
             .listStyle(.plain)
             .refreshable {
+                guard !refreshing else { return }
+                refreshing = true
+                defer {
+                    refreshing = false
+                    loadingMore = false
+                    // Complete the native lifecycle even if List rebuilt its rows.
+                    // End it explicitly after the complete refresh/load operation,
+                    // including cancellation and early returns.
+                    refreshControl.list?.refreshControl?.endRefreshing()
+                }
                 loadingTask?.cancel()
+                loadingTask = nil
                 await MangaManager.shared.refreshLibrary(forceAll: true)
+                guard !Task.isCancelled else { return }
                 await MCCollectionStore.shared.refresh()
+                guard !Task.isCancelled else { return }
                 offset = 0
                 entries = []
                 reachedEnd = false
                 hasNoUpdates = false
                 loadingMore = true
                 await loadNewEntries()
+            }
+            .introspect(.list, on: .iOS(.v18, .v26, .v27)) { list in
+                refreshControl.list = list
             }
             .overlay {
                 if hasNoUpdates {
@@ -142,6 +162,11 @@ struct MangaUpdatesView: View {
         }
         .listRowSeparator(.hidden)
     }
+}
+
+@MainActor
+private final class UpdatesRefreshControl {
+    weak var list: UIScrollView?
 }
 
 extension MangaUpdatesView {

@@ -30,6 +30,12 @@ final class CoreDataManager: @unchecked Sendable {
         cloudDescription.shouldMigrateStoreAutomatically = true
         cloudDescription.shouldInferMappingModelAutomatically = true
 
+        // Earlier releases opened this same store with persistent history enabled.
+        // Keep that option when disabling CloudKit mirroring: otherwise Core Data
+        // can reopen an existing store read-only and every history/session save fails.
+        // This tracks local transactions only; it does not enable iCloud sync.
+        cloudDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+
         let localDescription = NSPersistentStoreDescription(url: storeDirectory.appendingPathComponent("Local.sqlite"))
         localDescription.configuration = "Local"
         localDescription.shouldMigrateStoreAutomatically = true
@@ -43,9 +49,18 @@ final class CoreDataManager: @unchecked Sendable {
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
 
-        container.loadPersistentStores { _, error in
+        container.loadPersistentStores { description, error in
             if let error = error as NSError? {
                 LogManager.logger.error("Error loading persistent stores \(error), \(error.userInfo)")
+                return
+            }
+            if let store = container.persistentStoreCoordinator.persistentStores.first(where: { $0.url == description.url }) {
+                let name = description.url?.lastPathComponent ?? description.configuration ?? "database"
+                if store.isReadOnly {
+                    LogManager.logger.error("CoreDataManager: \(name) opened read-only; progress and session saves cannot succeed")
+                } else {
+                    LogManager.logger.info("CoreDataManager: \(name) opened writable")
+                }
             }
         }
 
