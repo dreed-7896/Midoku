@@ -16,7 +16,7 @@ final class ReaderControlsView: UIVisualEffectView {
         layer.cornerCurve = .continuous
         clipsToBounds = true
         for (button, symbol, label) in [
-            (closeButton, "chevron.backward", "Go back"),
+            (closeButton, "xmark", "Close"),
             (webButton, "safari", "Webview"),
             (chaptersButton, "list.bullet", "Chapters"),
             (panelsButton, "square.grid.3x3", "View panels"),

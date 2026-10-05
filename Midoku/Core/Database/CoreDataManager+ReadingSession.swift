@@ -29,7 +29,9 @@ extension CoreDataManager {
             // if history object was just created, populate it with info we have
             historyObject.dateRead = data.endDate
         }
-        let session = ReadingSessionObject(context: context)
+        let entity = NSEntityDescription.entity(forEntityName: "ReadingSession", in: context)!
+        let session = ReadingSessionObject(entity: entity, insertInto: context)
+        assignToCloudStore(session, context: context)
         session.startDate = data.startDate
         session.endDate = data.endDate
         session.pagesRead = Int16(data.pagesRead)

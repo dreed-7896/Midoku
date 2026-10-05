@@ -203,14 +203,11 @@ extension ReaderViewController {
 
 struct MCReaderView: UIViewControllerRepresentable {
     let sequence: MCReaderSequence
-    @Environment(\.dismiss) private var dismiss
-    func makeUIViewController(context: Context) -> ReaderViewController {
+    func makeUIViewController(context: Context) -> ReaderNavigationController {
         guard let route = sequence.route(key: sequence.initialKey) else { preconditionFailure("Validated reader route missing") }
         let reader = ReaderViewController(source: route.source, manga: route.manga, chapter: route.displayChapter,
                                           startPage: startPage, collectionSequence: sequence)
         reader.showPanelsOnOpen = showPanels
-        reader.isNavigationPage = true
-        reader.goBack = { dismiss() }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--reader-preview") {
             Task { @MainActor [weak reader] in
@@ -225,25 +222,25 @@ struct MCReaderView: UIViewControllerRepresentable {
             }
         }
         #endif
-        return reader
+        return ReaderNavigationController(readerViewController: reader)
     }
-    func updateUIViewController(_ uiViewController: ReaderViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: ReaderNavigationController, context: Context) {}
     var startPage: Int? = nil
     var showPanels = false
 }
 
-/// The reader is a destination in the existing stack, so UIKit owns back swipes.
+/// Present the reader from the bottom with its own navigation and edge dismissal.
 struct MCReaderPresentation: ViewModifier {
     @Binding var sheet: MCReaderSheet?
 
     func body(content: Content) -> some View {
-        content.navigationDestination(item: $sheet) {
-            MCReaderPage(route: $0)
+        content.fullScreenCover(item: $sheet) {
+            MCReaderCover(route: $0)
         }
     }
 }
 
-private struct MCReaderPage: View {
+private struct MCReaderCover: View {
     let route: MCReaderSheet
     @AppStorage("Reader.orientation") private var orientation = "device"
     @State private var barsVisible = true

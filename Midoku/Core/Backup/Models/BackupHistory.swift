@@ -27,7 +27,7 @@ struct BackupHistory: Codable, Hashable {
     }
 
     func toObject(context: NSManagedObjectContext) -> HistoryObject {
-        let obj = HistoryObject(context: context)
+        let obj = CoreDataManager.shared.insertHistory(context: context)
         obj.dateRead = dateRead
         obj.sourceId = sourceId
         obj.chapterId = chapterId

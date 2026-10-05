@@ -31,8 +31,7 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
         readerBackGesture.delaysTouchesBegan = false
         readerBackGesture.delaysTouchesEnded = false
         readerBackGesture.delegate = self
-        // Closing is available in the reader controls. An edge pan competes with
-        // the webtoon scroll view's pan recognizer even when it rejects the swipe.
+        view.addGestureRecognizer(readerBackGesture)
     }
 
     private var usesVerticalScrolling: Bool {

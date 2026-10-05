@@ -4,7 +4,7 @@ import Foundation
 /// Core Data saves and remote completion updates. All keys are physical chapters.
 @MainActor
 enum ReaderProgressStore {
-    struct Position: Codable {
+    struct Position: Codable, Sendable {
         let identifier: ChapterIdentifier
         let page: Int
         let scrollPosition: Double?
@@ -12,6 +12,9 @@ enum ReaderProgressStore {
         let slotID: UUID?
     }
 
+    private static let writer = DispatchQueue(label: "Midoku.reader-progress", qos: .utility)
+    private static var pendingFlush: Task<Void, Never>?
+    private static var isDirty = false
     private static let key = "Reader.lastPositions.v1"
     private static var positions: [ChapterIdentifier: Position] = {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -27,32 +30,49 @@ enum ReaderProgressStore {
 
     static func record(identifier: ChapterIdentifier, page: Int, scrollPosition: Double?, slotID: UUID?) {
         guard page > 0, !AppSettings.general.incognitoMode.get() else { return }
-        let previous = positions[identifier]
         positions[identifier] = Position(identifier: identifier, page: page, scrollPosition: scrollPosition,
                                          updatedAt: Date(), slotID: slotID)
-        // Persist page turns immediately; fractional scrolling stays in memory
-        // until the reader's regular save or disappearance flushes it.
-        if previous?.page != page || previous?.slotID != slotID { flush() }
+        isDirty = true
+        // Throttle disk snapshots during continuous scrolling. Resume reads the
+        // immediate in-memory position; encoding and disk writes use a serial queue.
+        if pendingFlush == nil {
+            pendingFlush = Task {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                pendingFlush = nil
+                flush()
+            }
+        }
     }
 
     static func flush() {
-        if let data = try? JSONEncoder().encode(Array(positions.values)) {
-            UserDefaults.standard.set(data, forKey: key)
+        pendingFlush?.cancel()
+        pendingFlush = nil
+        guard isDirty else { return }
+        isDirty = false
+        let snapshot = Array(positions.values)
+        let storageKey = key
+        writer.async {
+            if let data = try? JSONEncoder().encode(snapshot) {
+                UserDefaults.standard.set(data, forKey: storageKey)
+            }
         }
     }
 
     static func remove(chapterIDs: [ChapterIdentifier]) {
         for id in chapterIDs { positions[id] = nil }
+        isDirty = true
         flush()
     }
 
     static func remove(mangaID: MangaIdentifier) {
         positions = positions.filter { $0.key.mangaIdentifier != mangaID }
+        isDirty = true
         flush()
     }
 
     static func clear(keeping mangaIDs: Set<MangaIdentifier> = []) {
         positions = positions.filter { mangaIDs.contains($0.key.mangaIdentifier) }
+        isDirty = true
         flush()
     }
 }

@@ -144,6 +144,21 @@ extension CoreDataManager {
         }
     }
 
+    /// Resolve the entity from this context's model and keep standalone history
+    /// in the Cloud configuration, even when no Chapter object is cached.
+    func insertHistory(context: NSManagedObjectContext) -> HistoryObject {
+        let entity = NSEntityDescription.entity(forEntityName: "History", in: context)!
+        let object = HistoryObject(entity: entity, insertInto: context)
+        assignToCloudStore(object, context: context)
+        return object
+    }
+
+    func assignToCloudStore(_ object: NSManagedObject, context: NSManagedObjectContext) {
+        guard let coordinator = context.persistentStoreCoordinator,
+              let store = coordinator.persistentStores.first(where: { $0.configurationName == "Cloud" }) else { return }
+        context.assign(object, to: store)
+    }
+
     func getOrCreateHistory(
         chapterId: ChapterIdentifier,
         context: NSManagedObjectContext
@@ -154,7 +169,7 @@ extension CoreDataManager {
         ) {
             return historyObject
         }
-        let historyObject = HistoryObject(context: context)
+        let historyObject = insertHistory(context: context)
         historyObject.sourceId = chapterId.sourceKey
         historyObject.mangaId = chapterId.mangaKey
         historyObject.chapterId = chapterId.chapterKey
