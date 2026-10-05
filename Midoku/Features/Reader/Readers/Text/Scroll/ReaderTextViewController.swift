@@ -61,6 +61,9 @@ class ReaderTextViewController: BaseViewController {
     /// Load previously saved reading progress for a chapter.
     private func loadReadingProgress(for chapterKey: String) async -> CGFloat? {
         let identifier = viewModel.physicalIdentifier(key: chapterKey)
+        if let position = ReaderProgressStore.position(for: identifier)?.scrollPosition {
+            return CGFloat(position)
+        }
         return await CoreDataManager.shared.container.performBackgroundTask { context in
             let object = CoreDataManager.shared.getHistory(
                 chapterId: identifier,

@@ -178,7 +178,7 @@ nonisolated struct MCLibraryState: Codable, Sendable {
             guard let variant = slot.preferred, let identity = identities[variant.chapterID] else { return nil }
             return (identity, slot.id)
         }, uniquingKeysWith: { first, _ in first })
-        // Choose the most recently opened chapter; completed chapters restart at page one in the reader.
+        // Choose the most recently opened chapter; the reader restores its saved page even when completed.
         if let recent = positions.filter({ slots[$0.id] != nil }).max(by: { $0.updatedAt < $1.updatedAt }) {
             return slots[recent.id]
         }

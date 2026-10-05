@@ -100,14 +100,12 @@ struct MCEntryView: View {
     @State private var resettingChapter: MCID?
     @State private var reader: MCReaderSheet?
     @State private var showBookmarks = false
-    @State private var bookmarkedPanels: [MCPanelBookmark] = []
     @State private var selectedBookmark: MCPanelBookmark?
     @State private var showReorder = false
     @State private var showStatusEditor = false
     @State private var didLongPressSave = false
     @State private var webPage: MCWebPage?
     @State private var confirmRemove = false
-    @State private var confirmReset = false
     @State private var confirmResetThumbnails = false
     @State private var confirmRemoveChapters = false
     @State private var thumbnailRevision = 0
@@ -201,32 +199,31 @@ struct MCEntryView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button("Edit entry", systemImage: "square.and.pencil") { showEdit = true }
-                            Button("Add nested title", systemImage: "plus.rectangle.on.rectangle") { showAddNested = true }
-                            Button("Move into title", systemImage: "folder") { showMove = true }
+                            Button("Add title", systemImage: "plus.rectangle.on.rectangle") { showAddNested = true }
+                            Button("Move title", systemImage: "folder") { showMove = true }
                             if entry.parentEntryID != nil {
                                 Button("Move to library", systemImage: "arrow.up.left") {
                                     store.perform { try $0.library.moveEntry(entryID, into: nil) }
                                 }
                             }
                             if !entry.exclusions.isEmpty {
-                                Button("Removed chapters (\(entry.exclusions.count))", systemImage: "arrow.uturn.backward") { showRemovedChapters = true }
+                                Button("Removed chapters", systemImage: "arrow.uturn.backward") { showRemovedChapters = true }
                             }
-                            Button("Reset edits", systemImage: "arrow.counterclockwise") { confirmReset = true }
+                            Divider()
                             Button("Sources", systemImage: "square.stack.3d.up") { showSources = true }
                             if store.snapshot.manga.contains(where: { $0.listingID == entry.primaryListingID }) {
                                 Button("Migrate", systemImage: "arrow.triangle.branch") {
                                     migrateEntry(entry)
                                 }
                             }
-                            Button("Reset chapter thumbnails", systemImage: "arrow.counterclockwise") { confirmResetThumbnails = true }
+                            Button("Reset thumbnails", systemImage: "arrow.counterclockwise") { confirmResetThumbnails = true }
                                 .disabled(entry.slots.isEmpty)
-                            Button("Reorder chapters and titles", systemImage: "line.3.horizontal") { selecting = false; showReorder = true }
+                            Button("Reorder", systemImage: "line.3.horizontal") { selecting = false; showReorder = true }
                             if entry.manualOrder && !contents.contains(where: { if case .title = $0 { return true }; return false }) {
-                                Button("Restore chapter-number order") { store.perform { try $0.library.editEntry(entryID) { $0.manualOrder = false; $0.contentOrder = nil } } }
+                                Button("Sort by number", systemImage: "number") { store.perform { try $0.library.editEntry(entryID) { $0.manualOrder = false; $0.contentOrder = nil } } }
                             }
-                            Button("Refresh sources", systemImage: "arrow.clockwise") { Task { await store.refresh(entryID: entryID) } }.disabled(store.isRefreshing)
                             Divider()
-                            Button("Remove from library", systemImage: "trash", role: .destructive) { confirmRemove = true }
+                            Button("Remove title", systemImage: "trash", role: .destructive) { confirmRemove = true }
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Entry options")
                     }
                 }
@@ -247,39 +244,8 @@ struct MCEntryView: View {
         .sheet(isPresented: $showBookmarks, onDismiss: {
             if let bookmark = selectedBookmark { selectedBookmark = nil; openBookmark(bookmark) }
         }) {
-            NavigationStack {
-                List {
-                    ForEach(bookmarkedPanels) { bookmark in
-                        Button {
-                            selectedBookmark = bookmark
-                            showBookmarks = false
-                        } label: {
-                            HStack(spacing: 12) {
-                                if let data = bookmark.preview, let image = UIImage(data: data) {
-                                    Image(uiImage: image).resizable().scaledToFit()
-                                        .frame(width: 64, height: 88).clipped()
-                                } else {
-                                    Image(systemName: "photo").frame(width: 64, height: 88)
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(bookmark.chapterTitle).font(.headline).lineLimit(2)
-                                    if let number = bookmark.chapterNumber {
-                                        Text("Chapter \(number.formatted()) · Panel \(bookmark.page)")
-                                            .font(.subheadline).foregroundStyle(.secondary)
-                                    } else {
-                                        Text("Panel \(bookmark.page)").font(.subheadline).foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }.buttonStyle(.plain)
-                    }.onDelete { offsets in
-                        for index in offsets { MCPanelBookmarks.remove(bookmarkedPanels[index].id) }
-                        bookmarkedPanels.remove(atOffsets: offsets)
-                    }
-                }
-                .overlay { if bookmarkedPanels.isEmpty { ContentUnavailableView("No bookmarked panels", systemImage: "bookmark") } }
-                .navigationTitle("Bookmarked panels")
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showBookmarks = false } } }
+            MCPanelBookmarksView(titleKey: (store.library.ancestorIDs(of: entryID).last ?? entryID).uuidString) {
+                selectedBookmark = $0
             }
         }
         .modifier(MCReaderPresentation(sheet: $reader))
@@ -295,9 +261,6 @@ struct MCEntryView: View {
                 Button("Remove entry", role: .destructive) { if store.removeEntries([entryID]) { dismiss() } }
             }
         } message: { Text("Reading history and downloaded chapters are kept.") }
-        .confirmationDialog("Reset entry edits?", isPresented: $confirmReset) {
-            Button("Reset edits", role: .destructive) { store.perform { try $0.library.resetDetails(entryID) } }
-        } message: { Text("Resets the entry’s title, description, author and cover. Chapters, categories and reading progress are kept.") }
         .confirmationDialog("Reset all chapter thumbnails?", isPresented: $confirmResetThumbnails) {
             Button("Reset thumbnails", role: .destructive) { resetChapterThumbnails() }
         } message: { Text("Custom and generated thumbnails for this entry will be cleared. Chapter details and reading progress are kept.") }
@@ -416,7 +379,7 @@ struct MCEntryView: View {
     }
 
     private func readingActions(_ entry: MCPersonalEntry) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             Button {
                 Task {
                     guard let slotID = await store.resumeSlot(entryID: entryID),
@@ -426,22 +389,23 @@ struct MCEntryView: View {
             } label: {
                 Label(entry.lastReadAt != nil || store.unreadCount(entryID: entryID) < store.chapterCount(entryID: entryID) ? "Resume" : "Read",
                     systemImage: "book.pages").font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(.white)
+                    .frame(height: 44).padding(.horizontal, 12)
+                    .background(Color.accentColor, in: Capsule())
             }
-            .buttonStyle(.borderedProminent).controlSize(.small)
+            .buttonStyle(.plain)
+            .opacity(store.chapterCount(entryID: entryID) == 0 ? 0.5 : 1)
             .disabled(store.chapterCount(entryID: entryID) == 0)
-            Spacer(minLength: 8)
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
                 Button { selecting.toggle(); selected.removeAll() } label: {
-                    Image(systemName: selecting ? "checkmark.circle.fill" : "checkmark.circle").frame(width: 24, height: 24)
+                    entryActionIcon(selecting ? "checkmark.circle.fill" : "checkmark.circle", selected: selecting)
                 }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
-                Button {
-                    let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
-                    bookmarkedPanels = MCPanelBookmarks.forTitle(rootID.uuidString)
-                    showBookmarks = true
-                } label: { Image(systemName: "bookmark").frame(width: 24, height: 24) }
+                Button { showBookmarks = true } label: { entryActionIcon("bookmark") }
                     .accessibilityLabel("View bookmarked panels")
                 Button { chapterGridOverride.wrappedValue = !grid } label: {
-                    Image(systemName: grid ? "list.bullet" : "square.grid.2x2").frame(width: 24, height: 24)
+                    entryActionIcon(grid ? "list.bullet" : "square.grid.2x2")
                 }.accessibilityLabel(grid ? "List view" : "Grid view")
                 Menu {
                     Picker("Sort chapters", selection: Binding(
@@ -451,15 +415,24 @@ struct MCEntryView: View {
                         ForEach(MCChapterDisplaySort.allCases) { Text($0.title).tag($0) }
                     }
                     if self.entry?.chapterSort == nil || self.entry?.chapterSort == .custom {
-                        Button("Reverse personal order", systemImage: "arrow.up.arrow.down") {
+                        Button("Reverse order", systemImage: "arrow.up.arrow.down") {
                             store.perform { try $0.library.editEntry(entryID) { $0.descendingDisplay.toggle() } }
                         }
                     }
-                } label: { Image(systemName: "arrow.up.arrow.down").frame(width: 24, height: 24) }
+                } label: { entryActionIcon("arrow.up.arrow.down") }
                     .accessibilityLabel("Sort chapters")
-
+            }
+            .buttonStyle(.plain)
+            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
         }
-        .buttonStyle(.bordered).controlSize(.small)
+    }
+
+    private func entryActionIcon(_ symbol: String, selected: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 17, weight: .medium))
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .frame(width: 40, height: 44)
+            .contentShape(Rectangle())
     }
 
     private func coverActions(_ entry: MCPersonalEntry) -> some View {
@@ -698,13 +671,8 @@ struct MCEntryView: View {
     }
 
     private func openBookmark(_ bookmark: MCPanelBookmark) {
-        let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
-        guard let slotID = bookmark.slotID,
-              store.library.flattenedChapters(entryID: rootID).contains(where: { $0.slot.id == slotID })
-        else { return }
-        do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: rootID, slotID: slotID),
-                                    startPage: bookmark.page) }
-        catch { store.error = error.localizedDescription }
+        do { reader = try MCPanelBookmarks.reader(for: bookmark) }
+        catch { store.error = "This bookmarked chapter is no longer available in your library." }
     }
     private func resetChapterThumbnails(slotIDs: Set<UUID>? = nil) {
         guard let entry else { return }

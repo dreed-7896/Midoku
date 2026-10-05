@@ -25,7 +25,7 @@ final class MCReaderSequence {
     private let indices: [String: Int]
     var chapters: [AidokuRunner.Chapter] { routes.map(\.displayChapter) }
 
-    init(entryID: UUID, slotID: UUID, store: MCCollectionStore? = nil) throws {
+    init(entryID: UUID, slotID: UUID, initialChapterID: UUID? = nil, store: MCCollectionStore? = nil) throws {
         let store = store ?? .shared
         let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
         guard let entry = store.library.entry(rootID) else { throw MCLibraryFailure.missing }
@@ -39,7 +39,8 @@ final class MCReaderSequence {
         let manga = Dictionary(uniqueKeysWithValues: store.snapshot.manga.map { ($0.listingID, $0.manga) })
         for item in store.library.flattenedChapters(entryID: rootID) {
             let slot = item.slot
-            guard let variant = slot.preferred, let libraryChapter = chapters[variant.chapterID],
+            let initialVariant = slot.id == slotID ? slot.variants.first { $0.chapterID == initialChapterID } : nil
+            guard let variant = initialVariant ?? slot.preferred, let libraryChapter = chapters[variant.chapterID],
                   let original = storedChapters[libraryChapter.id],
                   let listingID = listings[libraryChapter.identity.listing], let physicalManga = manga[listingID]
             else { throw MCLibraryFailure.missing }
@@ -66,11 +67,14 @@ final class MCReaderSequence {
     }
 }
 
-struct MCReaderSheet: Identifiable {
+struct MCReaderSheet: Identifiable, Hashable {
     let id = UUID()
     let sequence: MCReaderSequence
     var startPage: Int? = nil
     var showPanels = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// Small, durable panel references. The preview is kept small so bookmarks do not
@@ -78,6 +82,7 @@ struct MCReaderSheet: Identifiable {
 struct MCPanelBookmark: Codable, Identifiable {
     let id: UUID
     let titleKey: String
+    var title: String? = nil
     let slotID: UUID?
     let sourceKey: String
     let mangaKey: String
@@ -91,6 +96,7 @@ struct MCPanelBookmark: Codable, Identifiable {
 @MainActor
 enum MCPanelBookmarks {
     private static let key = "Reader.panelBookmarks.v1"
+    static let changed = Notification.Name("MCPanelBookmarks.changed")
 
     static var all: [MCPanelBookmark] {
         guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
@@ -108,10 +114,32 @@ enum MCPanelBookmarks {
             && $0.chapterKey == bookmark.chapterKey && $0.page == bookmark.page }
         items.insert(bookmark, at: 0)
         UserDefaults.standard.set(try? JSONEncoder().encode(items), forKey: key)
+        NotificationCenter.default.post(name: changed, object: nil)
     }
 
     static func remove(_ id: UUID) {
         UserDefaults.standard.set(try? JSONEncoder().encode(all.filter { $0.id != id }), forKey: key)
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    static func reader(for bookmark: MCPanelBookmark) throws -> MCReaderSheet {
+        let store = MCCollectionStore.shared
+        guard let connection = store.snapshot.connections.first(where: { $0.sourceKey == bookmark.sourceKey }),
+              let chapter = store.library.chapters.first(where: {
+                  $0.identity.listing.connectionID == connection.id
+                      && $0.identity.listing.externalID == bookmark.mangaKey && $0.identity.externalID == bookmark.chapterKey
+              }) else { throw MCLibraryFailure.missing }
+        let entries = store.library.entries.sorted { ($0.id.uuidString == bookmark.titleKey ? 0 : 1) < ($1.id.uuidString == bookmark.titleKey ? 0 : 1) }
+        for entry in entries {
+            let slots = store.library.flattenedChapters(entryID: entry.id).map(\.slot)
+            let slot = slots.first { $0.id == bookmark.slotID && $0.variants.contains { $0.chapterID == chapter.id } }
+                ?? slots.first { $0.variants.contains { $0.chapterID == chapter.id } }
+            if let slot {
+                return MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: slot.id,
+                                     initialChapterID: chapter.id), startPage: bookmark.page)
+            }
+        }
+        throw MCLibraryFailure.missing
     }
 }
 
@@ -128,6 +156,7 @@ extension ReaderViewController {
                 image.draw(in: CGRect(origin: .zero, size: size))
             }.jpegData(compressionQuality: 0.55)
             MCPanelBookmarks.add(.init(id: UUID(), titleKey: collectionSequence?.entryID.uuidString ?? "\(manga.sourceKey):\(manga.key)",
+                title: collectionSequence?.title ?? manga.title,
                 slotID: route?.slotID,
                 sourceKey: identity.sourceKey, mangaKey: identity.mangaKey, chapterKey: identity.chapterKey,
                 chapterTitle: display.title ?? "Chapter", chapterNumber: display.chapterNumber,
@@ -174,11 +203,14 @@ extension ReaderViewController {
 
 struct MCReaderView: UIViewControllerRepresentable {
     let sequence: MCReaderSequence
-    func makeUIViewController(context: Context) -> ReaderNavigationController {
+    @Environment(\.dismiss) private var dismiss
+    func makeUIViewController(context: Context) -> ReaderViewController {
         guard let route = sequence.route(key: sequence.initialKey) else { preconditionFailure("Validated reader route missing") }
         let reader = ReaderViewController(source: route.source, manga: route.manga, chapter: route.displayChapter,
-                                          startPage: context.coordinator.startPage, collectionSequence: sequence)
-        reader.showPanelsOnOpen = context.coordinator.showPanels
+                                          startPage: startPage, collectionSequence: sequence)
+        reader.showPanelsOnOpen = showPanels
+        reader.isNavigationPage = true
+        reader.goBack = { dismiss() }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--reader-preview") {
             Task { @MainActor [weak reader] in
@@ -193,26 +225,44 @@ struct MCReaderView: UIViewControllerRepresentable {
             }
         }
         #endif
-        return ReaderNavigationController(readerViewController: reader)
+        return reader
     }
-    func updateUIViewController(_ uiViewController: ReaderNavigationController, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(startPage: startPage, showPanels: showPanels) }
+    func updateUIViewController(_ uiViewController: ReaderViewController, context: Context) {}
     var startPage: Int? = nil
     var showPanels = false
-    final class Coordinator {
-        let startPage: Int?
-        let showPanels: Bool
-        init(startPage: Int?, showPanels: Bool) { self.startPage = startPage; self.showPanels = showPanels }
-    }
 }
 
-/// SwiftUI owns the presentation and clears the binding when the reader closes.
+/// The reader is a destination in the existing stack, so UIKit owns back swipes.
 struct MCReaderPresentation: ViewModifier {
     @Binding var sheet: MCReaderSheet?
 
     func body(content: Content) -> some View {
-        content.fullScreenCover(item: $sheet) {
-            MCReaderView(sequence: $0.sequence, startPage: $0.startPage, showPanels: $0.showPanels).ignoresSafeArea()
+        content.navigationDestination(item: $sheet) {
+            MCReaderPage(route: $0)
         }
+    }
+}
+
+private struct MCReaderPage: View {
+    let route: MCReaderSheet
+    @AppStorage("Reader.orientation") private var orientation = "device"
+    @State private var barsVisible = true
+    private var orientations: UIInterfaceOrientationMask {
+        switch orientation {
+        case "portrait": .portrait
+        case "landscape": .landscape
+        default: .all
+        }
+    }
+
+    var body: some View {
+        MCReaderView(sequence: route.sequence, startPage: route.startPage, showPanels: route.showPanels)
+            .ignoresSafeArea()
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(.hidden, for: .tabBar)
+            .statusBarHidden(!barsVisible)
+            .interfaceOrientations(orientations)
+            .onReceive(NotificationCenter.default.publisher(for: .readerShowingBars)) { _ in barsVisible = true }
+            .onReceive(NotificationCenter.default.publisher(for: .readerHidingBars)) { _ in barsVisible = false }
     }
 }

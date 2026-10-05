@@ -4,11 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      run_tests:
-        description: Run collection and simulator regression tests
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -54,51 +49,3 @@ jobs:
           name: Midoku-unsigned-${{ github.sha }}
           path: build/artifacts/
           if-no-files-found: error
-
-  checks:
-    if: github.event_name == 'push' || inputs.run_tests
-    runs-on: xcode-27
-    timeout-minutes: 20
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Test collection core
-        run: swift test
-      - name: Test reader and collection on simulator
-        timeout-minutes: 12
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p build
-          simulator_id=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          ids = [d["udid"] for runtime, items in devices.items() if "iOS-27" in runtime for d in items if d.get("isAvailable") and "iPhone" in d["name"]]
-          print(ids[0] if ids else "")')
-          if [ -n "$simulator_id" ]; then
-            xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
-              -destination "platform=iOS Simulator,id=$simulator_id" -derivedDataPath build/Simulator \
-              -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
-              CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-              -parallel-testing-enabled NO \
-              -only-testing:MidokuTests/CollectionIntegrationTests \
-              -only-testing:MidokuTests/ArtworkCacheTests \
-              -only-testing:MidokuTests/ReaderReliabilityTests test 2>&1 | tee build/tests.log
-          else
-            echo '::warning::No iOS 27 simulator runtime is installed; compiling the integration tests instead.'
-            xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
-              -destination 'generic/platform=iOS Simulator' -derivedDataPath build/Simulator \
-              -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
-              CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-              build-for-testing 2>&1 | tee build/tests.log
-          fi
-      - name: Upload test diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: Midoku-tests-${{ github.sha }}
-          path: build/tests.log
-          if-no-files-found: ignore

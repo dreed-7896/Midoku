@@ -96,6 +96,8 @@ struct MCCollectionRootView: View {
     @State private var readingMode = false
     @State private var showReadingAdd = false
     @State private var reader: MCReaderSheet?
+    @State private var showBookmarks = false
+    @State private var selectedBookmark: MCPanelBookmark?
     @State private var confirmResetReading = false
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
@@ -322,6 +324,7 @@ struct MCCollectionRootView: View {
                             Toggle("Cover grid", isOn: $grid)
                             Toggle("Chapter grid", isOn: $chapterGrid)
                             Button("Categories", systemImage: "folder") { showCategories = true }
+                            Button("Bookmarked panels", systemImage: "bookmark") { showBookmarks = true }
                             Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
                     }
@@ -349,6 +352,14 @@ struct MCCollectionRootView: View {
             .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
+            .sheet(isPresented: $showBookmarks, onDismiss: {
+                guard let bookmark = selectedBookmark else { return }
+                selectedBookmark = nil
+                do { reader = try MCPanelBookmarks.reader(for: bookmark) }
+                catch { store.error = "This bookmarked chapter is no longer available in your library." }
+            }) {
+                MCPanelBookmarksView { selectedBookmark = $0 }
+            }
             .modifier(MCReaderPresentation(sheet: $reader))
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }

@@ -185,11 +185,22 @@ struct MCEntrySourcesView: View {
         NavigationStack {
             List {
                 if let entry = store.library.entry(entryID) {
+                    Section {
+                        Button {
+                            Task { await store.refresh(entryID: entryID) }
+                        } label: {
+                            HStack {
+                                Label("Refresh sources", systemImage: "arrow.clockwise")
+                                Spacer()
+                                if store.isRefreshing { ProgressView() }
+                            }
+                        }.disabled(store.isRefreshing)
+                    }
                     ForEach(entry.links) { link in
                         if let record = store.library.listing(link.listingID) {
                             Section(store.sourceName(record.identity.connectionID)) {
                                 Text(record.details.title)
-                                Button("Open original listing", systemImage: "arrow.up.forward.app") { listing = MCID(id: record.id) }
+                                Button("Open listing", systemImage: "arrow.up.forward.app") { listing = MCID(id: record.id) }
                                 Toggle("Get new chapters", isOn: Binding(get: { link.followsNewChapters }, set: { value in
                                     store.perform { state in
                                         let baseline = Set(state.library.chapters.filter { $0.identity.listing == record.identity }.map(\.id))
@@ -235,7 +246,7 @@ struct MCEntrySourcesView: View {
                         }
                     }
                 }
-            }.navigationTitle("Sources and chapters").navigationBarTitleDisplayMode(.inline)
+            }.navigationTitle("Sources").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
                 .sheet(item: $listing) { item in
                     if let manga = store.snapshot.manga.first(where: { $0.listingID == item.id })?.manga { MCOriginalListingView(manga: manga) }

@@ -202,6 +202,7 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
         Task { @MainActor [weak self] in
             guard let delegate = self?.delegate else { return }
             delegate.zoomView.scheduleContentSizeUpdate()
+            delegate.restorePendingPosition()
         }
     }
 

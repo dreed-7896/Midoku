@@ -469,6 +469,18 @@ final class MCCollectionStore {
 
     func resumeSlot(entryID: UUID) async -> UUID? {
         guard let entry = library.entry(entryID) else { return nil }
+        let slots = library.flattenedChapters(entryID: entry.id).map(\.slot)
+        let physicalSlots: [(ChapterIdentifier, UUID)] = slots.compactMap { slot in
+            guard let variant = slot.preferred, let chapter = library.chapter(variant.chapterID),
+                  let connection = snapshot.connections.first(where: { $0.id == chapter.identity.listing.connectionID }) else { return nil }
+            return (.init(sourceKey: connection.sourceKey, mangaKey: chapter.identity.listing.externalID,
+                          chapterKey: chapter.identity.externalID), slot.id)
+        }
+        if let recent = ReaderProgressStore.latest(in: Set(physicalSlots.map { $0.0 })) {
+            // Preserve the exact personal slot when a physical chapter occurs twice.
+            return physicalSlots.first { $0.0 == recent.identifier && $0.1 == recent.slotID }?.1
+                ?? physicalSlots.first { $0.0 == recent.identifier }?.1
+        }
         let chapterIDs = Set(library.flattenedChapters(entryID: entry.id).compactMap(\.slot.preferred).map(\.chapterID))
         let identities = library.chapters.filter { chapterIDs.contains($0.id) }.map(\.identity)
         let connections = Dictionary(uniqueKeysWithValues: snapshot.connections.map { ($0.id, $0.sourceKey) })

@@ -124,6 +124,15 @@ class ReaderViewController: BaseObservingViewController {
     private var sessionStartDate: Date?
     private var sessionLastInteraction: Date?
     var showPanelsOnOpen = false
+    var isNavigationPage = false
+    var goBack: (() -> Void)?
+    private var chapterLoadTask: Task<Void, Never>?
+    private weak var pageNavigationController: UINavigationController?
+    private weak var previousPopDelegate: UIGestureRecognizerDelegate?
+    private var previousPopEnabled = true
+    private var previousContentPopEnabled = true
+    private var previousInterfaceStyle = UIUserInterfaceStyle.unspecified
+    private var capturedNavigationState = false
 
     weak var reader: ReaderReaderDelegate?
 
@@ -225,6 +234,7 @@ class ReaderViewController: BaseObservingViewController {
     }
 
     override func configure() {
+        capturePageNavigationState()
         node.backgroundColor = .systemBackground
         navigationController?.navigationBar.prefersLargeTitles = false
 
@@ -405,6 +415,11 @@ class ReaderViewController: BaseObservingViewController {
 
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        capturePageNavigationState()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
@@ -422,6 +437,13 @@ class ReaderViewController: BaseObservingViewController {
         }
 
         disableSwipeGestures()
+        if isNavigationPage, let navigationController {
+            navigationController.interactivePopGestureRecognizer?.delegate = self
+            navigationController.interactivePopGestureRecognizer?.isEnabled = true
+            // Full-screen back pans compete with horizontal page turns. The
+            // native edge gesture provides an interactive navigation pop.
+            navigationController.interactiveContentPopGestureRecognizer?.isEnabled = false
+        }
         configureNavigationBarDismissTapGesture(enabled: isDictionarySingleTapLookupActiveForCurrentChapter)
 
         // resume auto scroll if it was paused when presenting a sheet
@@ -434,6 +456,7 @@ class ReaderViewController: BaseObservingViewController {
         super.viewWillDisappear(animated)
         progressSaveTask?.cancel()
         progressSaveTask = nil
+        ReaderProgressStore.flush()
 
         (reader as? ReaderWebtoonViewController)?.stopAutoScroll()
 
@@ -450,6 +473,36 @@ class ReaderViewController: BaseObservingViewController {
         Task {
             await updateReadPosition()
         }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard isNavigationPage, let navigation = pageNavigationController else { return }
+        var ancestor: UIViewController? = self
+        while let current = ancestor {
+            if navigation.viewControllers.contains(where: { $0 === current }) { return }
+            ancestor = current.parent
+        }
+        // Restore the library's gesture and appearance settings after a completed
+        // pop, never during a cancelled back swipe or a reader sheet presentation.
+        if navigation.interactivePopGestureRecognizer?.delegate === self {
+            navigation.interactivePopGestureRecognizer?.delegate = previousPopDelegate
+            navigation.interactivePopGestureRecognizer?.isEnabled = previousPopEnabled
+        }
+        navigation.interactiveContentPopGestureRecognizer?.isEnabled = previousContentPopEnabled
+        navigation.overrideUserInterfaceStyle = previousInterfaceStyle
+        navigation.setNavigationBarHidden(false, animated: false)
+        capturedNavigationState = false
+    }
+
+    private func capturePageNavigationState() {
+        guard isNavigationPage, !capturedNavigationState, let navigationController else { return }
+        capturedNavigationState = true
+        pageNavigationController = navigationController
+        previousPopDelegate = navigationController.interactivePopGestureRecognizer?.delegate
+        previousPopEnabled = navigationController.interactivePopGestureRecognizer?.isEnabled ?? true
+        previousContentPopEnabled = navigationController.interactiveContentPopGestureRecognizer?.isEnabled ?? true
+        previousInterfaceStyle = navigationController.overrideUserInterfaceStyle
     }
 
 
@@ -477,6 +530,7 @@ extension ReaderViewController {
     }
 
     func disableSwipeGestures() {
+        guard !isNavigationPage else { return }
         // the view with the target gesture recognizers changes based on if it was presented from uikit or swiftui
         let gestureRecognizers = (parent?.view.gestureRecognizers ?? []) + (parent?.view.superview?.superview?.gestureRecognizers ?? [])
 
@@ -504,6 +558,7 @@ extension ReaderViewController {
         scrollPosition: Double? = nil,
         saveSession: Bool = true
     ) async {
+        ReaderProgressStore.flush()
         let effectiveTotalPages = totalPages ?? toolbarView.totalPages ?? 0
         let effectiveCurrentPage = currentPage ?? self.currentPage
 
@@ -568,23 +623,21 @@ extension ReaderViewController {
             }
         }
 
-        if let forceStartPage {
-            currentPage = forceStartPage
-            self.forceStartPage = nil
-        } else {
-            let (completed, startPage) = CoreDataManager.shared.getProgress(
-                chapterId: physicalIdentifier(chapter)
-            )
-            if let startPage, startPage > 0 {
-                currentPage = startPage
-            } else if completed || collectionSequence?.route(chapter)?.initiallyRead == true {
-                // Only start fresh when there is no saved page for this physical chapter.
-                currentPage = 0
-            } else {
-                currentPage = -1
+        let requestedChapter = chapter
+        let identifier = physicalIdentifier(requestedChapter)
+        let explicitPage = forceStartPage
+        forceStartPage = nil
+        chapterLoadTask?.cancel()
+        chapterLoadTask = Task { [weak self] in
+            let (_, historyPage) = await CoreDataManager.shared.container.performBackgroundTask { context in
+                CoreDataManager.shared.getProgress(chapterId: identifier, context: context)
             }
+            guard let self, !Task.isCancelled, chapter == requestedChapter else { return }
+            let local = ReaderProgressStore.position(for: identifier)
+            currentPage = max(1, explicitPage ?? local?.page ?? historyPage ?? 1)
+            currentPosition = explicitPage == nil ? local?.scrollPosition : nil
+            reader?.setChapter(requestedChapter, startPage: currentPage)
         }
-        reader?.setChapter(chapter, startPage: currentPage)
     }
 
     func loadNavbarTitle() {
@@ -674,9 +727,13 @@ extension ReaderViewController {
     @objc func close() {
         progressSaveTask?.cancel()
         progressSaveTask = nil
+        ReaderProgressStore.flush()
         // viewWillDisappear saves the final position; temporary files are removed on deinit,
         // after page requests have released them (including cancelled interactive dismissals).
-        dismiss(animated: true)
+        if let goBack { goBack() }
+        else if let navigationController, navigationController.viewControllers.count > 1 {
+            navigationController.popViewController(animated: true)
+        } else { dismiss(animated: true) }
     }
 
     @objc func sliderMoved(_ sender: ReaderSliderView) {
@@ -1017,6 +1074,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         }
 
         self.chapter = chapter
+        chapterLoadTask?.cancel()
         currentPosition = nil
         updateChapterButtons()
         self.chaptersToMark = [chapter]
@@ -1059,6 +1117,8 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
 
         currentPage = page
         currentPosition = position
+        ReaderProgressStore.record(identifier: physicalIdentifier(chapter), page: page,
+                                   scrollPosition: position, slotID: collectionSequence?.route(chapter)?.slotID)
         if changedPage {
             toolbarView.currentPage = page
             toolbarView.updateSliderPosition()
@@ -1590,9 +1650,26 @@ extension ReaderViewController {
 // MARK: - UIGestureRecognizerDelegate
 extension ReaderViewController: UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if isNavigationPage, gestureRecognizer === navigationController?.interactivePopGestureRecognizer {
+            guard let navigationController, navigationController.viewControllers.count > 1,
+                  navigationController.presentedViewController == nil, presentedViewController == nil else { return false }
+            if let webtoon = reader as? ReaderWebtoonViewController,
+               webtoon.scrollView.zoomScale > webtoon.scrollView.minimumZoomScale + 0.01 { return false }
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = pan.velocity(in: view)
+            return velocity.x > 0 && velocity.x > abs(velocity.y) * 1.5
+        }
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
         let velocity = pan.velocity(in: pan.view)
         return velocity.y > velocity.x && (abs(velocity.x) < 40 || abs(velocity.y) > abs(velocity.x) * 3)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard isNavigationPage, gestureRecognizer === navigationController?.interactivePopGestureRecognizer,
+              reader is ReaderWebtoonViewController || reader is ReaderTextViewController,
+              let scroll = otherGestureRecognizer.view as? UIScrollView else { return false }
+        return otherGestureRecognizer === scroll.panGestureRecognizer && scroll.isDescendant(of: view)
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {

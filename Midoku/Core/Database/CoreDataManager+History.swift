@@ -10,11 +10,14 @@ import CoreData
 extension CoreDataManager {
     /// Remove all history objects.
     func clearHistory(context: NSManagedObjectContext) {
+        Task { @MainActor in ReaderProgressStore.clear() }
         clear(request: HistoryObject.fetchRequest(), context: context)
     }
 
     /// Remove all history objects from manga not in library
     func clearHistoryExcludingLibrary(context: NSManagedObjectContext) {
+        let mangaIDs = Set(getLibraryManga(context: context).compactMap { $0.manga?.identifier })
+        Task { @MainActor in ReaderProgressStore.clear(keeping: mangaIDs) }
         let request = HistoryObject.fetchRequest()
 
         let pairPredicates = self.getLibraryManga(context: context).compactMap { mangaObj -> NSCompoundPredicate? in
@@ -115,6 +118,7 @@ extension CoreDataManager {
 
     /// Removes history for manga.
     func removeHistory(mangaId: MangaIdentifier, context: NSManagedObjectContext) {
+        Task { @MainActor in ReaderProgressStore.remove(mangaID: mangaId) }
         let history = getHistoryForManga(mangaId: mangaId, context: context)
         for item in history {
             context.delete(item)
@@ -122,6 +126,7 @@ extension CoreDataManager {
     }
 
     func removeHistory(chapterIds: [ChapterIdentifier]) async {
+        await ReaderProgressStore.remove(chapterIDs: chapterIds)
         await container.performBackgroundTask { context in
             do {
                 for chapterId in chapterIds {

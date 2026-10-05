@@ -59,6 +59,9 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
     private var previousPage = 0
     private var lastPositionUpdate = CFTimeInterval(0)
     private var lastReportedPage = -1
+    private var isRestoringChapter = false
+    private var chapterLoadTask: Task<Void, Never>?
+    private var pendingRestore: (chapterKey: String, page: Int, position: Double)?
 
     private var autoScrollDisplayLink: CADisplayLink?
     private var autoScrollLastTimestamp: CFTimeInterval?
@@ -178,6 +181,28 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
         }
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        restorePendingPosition()
+    }
+
+    /// Keep the saved panel anchored while lazy images replace estimated heights.
+    /// A user drag, tap navigation, slider jump or auto scroll releases the anchor.
+    func restorePendingPosition() {
+        guard !isRestoringChapter, let restore = pendingRestore, chapter?.key == restore.chapterKey,
+              let section = chapters.firstIndex(where: { $0.key == restore.chapterKey }) else { return }
+        isRestoringChapter = true
+        defer { isRestoringChapter = false }
+        collectionNode.view.layoutIfNeeded()
+        guard let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: IndexPath(row: restore.page, section: section))?.frame,
+              frame.height > 0 else { return }
+        zoomView.adjustContentSize()
+        let offset = max(0, min(frame.minY + CGFloat(restore.position) * frame.height,
+                               max(0, scrollView.contentSize.height - scrollView.bounds.height)))
+        collectionNode.contentOffset.y = offset
+        scrollView.contentOffset = collectionNode.contentOffset
+    }
+
     enum ScreenPosition {
         case top
         case middle
@@ -260,6 +285,7 @@ extension ReaderWebtoonViewController {
 
     private func startAutoScroll() {
         guard !isAutoScrolling else { return }
+        pendingRestore = nil
 
         isAutoScrolling = true
         resumeAutoScroll()
@@ -337,6 +363,7 @@ extension ReaderWebtoonViewController {
 // MARK: - Scroll View Delegate
 extension ReaderWebtoonViewController {
     override func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        pendingRestore = nil
         super.scrollViewWillBeginDragging(scrollView)
         restorePreloadRange()
         pauseAutoScroll()
@@ -350,6 +377,7 @@ extension ReaderWebtoonViewController {
         // invokes the collection delegate; don't process the same frame twice.
         guard scrollView === self.scrollView else { return }
         super.scrollViewDidScroll(scrollView)
+        guard !isRestoringChapter, pendingRestore == nil else { return }
 
         isScrolling = true
 
@@ -396,6 +424,7 @@ extension ReaderWebtoonViewController {
     }
 
     func jumpToPage(_ page: Int) {
+        pendingRestore = nil
         guard let chapter, let section = chapters.firstIndex(of: chapter),
               let chapterPages = pages[safe: section], chapterPages.count > 2 else { return }
         let row = max(1, min(page, chapterPages.count - 2))
@@ -865,6 +894,7 @@ extension ReaderWebtoonViewController {
 // MARK: - Reader Delegate
 extension ReaderWebtoonViewController: ReaderReaderDelegate {
     func moveLeft() {
+        pendingRestore = nil
         let offset = CGPoint(
             x: collectionNode.contentOffset.x,
             y: max(
@@ -879,6 +909,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
     }
 
     func moveRight() {
+        pendingRestore = nil
         let offset = CGPoint(
             x: collectionNode.contentOffset.x,
             y: min(
@@ -893,6 +924,7 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
     }
 
     func sliderMoved(value: CGFloat) {
+        pendingRestore = nil
         isSliding = true
 
         // get slider area
@@ -938,18 +970,33 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
     }
 
     func setChapter(_ chapter: AidokuRunner.Chapter, startPage: Int) {
+        chapterLoadTask?.cancel()
+        isRestoringChapter = true
+        pendingRestore = nil
         self.chapter = chapter
         lastReportedPage = -1
         updateDoubleTapZoomSetting()
         chapters = [chapter]
 
-        Task {
+        chapterLoadTask = Task {
+            let identifier = viewModel.physicalIdentifier(key: chapter.key)
+            let savedPosition: Double?
+            if let local = ReaderProgressStore.position(for: identifier), local.page == startPage {
+                savedPosition = local.scrollPosition
+            } else {
+                savedPosition = await CoreDataManager.shared.container.performBackgroundTask { context in
+                    let history = CoreDataManager.shared.getHistory(chapterId: identifier, context: context)
+                    return Int(history?.progress ?? 0) == startPage ? history?.scrollPosition?.doubleValue : nil
+                }
+            }
+            guard self.chapter == chapter, !Task.isCancelled else { return }
             await viewModel.loadPages(chapter: chapter)
             guard self.chapter == chapter, !Task.isCancelled else { return }
             delegate?.setPages(viewModel.pages)
             if viewModel.pages.isEmpty {
                 pages = []
                 await collectionNode.reloadData()
+                isRestoringChapter = false
                 return
             }
             let sourceId = viewModel.source?.key ?? viewModel.manga.sourceKey
@@ -969,7 +1016,6 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
                 )
             ]]
 
-            let restorePosition = startPage > 0
             var startPage = startPage
             if startPage < 1 {
                 startPage = 1
@@ -978,6 +1024,8 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
             }
 
             await collectionNode.reloadData()
+            guard self.chapter == chapter, !Task.isCancelled else { return }
+            collectionNode.view.layoutIfNeeded()
             zoomView.adjustContentSize()
 
             // scroll to first page
@@ -986,15 +1034,13 @@ extension ReaderWebtoonViewController: ReaderReaderDelegate {
                 at: .top,
                 animated: false
             )
-            let history = CoreDataManager.shared.getHistory(
-                chapterId: viewModel.physicalIdentifier(key: chapter.key), context: CoreDataManager.shared.context)
-            if restorePosition, Int(history?.progress ?? 0) == startPage,
-               let position = history?.scrollPosition?.doubleValue, position.isFinite,
-               let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: IndexPath(row: startPage, section: 0))?.frame {
-                let offset = frame.minY + CGFloat(position) * frame.height
-                collectionNode.contentOffset.y = max(0, min(offset, collectionNode.view.contentSize.height - collectionNode.bounds.height))
-            }
             scrollView.contentOffset = collectionNode.contentOffset
+            let position = savedPosition.flatMap { $0.isFinite ? $0 : nil } ?? 0
+            pendingRestore = (chapter.key, startPage, position)
+            isRestoringChapter = false
+            restorePendingPosition()
+            lastReportedPage = startPage
+            delegate?.setCurrentPage(startPage, position: position)
             if let next = delegate?.getNextChapter() {
                 Task { await viewModel.preload(chapter: next) }
             }
