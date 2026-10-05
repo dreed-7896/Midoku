@@ -228,7 +228,6 @@ class ReaderViewController: BaseObservingViewController {
     }
 
     override func configure() {
-        capturePageNavigationState()
         node.backgroundColor = .systemBackground
         navigationController?.navigationBar.prefersLargeTitles = false
 
