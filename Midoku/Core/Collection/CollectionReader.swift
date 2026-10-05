@@ -127,7 +127,7 @@ extension ReaderViewController {
             let preview = UIGraphicsImageRenderer(size: size).image { _ in
                 image.draw(in: CGRect(origin: .zero, size: size))
             }.jpegData(compressionQuality: 0.55)
-            MCPanelBookmarks.add(.init(id: UUID(), titleKey: collectionSequence?.entryID.uuidString ?? manga.identifier,
+            MCPanelBookmarks.add(.init(id: UUID(), titleKey: collectionSequence?.entryID.uuidString ?? "\(manga.sourceKey):\(manga.key)",
                 slotID: route?.slotID,
                 sourceKey: identity.sourceKey, mangaKey: identity.mangaKey, chapterKey: identity.chapterKey,
                 chapterTitle: display.title ?? "Chapter", chapterNumber: display.chapterNumber,
