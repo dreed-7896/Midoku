@@ -121,6 +121,8 @@ class ReaderViewController: BaseObservingViewController {
     private var lastPositionChange = Date.distantPast
     private var displayedPages: ClosedRange<Int>?
     private var displayedChapterKey: String?
+    private var needsDescriptionUpdate = false
+    private var needsPageControlUpdate = false
     private var sessionReadPages: Set<Int> = []
     private var sessionStartDate: Date?
     private var sessionLastInteraction: Date?
@@ -874,6 +876,9 @@ extension ReaderViewController {
         webtoonReader?.onAutoScrollStateChange = { [weak self] _ in
             self?.updateAutoScrollButtonIcon()
         }
+        webtoonReader?.onContentScrollingChange = { [weak self] scrolling in
+            if !scrolling { self?.renderCurrentPageControls() }
+        }
         controlsView.autoScrollButton.isEnabled = webtoonReader != nil
         updateAutoScrollButtonIcon()
     }
@@ -1051,8 +1056,8 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         if changedPage {
             displayedPages = pages
             displayedChapterKey = chapter.key
-            updateDescriptionButton(pages: pages)
-            updateAutoScrollButton()
+            needsDescriptionUpdate = true
+            needsPageControlUpdate = true
         }
 
         sessionLastInteraction = Date.now
@@ -1066,8 +1071,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         ReaderProgressStore.record(identifier: physicalIdentifier(chapter), page: page,
                                    scrollPosition: position, slotID: collectionSequence?.route(chapter)?.slotID)
         if changedPage {
-            toolbarView.currentPage = page
-            toolbarView.updateSliderPosition()
+            renderCurrentPageControls()
         }
         // Keep the immediate snapshot current, but defer Core Data, library
         // notifications and tracker work until scrolling has settled.
@@ -1096,6 +1100,21 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         }
     }
 
+    private func renderCurrentPageControls() {
+        // Keep progress current while scrolling, without moving the slider's
+        // constraints or rebuilding SwiftUI accessories at every panel boundary.
+        guard (reader as? ReaderWebtoonViewController)?.isContentScrolling != true else { return }
+        if needsDescriptionUpdate, let displayedPages {
+            needsDescriptionUpdate = false
+            updateDescriptionButton(pages: displayedPages)
+        }
+        if needsPageControlUpdate, readerControlsVisible {
+            needsPageControlUpdate = false
+            toolbarView.currentPage = currentPage
+            toolbarView.updateSliderPosition()
+        }
+    }
+
     private func updateDescriptionButton(pages: ClosedRange<Int>) {
         let pageItems = pages.compactMap { self.pages[safe: $0 - 1]?.toNew() }
         if pageItems.contains(where: { $0.hasDescription }) {
@@ -1108,6 +1127,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
                 self.descriptionButtonController.view.alpha = 1
             }
         } else {
+            guard !descriptionButtonController.view.isHidden else { return }
             UIView.animate(withDuration: CATransaction.animationDuration()) {
                 self.descriptionButtonController.view.alpha = 0
             } completion: { _ in
@@ -1581,7 +1601,10 @@ extension ReaderViewController {
         controlsView.isUserInteractionEnabled = visible
         NSLayoutConstraint.deactivate(visible ? accessoryBottomFullscreen : accessoryBottomWithControls)
         NSLayoutConstraint.activate(visible ? accessoryBottomWithControls : accessoryBottomFullscreen)
-        if visible { controlsView.isHidden = false }
+        if visible {
+            controlsView.isHidden = false
+            renderCurrentPageControls()
+        }
         setNeedsStatusBarAppearanceUpdate()
         setNeedsUpdateOfHomeIndicatorAutoHidden()
         NotificationCenter.default.post(name: visible ? .readerShowingBars : .readerHidingBars, object: nil)

@@ -39,6 +39,7 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
 
     private var shouldShowLiveTextButton = false
     private var liveTextAnalysisTask: Task<Void, Never>?
+    private var pendingLiveTextAnalysis: Any?
 
     private var hasScheduledDictionaryTextAnalysis = false
     private var needsDictionaryOverlayRender = false
@@ -125,6 +126,17 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
         cancelDictionaryTextAnalysis()
     }
 
+    override func didLoad() {
+        super.didLoad()
+        // Install interactions once, rather than inspecting/creating UIKit views
+        // whenever Texture moves this panel into its display range.
+        Task { @MainActor [weak self] in
+            guard let self, !page.isTextPage, let delegate else { return }
+            imageNode.isUserInteractionEnabled = true
+            imageNode.addInteraction(UIContextMenuInteraction(delegate: delegate))
+        }
+    }
+
     override func layout() {
         super.layout()
 
@@ -156,25 +168,9 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
         displayPage()
     }
 
-    override func didExitDisplayState() {
-        super.didExitDisplayState()
-        guard !isVisible else { return }
-
-        // don't hide images if zooming in/out
-        if let delegate, delegate.isZooming {
-            return
-        }
-
-        cancelLiveTextAnalysis()
-        cancelDictionaryTextAnalysis()
-        clearDictionaryOverlays()
-        hasScheduledDictionaryTextAnalysis = false
-        needsDictionaryOverlayRender = false
-        // Keep decoded pages within the preload range for quick direction changes.
-        // Release them when they leave that range, or on a memory warning.
-    }
-
     private func releasePageResources() {
+        // Retain images and completed analysis until leaving the preload range,
+        // so direction changes don't rebuild interactions and repeat OCR.
         clearDisplayedImage()
         text = nil
         imageNode.alpha = 0
@@ -209,12 +205,6 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
 }
 
 extension ReaderWebtoonPageNode {
-    func getPillarboxHeight(percent: CGFloat, maxWidth: CGFloat) -> CGFloat {
-        guard let image, image.size.width > 0 else { return 0 }
-        let width = maxWidth * percent
-        return width / image.size.width * image.size.height
-    }
-
     func isPillarboxOrientation() -> Bool {
         pillarboxOrientation == "both"
             || (pillarboxOrientation == "portrait" && pillarboxLayoutState.isPortrait)
@@ -222,27 +212,21 @@ extension ReaderWebtoonPageNode {
     }
 
     override func layoutSpecThatFits(_ constrainedSize: ASSizeRange) -> ASLayoutSpec {
-        if let image {
+        if !page.isTextPage {
+            // Keep the same hierarchy before/after loading and across preload
+            // eviction. Showing a cached image does not need a layout transition.
+            let imageLayout = ASRatioLayoutSpec(ratio: ratio ?? Self.defaultRatio, child: imageNode)
+            let content: ASLayoutSpec
             if pillarbox && isPillarboxOrientation() {
-                let percent = (100 - pillarboxAmount) / 100
-                let height = getPillarboxHeight(percent: percent, maxWidth: constrainedSize.max.width)
-
-                imageNode.style.width = ASDimensionMakeWithFraction(percent)
-                imageNode.style.height = ASDimensionMakeWithPoints(height)
-                imageNode.style.alignSelf = .center
-
-                return ASCenterLayoutSpec(
-                    horizontalPosition: .center,
-                    verticalPosition: .center,
-                    sizingOption: [],
-                    child: imageNode
+                let inset = constrainedSize.max.width * pillarboxAmount / 200
+                content = ASInsetLayoutSpec(
+                    insets: UIEdgeInsets(top: 0, left: inset, bottom: 0, right: inset),
+                    child: imageLayout
                 )
             } else {
-                let ratio = image.size.width > 0
-                    ? image.size.height / image.size.width
-                    : Self.defaultRatio
-                return ASRatioLayoutSpec(ratio: ratio, child: imageNode)
+                content = imageLayout
             }
+            return ASOverlayLayoutSpec(child: content, overlay: progressNode)
         } else if text != nil {
             // todo: the text node should probably adjust its size based on the text
             if pillarbox && isPillarboxOrientation() {
@@ -520,29 +504,8 @@ extension ReaderWebtoonPageNode {
                 hasDisplayedContent = false
             }
 
-            Task { @MainActor in
-                imageNode.isUserInteractionEnabled = true
-                if let delegate,
-                   !imageNode.view.interactions.contains(where: { $0 is UIContextMenuInteraction }) {
-                    imageNode.addInteraction(UIContextMenuInteraction(delegate: delegate))
-                }
-
-                if
-                    #available(iOS 16.0, *),
-                    UserDefaults.standard.bool(forKey: "Reader.liveText"),
-                    ImageAnalyzer.isSupported,
-                    imageNode.imageAnalaysisInteraction == nil
-                {
-                    let interaction = ImageAnalysisInteraction()
-                    interaction.preferredInteractionTypes = .automatic
-                    imageNode.addInteraction(interaction)
-                    await analyzeLiveText()
-                }
-
-                if isVisible, !hasScheduledDictionaryTextAnalysis {
-                    hasScheduledDictionaryTextAnalysis = true
-                    scheduleDictionaryTextAnalysis()
-                }
+            Task { @MainActor [weak self] in
+                self?.prepareImageFeaturesIfIdle()
             }
         } else if let text {
             progressNode.isHidden = true
@@ -554,11 +517,22 @@ extension ReaderWebtoonPageNode {
 
         if !hasDisplayedContent {
             hasDisplayedContent = true
-            transition()
+            let widthFactor = pillarbox && isPillarboxOrientation() ? (100 - pillarboxAmount) / 100 : 1
+            let expectedHeight = pageWidth * (ratio ?? Self.defaultRatio) * widthFactor
+            if !page.isTextPage, pageWidth > 0, abs(calculatedSize.height - expectedHeight) < 0.5 {
+                imageNode.alpha = 1
+            } else {
+                transition()
+            }
         }
     }
 
     private func clearDisplayedImage() {
+        cancelLiveTextAnalysis()
+        cancelDictionaryTextAnalysis()
+        clearDictionaryOverlays()
+        hasScheduledDictionaryTextAnalysis = false
+        needsDictionaryOverlayRender = false
         hasDisplayedContent = false
         imageNode.reset()
         image = nil
@@ -575,6 +549,32 @@ extension ReaderWebtoonPageNode {
     }
 
     @MainActor
+    func prepareImageFeaturesIfIdle() {
+        guard isVisible, image != nil, delegate?.isContentScrolling != true else { return }
+        if #available(iOS 16.0, *) {
+            if let analysis = pendingLiveTextAnalysis as? ImageAnalysis {
+                imageNode.imageAnalaysisInteraction?.analysis = analysis
+                imageNode.imageAnalaysisInteraction?.isSupplementaryInterfaceHidden = !shouldShowLiveTextButton
+                pendingLiveTextAnalysis = nil
+            }
+            if UserDefaults.standard.bool(forKey: "Reader.liveText"),
+               ImageAnalyzer.isSupported,
+               imageNode.imageAnalaysisInteraction == nil {
+                let interaction = ImageAnalysisInteraction()
+                interaction.preferredInteractionTypes = .automatic
+                imageNode.addInteraction(interaction)
+                Task { @MainActor [weak self] in await self?.analyzeLiveText() }
+            }
+        }
+        if !hasScheduledDictionaryTextAnalysis {
+            hasScheduledDictionaryTextAnalysis = true
+            scheduleDictionaryTextAnalysis()
+        } else if needsDictionaryOverlayRender {
+            renderDictionaryOverlaysIfNeeded()
+        }
+    }
+
+    @MainActor
     private func analyzeLiveText() async {
         guard #available(iOS 16.0, *), let image else { return }
 
@@ -588,14 +588,13 @@ extension ReaderWebtoonPageNode {
 
             guard
                 !Task.isCancelled,
-                let self,
-                let interaction = self.imageNode.imageAnalaysisInteraction
+                let self
             else {
                 return
             }
 
-            interaction.analysis = analysis
-            interaction.isSupplementaryInterfaceHidden = !self.shouldShowLiveTextButton
+            self.pendingLiveTextAnalysis = analysis
+            self.prepareImageFeaturesIfIdle()
         }
 
         await liveTextAnalysisTask?.value
@@ -604,6 +603,7 @@ extension ReaderWebtoonPageNode {
     private func cancelLiveTextAnalysis() {
         liveTextAnalysisTask?.cancel()
         liveTextAnalysisTask = nil
+        pendingLiveTextAnalysis = nil
 
         if #available(iOS 16.0, *) {
             Task { @MainActor [weak imageNode] in
@@ -652,17 +652,14 @@ extension ReaderWebtoonPageNode {
         cancelLiveTextAnalysis()
         cancelDictionaryTextAnalysis()
         clearDictionaryOverlays()
+        hasScheduledDictionaryTextAnalysis = false
+        needsDictionaryOverlayRender = false
 
         // remove data from non-visible pages
         guard !isVisible else { return }
 
         cancelPageLoad()
-        clearDisplayedImage()
-        text = nil
-
-        imageNode.alpha = 0
-        textNode.alpha = 0
-        progressNode.isHidden = false
+        releasePageResources()
     }
 
 }
@@ -674,7 +671,7 @@ extension ReaderWebtoonPageNode {
     }
 
     private func renderDictionaryOverlaysIfNeeded() {
-        guard imageNode.bounds.width > 0 else {
+        guard isVisible, delegate?.isContentScrolling != true, imageNode.bounds.width > 0 else {
             needsDictionaryOverlayRender = true
             return
         }

@@ -52,6 +52,11 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
         didSet {
             guard isContentScrolling != oldValue else { return }
             onContentScrollingChange?(isContentScrolling)
+            if !isContentScrolling {
+                collectionNode.visibleNodes.forEach {
+                    ($0 as? ReaderWebtoonPageNode)?.prepareImageFeaturesIfIdle()
+                }
+            }
         }
     }
 
