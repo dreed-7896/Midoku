@@ -48,21 +48,19 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
     private var isScrolling = false
     // Indicates if an info refresh should be done if info pages are off screen
     private var needsInfoRefresh = false
+    private var imageFeaturesTask: Task<Void, Never>?
     private(set) var isContentScrolling = false {
         didSet {
             guard isContentScrolling != oldValue else { return }
             onContentScrollingChange?(isContentScrolling)
-            if !isContentScrolling {
-                collectionNode.visibleNodes.forEach {
-                    ($0 as? ReaderWebtoonPageNode)?.prepareImageFeaturesIfIdle()
-                }
-            }
+            imageFeaturesTask?.cancel()
+            imageFeaturesTask = nil
+            if !isContentScrolling { scheduleImageFeaturesIfIdle() }
         }
     }
 
     // Stores the last calculated page number
     private var previousPage = 0
-    private var lastPositionUpdate = CFTimeInterval(0)
     private var lastReportedPage = -1
     private var isRestoringChapter = false
     private var chapterLoadTask: Task<Void, Never>?
@@ -96,6 +94,21 @@ class ReaderWebtoonViewController: ZoomableCollectionViewController {
 
     deinit {
         autoScrollDisplayLink?.invalidate()
+        imageFeaturesTask?.cancel()
+    }
+
+    func scheduleImageFeaturesIfIdle() {
+        guard !isContentScrolling, !isZooming, imageFeaturesTask == nil else { return }
+        imageFeaturesTask = Task { @MainActor [weak self] in
+            // Short pauses between swipes should not start OCR/overlay work.
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+            guard let self else { return }
+            imageFeaturesTask = nil
+            guard !isContentScrolling, !isZooming, viewIfLoaded?.window != nil else { return }
+            collectionNode.visibleNodes.forEach {
+                ($0 as? ReaderWebtoonPageNode)?.prepareImageFeaturesIfIdle()
+            }
+        }
     }
 
     override func configure() {
@@ -296,6 +309,10 @@ extension ReaderWebtoonViewController {
         resumeAutoScroll()
 
         let displayLink = CADisplayLink(target: self, selector: #selector(handleAutoScrollFrame(_:)))
+        let maximumFrameRate = Float(view.window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
+        displayLink.preferredFrameRateRange = CAFrameRateRange(
+            minimum: min(60, maximumFrameRate), maximum: maximumFrameRate, preferred: maximumFrameRate
+        )
         displayLink.add(to: .main, forMode: .common)
         autoScrollDisplayLink = displayLink
 
@@ -413,14 +430,21 @@ extension ReaderWebtoonViewController {
         // update page number
         let page = currentPage(at: pagePath)
         previousPage = page
-        // The scroll view emits several callbacks per display frame. Page changes
-        // must be immediate, while the fractional offset only needs a few samples
-        // per second for restoring the exact webtoon position.
-        let now = CACurrentMediaTime()
-        guard page != lastReportedPage || now - lastPositionUpdate >= 0.1 else { return }
+        // Keep page changes in memory; fractional resume updates wait until the
+        // gesture ends, the reader closes, or the app leaves the foreground.
+        guard page != lastReportedPage else { return }
+        reportReadingPosition(page: page, path: pagePath)
+    }
+
+    func captureReadingPosition() {
+        guard !isRestoringChapter, pendingRestore == nil else { return }
+        let path = getCurrentPagePath()
+        reportReadingPosition(page: currentPage(at: path), path: path)
+    }
+
+    private func reportReadingPosition(page: Int, path: IndexPath?) {
         lastReportedPage = page
-        lastPositionUpdate = now
-        let position = pagePath.flatMap { path -> Double? in
+        let position = path.flatMap { path -> Double? in
             guard let frame = collectionNode.collectionViewLayout.layoutAttributesForItem(at: path)?.frame,
                   frame.height > 0 else { return nil }
             return Double((collectionNode.contentOffset.y - frame.minY) / frame.height)
@@ -442,12 +466,15 @@ extension ReaderWebtoonViewController {
     // zooming sometimes causes page count to jitter between two pages
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         isZooming = true
+        imageFeaturesTask?.cancel()
+        imageFeaturesTask = nil
         stopAutoScroll()
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
         isZooming = false
         scrollViewDidScroll(scrollView)
+        scheduleImageFeaturesIfIdle()
     }
 
     // fix content size when rotating
@@ -662,6 +689,7 @@ extension ReaderWebtoonViewController {
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        captureReadingPosition()
         setLiveTextButtonHidden(false)
         if infinite {
             isScrolling = false
@@ -849,6 +877,7 @@ extension ReaderWebtoonViewController {
             let pages = pages[safe: chapterIndex - 1]
         else { return }
         self.chapter = chapter
+        lastReportedPage = -1
         updateDoubleTapZoomSetting()
         delegate?.setChapter(chapter)
         delegate?.setPages(pages.filter({ $0.type == .imagePage }))
@@ -864,6 +893,7 @@ extension ReaderWebtoonViewController {
             let pages = pages[safe: chapterIndex + 1]
         else { return }
         self.chapter = chapter
+        lastReportedPage = -1
         updateDoubleTapZoomSetting()
         delegate?.setChapter(chapter)
         delegate?.setPages(pages.filter({ $0.type == .imagePage }))

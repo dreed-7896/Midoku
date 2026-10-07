@@ -101,24 +101,28 @@ class ReaderViewController: BaseObservingViewController {
 
     private var chapterList: [AidokuRunner.Chapter]
     private var chaptersToMark: [AidokuRunner.Chapter] = []
-    private var chaptersToRemoveDownload: [AidokuRunner.Chapter] = [] {
-        didSet {
-            // ensure chapters queued for deletion are persistent, in case of app termination
-            if chaptersToRemoveDownload.isEmpty {
-                UserDefaults.standard.removeObject(forKey: "Data.chaptersToBeDeleted")
-            } else {
-                let data = try? JSONEncoder().encode(chaptersToRemoveDownload.map {
-                    physicalIdentifier($0)
-                })
-                UserDefaults.standard.set(data, forKey: "Data.chaptersToBeDeleted")
-            }
-        }
-    }
+    private var chaptersToRemoveDownload: [AidokuRunner.Chapter] = []
     private var forceStartPage: Int?
     private var currentPage = 1
     private var currentPosition: Double?
-    private var progressSaveTask: Task<Void, Never>?
-    private var lastPositionChange = Date.distantPast
+    private struct PendingProgress {
+        let identifier: ChapterIdentifier
+        let chapter: AidokuRunner.Chapter
+        let page: Int
+        let totalPages: Int
+        let position: Double?
+    }
+    private struct PendingSession {
+        let identifier: ChapterIdentifier
+        let startDate: Date
+        let endDate: Date
+        let pagesRead: Int
+    }
+    private var pendingProgress: [ChapterIdentifier: PendingProgress] = [:]
+    private var pendingCompletions: [ChapterIdentifier: AidokuRunner.Chapter] = [:]
+    private var pendingSessions: [PendingSession] = []
+    private var persistenceTask: Task<Void, Never>?
+    private var persistenceGeneration = 0
     private var displayedPages: ClosedRange<Int>?
     private var displayedChapterKey: String?
     private var needsDescriptionUpdate = false
@@ -437,22 +441,24 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        progressSaveTask?.cancel()
-        progressSaveTask = nil
-        ReaderProgressStore.flush()
-
         (reader as? ReaderWebtoonViewController)?.stopAutoScroll()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
 
         if !chaptersToRemoveDownload.isEmpty {
+            let identifiers = chaptersToRemoveDownload.map { physicalIdentifier($0) }
+            chaptersToRemoveDownload = []
+            UserDefaults.standard.set(try? JSONEncoder().encode(identifiers), forKey: "Data.chaptersToBeDeleted")
             Task {
-                await DownloadManager.shared.delete(chapters: chaptersToRemoveDownload.map {
-                    physicalIdentifier($0)
-                })
-                chaptersToRemoveDownload = []
+                await DownloadManager.shared.delete(chapters: identifiers)
+                UserDefaults.standard.removeObject(forKey: "Data.chaptersToBeDeleted")
             }
         }
 
-        guard currentPage >= 1 else { return }
+        // Keep persistence and its library notifications out of the dismissal
+        // animation as well as out of scrolling.
         Task {
             await updateReadPosition()
         }
@@ -501,14 +507,12 @@ extension ReaderViewController {
         }
     }
 
-    func updateReadPosition(
+    private func stageReadPosition(
         currentPage: Int? = nil,
         totalPages: Int? = nil,
         chapter: AidokuRunner.Chapter? = nil,
-        scrollPosition: Double? = nil,
-        saveSession: Bool = true
-    ) async {
-        ReaderProgressStore.flush()
+        scrollPosition: Double? = nil
+    ) {
         let effectiveTotalPages = totalPages ?? toolbarView.totalPages ?? 0
         let effectiveCurrentPage = currentPage ?? self.currentPage
 
@@ -524,34 +528,68 @@ extension ReaderViewController {
         let position = scrollPosition ?? currentPosition
 
         let chapterId = physicalIdentifier(chapter)
-        let (completed, _) = await CoreDataManager.shared.container.performBackgroundTask { @Sendable context in
-            CoreDataManager.shared.getProgress(
-                chapterId: chapterId,
-                context: context
-            )
-        }
-        await HistoryManager.shared.setProgress(
-            chapterId: chapterId,
+        pendingProgress[chapterId] = PendingProgress(
+            identifier: chapterId,
             chapter: physicalChapter(chapter),
-            progress: currentPage,
+            page: currentPage,
             totalPages: effectiveTotalPages,
-            scrollPosition: position,
-            completed: completed
+            position: position
         )
-        if saveSession { await saveReadingSession(chapter: chapter) }
     }
 
-    private func saveReadingSession(chapter: AidokuRunner.Chapter? = nil) async {
+    private func stageReadingSession() {
         guard let sessionStartDate else { return }
         let pagesRead = sessionReadPages.count
-        if pagesRead > 0 && sessionLastInteraction != nil {
-            let chapter = chapter ?? self.chapter
-            await HistoryManager.shared.addSession(
-                chapterId: physicalIdentifier(chapter),
-                data: .init(startDate: sessionStartDate, endDate: .now, pagesRead: pagesRead)
-            )
+        if pagesRead > 0, sessionLastInteraction != nil, !AppSettings.general.incognitoMode.get() {
+            pendingSessions.append(PendingSession(identifier: physicalIdentifier(chapter),
+                                                  startDate: sessionStartDate, endDate: .now, pagesRead: pagesRead))
         }
         self.sessionStartDate = nil
+    }
+
+    /// Called only when leaving the reader, deactivating the app, or explicitly
+    /// replacing the text reader. Chapter crossings only stage updates in memory.
+    func updateReadPosition() async {
+        if !hasExited { (reader as? ReaderWebtoonViewController)?.captureReadingPosition() }
+        stageReadPosition()
+        stageReadingSession()
+        ReaderProgressStore.flush()
+
+        let progress = Array(pendingProgress.values)
+        let completions = pendingCompletions
+        let sessions = pendingSessions
+        pendingProgress.removeAll(keepingCapacity: true)
+        pendingCompletions.removeAll(keepingCapacity: true)
+        pendingSessions.removeAll(keepingCapacity: true)
+        guard !progress.isEmpty || !completions.isEmpty || !sessions.isEmpty else { return }
+
+        // Backgrounding and closing can overlap. Snapshot before suspending and
+        // serialize saves so an older checkpoint cannot replace a newer one.
+        let previousTask = persistenceTask
+        persistenceGeneration += 1
+        let generation = persistenceGeneration
+        let task = Task {
+            await previousTask?.value
+            let completionsByManga = Dictionary(grouping: completions, by: { $0.key.mangaIdentifier })
+            for (mangaId, items) in completionsByManga {
+                await HistoryManager.shared.addHistory(mangaId: mangaId, chapters: items.map { $0.value })
+            }
+            for item in progress {
+                let identifier = item.identifier
+                let (completed, _) = await CoreDataManager.shared.container.performBackgroundTask { context in
+                    CoreDataManager.shared.getProgress(chapterId: identifier, context: context)
+                }
+                await HistoryManager.shared.setProgress(chapterId: item.identifier, chapter: item.chapter,
+                    progress: item.page, totalPages: item.totalPages, scrollPosition: item.position, completed: completed)
+            }
+            for session in sessions {
+                await HistoryManager.shared.addSession(chapterId: session.identifier,
+                    data: .init(startDate: session.startDate, endDate: session.endDate, pagesRead: session.pagesRead))
+            }
+        }
+        persistenceTask = task
+        await task.value
+        if persistenceGeneration == generation { persistenceTask = nil }
     }
 
     func loadChapterList() async {
@@ -674,12 +712,10 @@ extension ReaderViewController {
     }
 
     @objc func close() {
+        (reader as? ReaderWebtoonViewController)?.captureReadingPosition()
         hasExited = true
         chapterLoadTask?.cancel()
-        progressSaveTask?.cancel()
-        progressSaveTask = nil
-        ReaderProgressStore.flush()
-        // viewWillDisappear saves the final position; temporary files are removed on deinit,
+        // viewDidDisappear saves the final position; temporary files are removed on deinit,
         // after page requests have released them (including cancelled interactive dismissals).
         dismiss(animated: true)
     }
@@ -1010,19 +1046,13 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     func setChapter(_ chapter: AidokuRunner.Chapter) {
         guard chapter != self.chapter else { return }
 
-        // store current history data since it will change when new chapter loads
-        let currentPage = currentPage
-        let totalPages = toolbarView.totalPages
-        let oldChapter = self.chapter
-        let position = currentPosition
-        progressSaveTask?.cancel()
-        progressSaveTask = nil
-        Task {
-            await updateReadPosition(currentPage: currentPage, totalPages: totalPages, chapter: oldChapter, scrollPosition: position ?? 0)
-            sessionReadPages = [self.currentPage]
-            sessionStartDate = Date.now
-            sessionLastInteraction = nil
-        }
+        // Infinite scrolling crosses chapters while momentum is still active.
+        // Capture the outgoing chapter synchronously without starting disk work.
+        stageReadPosition()
+        stageReadingSession()
+        sessionReadPages = []
+        sessionStartDate = .now
+        sessionLastInteraction = nil
 
         self.chapter = chapter
         chapterLoadTask?.cancel()
@@ -1073,21 +1103,8 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         if changedPage {
             renderCurrentPageControls()
         }
-        // Keep the immediate snapshot current, but defer Core Data, library
-        // notifications and tracker work until scrolling has settled.
-        lastPositionChange = .now
-        if progressSaveTask == nil {
-            progressSaveTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
-                    guard let self, !hasExited else { return }
-                    guard Date.now.timeIntervalSince(lastPositionChange) >= 2 else { continue }
-                    progressSaveTask = nil
-                    await updateReadPosition(saveSession: false)
-                    return
-                }
-            }
-        }
+        // No timer, disk save, library notification or tracker request while
+        // reading, including pauses between swipes. Save at lifecycle boundaries.
         // Mark as completed when reaching the last page
         // Exception: Don't mark for the pre-pagination placeholder (single text page before
         // ReaderPagedTextViewController has paginated it). Once paginated, even single-page
@@ -1198,14 +1215,10 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     func setCompleted() {
         guard !AppSettings.general.incognitoMode.get(), !chaptersToMark.isEmpty else { return }
 
-        let completedRoutes = chaptersToMark.map { (physicalIdentifier($0), physicalChapter($0)) }
-        chaptersToMark.removeAll()
-        Task {
-            for (identity, chapter) in completedRoutes {
-                await HistoryManager.shared.addHistory(mangaId: identity.mangaIdentifier, chapters: [chapter])
-                MCCollectionStore.shared.recordRead(identity, completed: true)
-            }
+        for chapter in chaptersToMark {
+            pendingCompletions[physicalIdentifier(chapter)] = physicalChapter(chapter)
         }
+        chaptersToMark.removeAll()
 
         if AppSettings.downloads.deleteDownloadAfterReading.get() {
             chaptersToRemoveDownload.append(chapter)
@@ -1729,3 +1742,4 @@ extension ReaderViewController {
         }
     }
 }
+

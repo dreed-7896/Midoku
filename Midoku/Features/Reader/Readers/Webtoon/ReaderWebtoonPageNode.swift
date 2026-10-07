@@ -84,9 +84,11 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
 
     lazy var textNode = HostingNode(content: MarkdownView(page.text ?? ""))
 
-    lazy var progressNode = ASCellNode(viewBlock: {
-        CircularProgressView()
-    })
+    lazy var progressNode: ASCellNode = {
+        let node = ASCellNode(viewBlock: { CircularProgressView() })
+        node.style.preferredSize = CGSize(width: 44, height: 44)
+        return node
+    }()
 
     init(
         source: AidokuRunner.Source?,
@@ -174,7 +176,7 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
         clearDisplayedImage()
         text = nil
         imageNode.alpha = 0
-        textNode.alpha = 0
+        if page.isTextPage { textNode.alpha = 0 }
         progressNode.isHidden = false
     }
 
@@ -184,7 +186,7 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
         UIView.performWithoutAnimation {
             super.animateLayoutTransition(context)
             imageNode.alpha = image == nil ? 0 : 1
-            textNode.alpha = text == nil ? 0 : 1
+            if page.isTextPage { textNode.alpha = text == nil ? 0 : 1 }
         }
         Task { @MainActor [weak self] in
             guard let delegate = self?.delegate else { return }
@@ -217,7 +219,10 @@ extension ReaderWebtoonPageNode {
             } else {
                 content = imageLayout
             }
-            return ASOverlayLayoutSpec(child: content, overlay: progressNode)
+            // A full-panel progress UIView allocates a huge drawing surface for
+            // tall webtoon images. The indicator only needs a small fixed layer.
+            let progress = ASCenterLayoutSpec(centeringOptions: .XY, sizingOptions: [], child: progressNode)
+            return ASOverlayLayoutSpec(child: content, overlay: progress)
         } else if text != nil {
             // todo: the text node should probably adjust its size based on the text
             if pillarbox && isPillarboxOrientation() {
@@ -279,7 +284,7 @@ extension ReaderWebtoonPageNode {
         guard image == nil, text == nil, !Task.isCancelled else { return }
 
         imageNode.alpha = 0
-        textNode.alpha = 0
+        if page.isTextPage { textNode.alpha = 0 }
         progressNode.isHidden = false
         progressNode.isUserInteractionEnabled = false
 
@@ -343,10 +348,12 @@ extension ReaderWebtoonPageNode {
 
         let imageTask = ImagePipeline.shared.loadImage(
             with: request,
-            progress: { [weak progressView] _, completed, total in
-                guard let progressView else { return }
+            progress: { [weak self] _, completed, total in
+                guard let self, self.isVisible, !self.progressNode.isHidden,
+                      self.progressNode.isNodeLoaded, total > 0 else { return }
                 Task { @MainActor in
-                    progressView.setProgress(value: Float(completed) / Float(total), withAnimation: false)
+                    guard self.isVisible, !self.progressNode.isHidden else { return }
+                    self.progressView.setProgress(value: Float(completed) / Float(total), withAnimation: false)
                 }
             },
             completion: { _ in }
@@ -496,7 +503,7 @@ extension ReaderWebtoonPageNode {
             }
 
             Task { @MainActor [weak self] in
-                self?.prepareImageFeaturesIfIdle()
+                self?.delegate?.scheduleImageFeaturesIfIdle()
             }
         } else if let text {
             progressNode.isHidden = true

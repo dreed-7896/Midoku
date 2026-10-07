@@ -13,9 +13,7 @@ enum ReaderProgressStore {
     }
 
     private static let writer = DispatchQueue(label: "Midoku.reader-progress", qos: .utility)
-    private static var pendingFlush: Task<Void, Never>?
     private static var isDirty = false
-    private static var lastRecordTime = Date.distantPast
     private static let key = "Reader.lastPositions.v1"
     private static var positions: [ChapterIdentifier: Position] = {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -34,27 +32,11 @@ enum ReaderProgressStore {
         positions[identifier] = Position(identifier: identifier, page: page, scrollPosition: scrollPosition,
                                          updatedAt: Date(), slotID: slotID)
         isDirty = true
-        lastRecordTime = .now
-        // Even background UserDefaults writes notify UI observers. Keep the
-        // in-memory resume position current, but persist only after reading rests.
-        // Explicit flushes on exit/background still save the latest position.
-        if pendingFlush == nil {
-            pendingFlush = Task {
-                while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
-                    guard Date.now.timeIntervalSince(lastRecordTime) >= 2 else { continue }
-                    break
-                }
-                guard !Task.isCancelled else { return }
-                pendingFlush = nil
-                flush()
-            }
-        }
+        // Reading only updates memory. The reader explicitly flushes on exit or
+        // backgrounding; even a pause between swipes must not start disk work.
     }
 
     static func flush() {
-        pendingFlush?.cancel()
-        pendingFlush = nil
         guard isDirty else { return }
         isDirty = false
         let snapshot = Array(positions.values)

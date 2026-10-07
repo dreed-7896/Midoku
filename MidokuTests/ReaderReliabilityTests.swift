@@ -10,6 +10,63 @@ import UIKit
 @MainActor
 @Suite("Reader resume and resource limits", .serialized)
 struct ReaderReliabilityTests {
+    @Test func readingAcrossChaptersKeepsProgressInMemoryUntilExplicitSave() async throws {
+        let manga = AidokuRunner.Manga(sourceKey: "reader.lifecycle", key: UUID().uuidString, title: "Lifecycle")
+        let chapters = [AidokuRunner.Chapter(key: "one", chapterNumber: 1),
+                        AidokuRunner.Chapter(key: "two", chapterNumber: 2),
+                        AidokuRunner.Chapter(key: "three", chapterNumber: 3)]
+        let identifiers = chapters.map {
+            ChapterIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key, chapterKey: $0.key)
+        }
+        let manager = CoreDataManager.shared
+        defer {
+            for identifier in identifiers {
+                if let history = manager.getHistory(chapterId: identifier, context: manager.context) {
+                    manager.context.delete(history)
+                }
+            }
+            try? manager.context.save()
+            ReaderProgressStore.remove(chapterIDs: identifiers)
+        }
+        let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: chapters[0])
+        let pages = (0..<3).map { Page(sourceId: manga.sourceKey, chapterId: "one", index: $0) }
+        reader.setPages(pages)
+        reader.setCurrentPage(3, position: 0.5)
+        reader.setChapter(chapters[1])
+        reader.setPages(pages)
+        reader.setCurrentPage(3, position: 0.75)
+        reader.setChapter(chapters[2])
+        reader.setPages(pages)
+        reader.setCurrentPage(2, position: 0.25)
+
+        // Neither chapter crossings, completion, nor a pause should write history.
+        try await Task.sleep(for: .milliseconds(2200))
+        for identifier in identifiers {
+            #expect(manager.getHistory(chapterId: identifier, context: manager.context) == nil)
+        }
+        #expect(ReaderProgressStore.position(for: identifiers[2])?.page == 2)
+        #expect(ReaderProgressStore.position(for: identifiers[2])?.scrollPosition == 0.25)
+
+        // Closing/backgrounding drains all chapters, not just the current one.
+        await reader.updateReadPosition()
+        #expect(manager.getProgress(chapterId: identifiers[0]).completed)
+        #expect(manager.getProgress(chapterId: identifiers[1]).completed)
+        #expect(!manager.getProgress(chapterId: identifiers[2]).completed)
+        #expect(manager.getHistory(chapterId: identifiers[2], context: manager.context)?.progress == 2)
+    }
+
+    @Test func tallPanelsKeepTheProgressDrawingSurfaceSmall() {
+        let node = ReaderWebtoonPageNode(source: nil, page: Page(sourceId: "test", chapterId: "tall"),
+            temporaryPageStore: ReaderTemporaryPageStore(), pillarboxLayoutState: ReaderPillarboxLayoutState())
+        node.pillarbox = false
+        node.ratio = 40
+        let size = CGSize(width: 320, height: 12_800)
+        _ = node.layoutThatFits(ASSizeRange(min: size, max: size))
+        #expect(node.progressNode.calculatedSize == CGSize(width: 44, height: 44))
+        #expect(!node.progressNode.isNodeLoaded)
+        #expect(node.getHeight(for: size) == 12_800)
+    }
+
     @Test func imageResizesOnlyCompensateForGeometryAboveTheViewport() {
         let layout = MCMeasuredWebtoonLayout()
         let dataSource = MCWebtoonLayoutDataSource()
