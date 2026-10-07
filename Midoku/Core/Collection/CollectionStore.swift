@@ -128,6 +128,7 @@ final class MCCollectionStore {
     private(set) var writable = true
     private let fileURL: URL
     @ObservationIgnored private var entryChapterCounts: [UUID: (total: Int, unread: Int)] = [:]
+    @ObservationIgnored private var chapterReleaseDates: [UUID: Date] = [:]
     @ObservationIgnored private var recentReads: [ChapterIdentifier: Date] = [:]
     @ObservationIgnored private var snapshotRevision = 0
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
@@ -170,7 +171,7 @@ final class MCCollectionStore {
             let data = try Data(contentsOf: fileURL)
             let loaded = try JSONDecoder().decode(MCCollectionSnapshot.self, from: data)
             try loaded.validate()
-            entryChapterCounts = loaded.library.chapterCounts()
+            updateChapterMetadata(loaded)
             snapshot = loaded
         } catch {
             writable = false
@@ -188,7 +189,7 @@ final class MCCollectionStore {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: [.atomic])
         let categoriesChanged = snapshot.categories != candidate.categories
-        entryChapterCounts = candidate.library.chapterCounts()
+        updateChapterMetadata(candidate)
         snapshot = candidate
         snapshotRevision += 1
         if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
@@ -214,7 +215,7 @@ final class MCCollectionStore {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: fileURL, options: .atomic)
             let categoriesChanged = snapshot.categories != candidate.categories
-            entryChapterCounts = candidate.library.chapterCounts()
+            updateChapterMetadata(candidate)
             snapshot = candidate
             snapshotRevision += 1
             if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
@@ -231,6 +232,15 @@ final class MCCollectionStore {
     /// Built once per saved snapshot instead of scanning every chapter on each category swipe.
     func unreadCount(entryID: UUID) -> Int { entryChapterCounts[entryID]?.unread ?? 0 }
     func chapterCount(entryID: UUID) -> Int { entryChapterCounts[entryID]?.total ?? 0 }
+
+    func chapterReleaseDate(_ chapterID: UUID) -> Date? { chapterReleaseDates[chapterID] }
+
+    private func updateChapterMetadata(_ state: MCCollectionSnapshot) {
+        entryChapterCounts = state.library.chapterCounts()
+        chapterReleaseDates = Dictionary(uniqueKeysWithValues: state.chapters.compactMap { stored in
+            stored.chapter.dateUploaded.map { (stored.chapterID, $0) }
+        })
+    }
 
     func sourceName(_ connectionID: UUID) -> String {
         snapshot.connections.first { $0.id == connectionID }?.name ?? "Unavailable source"

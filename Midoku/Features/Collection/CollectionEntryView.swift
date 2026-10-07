@@ -101,6 +101,7 @@ struct MCEntryView: View {
     @State private var reader: MCReaderSheet?
     @State private var showBookmarks = false
     @State private var selectedBookmark: MCPanelBookmark?
+    @State private var bookmarkedSlotIDs = MCPanelBookmarks.bookmarkedSlotIDs
     @State private var showReorder = false
     @State private var showStatusEditor = false
     @State private var didLongPressSave = false
@@ -276,6 +277,10 @@ struct MCEntryView: View {
         .midokuAccent()
         .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
         .onChange(of: slots.map(\.id)) { _, ids in selected.formIntersection(ids) }
+        .onAppear { bookmarkedSlotIDs = MCPanelBookmarks.bookmarkedSlotIDs }
+        .onReceive(NotificationCenter.default.publisher(for: MCPanelBookmarks.changed)) { _ in
+            bookmarkedSlotIDs = MCPanelBookmarks.bookmarkedSlotIDs
+        }
         .task {
             #if DEBUG
             let args = ProcessInfo.processInfo.arguments
@@ -403,7 +408,7 @@ struct MCEntryView: View {
                     entryActionIcon(selecting ? "checkmark.circle.fill" : "checkmark.circle", selected: selecting)
                 }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
                 Button { showBookmarks = true } label: { entryActionIcon("bookmark") }
-                    .accessibilityLabel("View bookmarked panels")
+                    .accessibilityLabel("View bookmarks")
                 Button { chapterGridOverride.wrappedValue = !grid } label: {
                     entryActionIcon(grid ? "list.bullet" : "square.grid.2x2")
                 }.accessibilityLabel(grid ? "List view" : "Grid view")
@@ -556,6 +561,13 @@ struct MCEntryView: View {
         .contextMenu {
 
                 Button("Read chapter", systemImage: "book") { open(slot) }
+                Button(bookmarkedSlotIDs.contains(slot.id) ? "Remove chapter bookmark" : "Bookmark chapter",
+                       systemImage: bookmarkedSlotIDs.contains(slot.id) ? "bookmark.slash" : "bookmark") {
+                    do {
+                        try MCPanelBookmarks.toggleChapter(entryID: entryID, slotID: slot.id)
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    } catch { store.error = error.localizedDescription }
+                }
                 Button("View panels", systemImage: "square.grid.3x3") { open(slot, showPanels: true) }
                 if let url = chapterWebURL(slot) {
                     Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
@@ -613,10 +625,14 @@ struct MCEntryView: View {
                         if store.library.isRead(slot) && !selecting { readMark.padding(6) }
                     }
                     .overlay(alignment: .topTrailing) { if selecting { selectionMark(slot).padding(6) } }
+                    .overlay(alignment: .topLeading) {
+                        if bookmarkedSlotIDs.contains(slot.id) { bookmarkMark.padding(6) }
+                    }
                 if gridStyle == .standard { chapterText(slot, compact: true) }
             }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(slot.preferred.map { store.library.chapterDisplayTitle($0) } ?? "Chapter")
+                .accessibilityLabel((slot.preferred.map { store.library.chapterDisplayTitle($0) } ?? "Chapter")
+                    + (bookmarkedSlotIDs.contains(slot.id) ? ", Bookmarked" : ""))
                 .accessibilityAddTraits(selected.contains(slot.id) ? .isSelected : [])
         } else {
             HStack(spacing: 12) {
@@ -628,6 +644,10 @@ struct MCEntryView: View {
                 }
                 chapterText(slot, compact: false)
                 Spacer(minLength: 0)
+                if bookmarkedSlotIDs.contains(slot.id) {
+                    Image(systemName: "bookmark.fill").font(.subheadline).foregroundStyle(Color.accentColor)
+                        .accessibilityLabel("Bookmarked chapter")
+                }
                 if selecting { selectionMark(slot) }
                 else if store.library.isRead(slot) { Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.secondary) }
             }.opacity(store.library.isRead(slot) && !selecting ? 0.65 : 1)
@@ -650,6 +670,15 @@ struct MCEntryView: View {
             .accessibilityLabel("Read")
     }
 
+    private var bookmarkMark: some View {
+        Image(systemName: "bookmark.fill")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 26, height: 30)
+            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+            .accessibilityLabel("Bookmarked chapter")
+    }
+
     private func chapterText(_ slot: MCChapterSlot, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID) {
@@ -660,6 +689,13 @@ struct MCEntryView: View {
                 }
                 Text(store.sourceName(chapter.identity.listing.connectionID) + (slot.variants.count > 1 ? " · \(slot.variants.count) alternatives" : ""))
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                if !compact, let date = store.chapterReleaseDate(chapter.id) {
+                    Label {
+                        Text(date, format: .dateTime.day().month(.abbreviated).year())
+                    } icon: { Image(systemName: "calendar") }
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityLabel("Released \(date.formatted(date: .abbreviated, time: .omitted))")
+                }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }

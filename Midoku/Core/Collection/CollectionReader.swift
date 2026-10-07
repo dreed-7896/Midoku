@@ -77,22 +77,6 @@ struct MCReaderSheet: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// Small, durable panel references. The preview is kept small so bookmarks do not
-/// depend on the source remaining online or the image cache surviving eviction.
-struct MCPanelBookmark: Codable, Identifiable {
-    let id: UUID
-    let titleKey: String
-    var title: String? = nil
-    let slotID: UUID?
-    let sourceKey: String
-    let mangaKey: String
-    let chapterKey: String
-    let chapterTitle: String
-    let chapterNumber: Float?
-    let page: Int
-    let preview: Data?
-}
-
 @MainActor
 enum MCPanelBookmarks {
     private static let key = "Reader.panelBookmarks.v1"
@@ -109,9 +93,7 @@ enum MCPanelBookmarks {
 
     static func add(_ bookmark: MCPanelBookmark) {
         var items = all
-        items.removeAll { $0.titleKey == bookmark.titleKey && $0.slotID == bookmark.slotID
-            && $0.sourceKey == bookmark.sourceKey && $0.mangaKey == bookmark.mangaKey
-            && $0.chapterKey == bookmark.chapterKey && $0.page == bookmark.page }
+        items.removeAll { bookmark.replaces($0) }
         items.insert(bookmark, at: 0)
         UserDefaults.standard.set(try? JSONEncoder().encode(items), forKey: key)
         NotificationCenter.default.post(name: changed, object: nil)
@@ -122,21 +104,51 @@ enum MCPanelBookmarks {
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
-    static func reader(for bookmark: MCPanelBookmark) throws -> MCReaderSheet {
-        let store = MCCollectionStore.shared
+    static var bookmarkedSlotIDs: Set<UUID> {
+        Set(all.filter(\.isChapter).compactMap(\.slotID))
+    }
+
+    static func toggleChapter(entryID: UUID, slotID: UUID, store: MCCollectionStore? = nil) throws {
+        let existing = all.filter { $0.isChapter && $0.slotID == slotID }
+        if !existing.isEmpty {
+            let ids = Set(existing.map(\.id))
+            UserDefaults.standard.set(try JSONEncoder().encode(all.filter { !ids.contains($0.id) }), forKey: key)
+            NotificationCenter.default.post(name: changed, object: nil)
+            return
+        }
+        let store = store ?? .shared
+        let rootID = store.library.ancestorIDs(of: entryID).last ?? entryID
+        guard let entry = store.library.entry(entryID), let root = store.library.entry(rootID),
+              let slot = entry.slots.first(where: { $0.id == slotID }), let variant = slot.preferred,
+              let chapter = store.library.chapter(variant.chapterID), let physical = store.physical(chapter.identity)
+        else { throw MCLibraryFailure.missing }
+        add(.init(id: UUID(), titleKey: rootID.uuidString, title: store.library.title(root), slotID: slot.id,
+            sourceKey: physical.manga.sourceKey, mangaKey: physical.manga.key, chapterKey: physical.chapter.key,
+            chapterTitle: store.library.chapterDisplayTitle(variant),
+            chapterNumber: store.library.number(variant).flatMap(Float.init), page: 1, preview: nil, kind: .chapter))
+    }
+
+    static func reader(for bookmark: MCPanelBookmark, store: MCCollectionStore? = nil) throws -> MCReaderSheet {
+        let store = store ?? .shared
         guard let connection = store.snapshot.connections.first(where: { $0.sourceKey == bookmark.sourceKey }),
               let chapter = store.library.chapters.first(where: {
                   $0.identity.listing.connectionID == connection.id
                       && $0.identity.listing.externalID == bookmark.mangaKey && $0.identity.externalID == bookmark.chapterKey
               }) else { throw MCLibraryFailure.missing }
         let entries = store.library.entries.sorted { ($0.id.uuidString == bookmark.titleKey ? 0 : 1) < ($1.id.uuidString == bookmark.titleKey ? 0 : 1) }
-        for entry in entries {
-            let slots = store.library.flattenedChapters(entryID: entry.id).map(\.slot)
-            let slot = slots.first { $0.id == bookmark.slotID && $0.variants.contains { $0.chapterID == chapter.id } }
-                ?? slots.first { $0.variants.contains { $0.chapterID == chapter.id } }
-            if let slot {
-                return MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: slot.id,
-                                     initialChapterID: chapter.id), startPage: bookmark.page)
+        // Resolve the exact saved slot across all roots before a legacy physical fallback.
+        // A removed chapter bookmark must not jump to another copy of that chapter.
+        for requireExactSlot in [true, false] {
+            if !requireExactSlot && bookmark.isChapter && bookmark.slotID != nil { continue }
+            for entry in entries {
+                let slots = store.library.flattenedChapters(entryID: entry.id).map(\.slot)
+                let slot = slots.first {
+                    (!requireExactSlot || $0.id == bookmark.slotID) && $0.variants.contains { $0.chapterID == chapter.id }
+                }
+                if let slot {
+                    return MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: slot.id,
+                                         initialChapterID: chapter.id, store: store), startPage: bookmark.isChapter ? 1 : bookmark.page)
+                }
             }
         }
         throw MCLibraryFailure.missing

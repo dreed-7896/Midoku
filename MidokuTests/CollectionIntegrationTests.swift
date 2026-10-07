@@ -9,6 +9,67 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func chapterBookmarksKeepPanelsAndExactPhysicalRouting() throws {
+        let defaultsKey = "Reader.panelBookmarks.v1"
+        let previous = UserDefaults.standard.data(forKey: defaultsKey)
+        defer { UserDefaults.standard.set(previous, forKey: defaultsKey) }
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("collection.json"))
+        let manga = AidokuRunner.Manga(sourceKey: "bookmarks.a", key: "book", title: "A")
+        let entryID = try store.add(manga, chapters: [.init(key: "one", chapterNumber: 1)])
+        let otherID = try store.add(.init(sourceKey: "bookmarks.b", key: "book", title: "B"),
+                                    chapters: [.init(key: "one", chapterNumber: 1)])
+        let slot = try #require(store.library.entry(entryID)?.slots.first)
+        let otherSlot = try #require(store.library.entry(otherID)?.slots.first)
+        let panel = MCPanelBookmark(id: UUID(), titleKey: entryID.uuidString, slotID: slot.id,
+            sourceKey: manga.sourceKey, mangaKey: manga.key, chapterKey: "one",
+            chapterTitle: "Chapter 1", chapterNumber: 1, page: 1, preview: nil)
+        MCPanelBookmarks.add(panel)
+        try MCPanelBookmarks.toggleChapter(entryID: entryID, slotID: slot.id, store: store)
+        #expect(MCPanelBookmarks.all.count == 2)
+        #expect(MCPanelBookmarks.bookmarkedSlotIDs == [slot.id])
+        #expect(!MCPanelBookmarks.bookmarkedSlotIDs.contains(otherSlot.id))
+        let saved = try #require(MCPanelBookmarks.all.first(where: \.isChapter))
+        let reader = try MCPanelBookmarks.reader(for: saved, store: store)
+        #expect(reader.startPage == 1)
+        let route = try #require(reader.sequence.route(key: reader.sequence.initialKey))
+        #expect(route.slotID == slot.id)
+        #expect(route.identifier.sourceKey == manga.sourceKey)
+        #expect(route.identifier.chapterKey == "one")
+        try store.change { state in
+            _ = try state.remember(manga, chapters: [.init(key: "one", title: "Refreshed", chapterNumber: 1)],
+                                   sourceName: "A", complete: true)
+        }
+        #expect(MCPanelBookmarks.all.contains { $0.id == saved.id })
+        try MCPanelBookmarks.toggleChapter(entryID: entryID, slotID: slot.id, store: store)
+        #expect(MCPanelBookmarks.all.map(\.id) == [panel.id])
+        #expect(MCPanelBookmarks.bookmarkedSlotIDs.isEmpty)
+    }
+
+    @Test func releaseDatesFollowPhysicalChaptersRefreshAndRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let manga = AidokuRunner.Manga(sourceKey: "dates", key: "book", title: "Dates")
+        let id = try store.add(manga, chapters: [.init(key: "one", dateUploaded: date), .init(key: "unknown")])
+        let known = try #require(store.library.chapters.first { $0.record.id == "one" })
+        let unknown = try #require(store.library.chapters.first { $0.record.id == "unknown" })
+        #expect(store.chapterReleaseDate(known.id) == date)
+        #expect(store.chapterReleaseDate(unknown.id) == nil)
+        #expect(MCCollectionStore(fileURL: file).chapterReleaseDate(known.id) == date)
+        let updated = date.addingTimeInterval(86_400)
+        try await store.changeAsync { state in
+            _ = try state.remember(manga, chapters: [.init(key: "one", dateUploaded: updated)],
+                                   sourceName: "Dates", complete: false)
+        }
+        #expect(store.chapterReleaseDate(known.id) == updated)
+        #expect(store.library.entry(id) != nil)
+    }
+
     @Test func groupedTitlesPersistAndNestedTitlesRemainIndependentRandomPicks() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -324,7 +324,7 @@ struct MCCollectionRootView: View {
                             Toggle("Cover grid", isOn: $grid)
                             Toggle("Chapter grid", isOn: $chapterGrid)
                             Button("Categories", systemImage: "folder") { showCategories = true }
-                            Button("Bookmarked panels", systemImage: "bookmark") { showBookmarks = true }
+                            Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
                             Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
                     }
