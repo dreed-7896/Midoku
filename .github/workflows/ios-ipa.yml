@@ -14,6 +14,8 @@ concurrency:
 
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: xcode-27
     timeout-minutes: 40
     env:
@@ -22,18 +24,23 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Test SideStore publishing
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Build unsigned device app
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
+          version="0.9.${GITHUB_RUN_NUMBER}"
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData \
             -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+            MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build \
             2>&1 | tee build.log
       - name: Package IPA
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p build/package/Payload build/artifacts
           app=build/DerivedData/Build/Products/Release-iphoneos/Midoku.app
           test -s "$app/Midoku"
@@ -42,7 +49,11 @@ jobs:
           (cd build/package && zip -qry ../artifacts/Midoku-unsigned.ipa Payload)
           unzip -t build/artifacts/Midoku-unsigned.ipa
           (cd build/artifacts && shasum -a 256 Midoku-unsigned.ipa > SHA256SUMS.txt)
-          printf 'Commit: %s\nUnsigned iOS device build for LiveContainer.\n' "$GITHUB_SHA" > build/artifacts/BUILD.txt
+          printf 'Commit: %s\nUnsigned iOS device build for SideStore or LiveContainer.\n' "$GITHUB_SHA" > build/artifacts/BUILD.txt
+      - name: Publish release and SideStore source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_sidestore.py build/artifacts/Midoku-unsigned.ipa
       - name: Upload IPA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
