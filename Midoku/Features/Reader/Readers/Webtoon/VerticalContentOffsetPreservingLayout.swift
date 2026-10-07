@@ -36,6 +36,17 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
     private var orderedAttributes: [UICollectionViewLayoutAttributes] = []
     private var needsRebuild = true
     private var preparedSize = CGSize.zero
+    private var preparedScale: CGFloat = 1
+    private var pendingOffsetAdjustment: CGFloat = 0
+
+    // The overlay scroll view owns momentum. Geometry updates report a delta;
+    // they must not set its position from the collection view's mirrored offset.
+    var onGeometryChange: (() -> Void)?
+
+    func consumeOffsetAdjustment() -> CGFloat {
+        defer { pendingOffsetAdjustment = 0 }
+        return pendingOffsetAdjustment
+    }
 
     override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
         // Moving the viewport doesn't change any page geometry.
@@ -69,8 +80,22 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
         guard let collectionView else { return }
         let boundsSize = collectionView.bounds.size
         guard needsRebuild || preparedSize != boundsSize else { return }
+        let oldContentSize = contentSize
+        let anchor: (indexPath: IndexPath, minY: CGFloat)?
+        if !isInsertingCellsAbove, preparedSize == boundsSize, preparedScale == scale {
+            let index = firstAttributeIndex(endingAfter: collectionView.contentOffset.y + pendingOffsetAdjustment)
+            if index < orderedAttributes.count {
+                let attributes = orderedAttributes[index]
+                anchor = (attributes.indexPath, attributes.frame.minY)
+            } else {
+                anchor = nil
+            }
+        } else {
+            anchor = nil
+        }
         needsRebuild = false
         preparedSize = boundsSize
+        preparedScale = scale
 
         // Rebuild only after a page size, chapter, viewport size or zoom change.
         currentAttributes.removeAll(keepingCapacity: true)
@@ -126,16 +151,17 @@ class VerticalContentOffsetPreservingLayout: UICollectionViewFlowLayout {
         // preserve offset when inserting cells above
         if isInsertingCellsAbove {
             if let oldContentSize = contentSizeBeforeInsertingAbove {
-                UIView.performWithoutAnimation {
-                    let newContentSize = collectionViewContentSize
-                    let contentOffsetX = collectionView.contentOffset.x + (newContentSize.width - oldContentSize.width)
-                    let contentOffsetY = collectionView.contentOffset.y + (newContentSize.height - oldContentSize.height)
-                    let newOffset = CGPoint(x: contentOffsetX, y: contentOffsetY)
-                    collectionView.contentOffset = newOffset
-                }
+                pendingOffsetAdjustment += contentSize.height - oldContentSize.height
             }
             contentSizeBeforeInsertingAbove = nil
             isInsertingCellsAbove = false
+        } else if let anchor, let attributes = currentAttributes[anchor.indexPath] {
+            // Only height changes above the viewport move the reading position.
+            // Images loading below it must never contribute to this correction.
+            pendingOffsetAdjustment += attributes.frame.minY - anchor.minY
+        }
+        if contentSize != oldContentSize || pendingOffsetAdjustment != 0 {
+            onGeometryChange?()
         }
     }
 

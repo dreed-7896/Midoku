@@ -6,7 +6,6 @@
 //
 
 import AsyncDisplayKit
-import Gifu
 import SwiftUI
 import UIKit
 import VisionKit
@@ -17,6 +16,7 @@ class ZoomableCollectionView: ASDisplayNode {
     let layout: UICollectionViewLayout
     private let dummyZoomView: UIView
     private var contentSizeUpdateScheduled = false
+    private(set) var isUpdatingContentGeometry = false
 
     var onZoomScaleChanged: ((CGFloat) -> Void)?
     var doubleTapEnabled: Bool {
@@ -44,6 +44,12 @@ class ZoomableCollectionView: ASDisplayNode {
 
         automaticallyManagesSubnodes = true
         collectionNode.backgroundColor = .clear
+
+        if let layout = layout as? VerticalContentOffsetPreservingLayout {
+            layout.onGeometryChange = { [weak self] in
+                self?.scheduleContentSizeUpdate()
+            }
+        }
 
         // remove gesture recognizers from the collection view (in order to use scroll view's)
 //        collectionNode.view.gestureRecognizers?.forEach {
@@ -77,24 +83,35 @@ class ZoomableCollectionView: ASDisplayNode {
         contentSizeUpdateScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.contentSizeUpdateScheduled = false
+            defer { self.contentSizeUpdateScheduled = false }
             self.collectionNode.view.layoutIfNeeded()
-            let offset = self.collectionNode.contentOffset
             self.adjustContentSize()
-            if self.scrollNode.view.contentOffset != offset {
-                self.scrollNode.view.contentOffset = offset
-            }
         }
     }
 
     @MainActor
     func adjustContentSize() {
+        guard !isUpdatingContentGeometry else { return }
+        isUpdatingContentGeometry = true
+        defer { isUpdatingContentGeometry = false }
+
+        let scrollView = scrollNode.view
+        var offset = scrollView.contentOffset
+        offset.y += (layout as? VerticalContentOffsetPreservingLayout)?.consumeOffsetAdjustment() ?? 0
         let size = layout.collectionViewContentSize
-        if scrollNode.view.contentSize != size {
-            scrollNode.view.contentSize = size
+        if scrollView.contentSize != size {
+            scrollView.contentSize = size
         }
         let frame = CGRect(origin: .zero, size: size)
         if dummyZoomView.frame != frame { dummyZoomView.frame = frame }
+
+        // A deferred layout callback can run after another pan/deceleration tick.
+        // Preserve the live offset, adding only an actual geometry correction.
+        let inset = scrollView.adjustedContentInset
+        offset.x = max(-inset.left, min(offset.x, max(-inset.left, size.width - scrollView.bounds.width + inset.right)))
+        offset.y = max(-inset.top, min(offset.y, max(-inset.top, size.height - scrollView.bounds.height + inset.bottom)))
+        if scrollView.contentOffset != offset { scrollView.contentOffset = offset }
+        if collectionNode.contentOffset != offset { collectionNode.contentOffset = offset }
     }
 
     private var allowNextTouchPassThrough = false
@@ -111,7 +128,7 @@ class ZoomableCollectionView: ASDisplayNode {
             lazy var origType = String(describing: type(of: orig))
             if orig is DictionaryOverlayButton {
                 return orig
-            } else if orig is _ASDisplayView || orig is GIFImageView {
+            } else if orig is _ASDisplayView || orig is ReaderImageView {
                 if lastHit.timeIntervalSinceNow <= -0.1 {
                     if !tempGestures.isEmpty {
                         tempGestures.forEach {
@@ -164,6 +181,7 @@ class ZoomableCollectionView: ASDisplayNode {
 extension ZoomableCollectionView: UIScrollViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard !isUpdatingContentGeometry else { return }
         if collectionNode.contentOffset != scrollView.contentOffset {
             collectionNode.contentOffset = scrollView.contentOffset
         }

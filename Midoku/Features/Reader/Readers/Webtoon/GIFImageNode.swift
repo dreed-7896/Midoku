@@ -9,8 +9,32 @@ import AsyncDisplayKit
 import Gifu
 import VisionKit
 
+// Static panels use UIImageView's normal display path. Gifu's GIFImageView
+// creates an animator and reassigns the image from every layer display callback,
+// even for JPEG/PNG panels. Only opt into that work for an actual animated GIF.
+final class ReaderImageView: UIImageView, GIFAnimatable {
+    var animator: Animator?
+
+    func displayGIF(_ data: Data) {
+        if animator == nil { animator = Animator(withDelegate: self) }
+        animate(withGIFData: data)
+    }
+
+    func clearGIF() {
+        // Releasing the animator also releases its frame buffer and display link.
+        animator = nil
+    }
+
+    override func display(_ layer: CALayer) {
+        if UIImageView.instancesRespond(to: #selector(display(_:))) {
+            super.display(layer)
+        }
+        if animator != nil { updateImageIfNeeded() }
+    }
+}
+
 class GIFImageNode: ASControlNode {
-    var imageView: GIFImageView?
+    var imageView: ReaderImageView?
     var animatedData: Data?
     var storedInteractions: [UIInteraction] = []
 
@@ -22,6 +46,7 @@ class GIFImageNode: ASControlNode {
 
     var image: UIImage? {
         didSet {
+            guard image !== oldValue else { return }
             Task { @MainActor in
                 imageView?.image = image
             }
@@ -43,14 +68,14 @@ class GIFImageNode: ASControlNode {
         super.init()
 
         setViewBlock { [weak self] in
-            let gifView = GIFImageView()
+            let gifView = ReaderImageView()
             gifView.image = self?.image
             gifView.isUserInteractionEnabled = true
             if let contentMode = self?.contentMode {
                 gifView.contentMode = contentMode
             }
             if let data = self?.animatedData {
-                gifView.animate(withGIFData: data)
+                gifView.displayGIF(data)
                 self?.animatedData = nil
             }
             if let storedInteractions = self?.storedInteractions {
@@ -67,7 +92,7 @@ class GIFImageNode: ASControlNode {
     func animate(withGIFData data: Data) {
         if let imageView {
             Task { @MainActor in
-                imageView.animate(withGIFData: data)
+                imageView.displayGIF(data)
             }
         } else {
             animatedData = data
@@ -79,7 +104,7 @@ class GIFImageNode: ASControlNode {
         animatedData = nil
 
         Task { @MainActor [weak imageView] in
-            imageView?.stopAnimatingGIF()
+            imageView?.clearGIF()
             imageView?.image = nil
         }
     }

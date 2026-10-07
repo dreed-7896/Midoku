@@ -179,15 +179,6 @@ class ReaderWebtoonPageNode: BaseObservingCellNode {
     }
 
     override func animateLayoutTransition(_ context: ASContextTransitioning) {
-        // Record the old content size before Texture commits a changed page height.
-        if let indexPath,
-           let collectionNode = owningNode as? ASCollectionNode,
-           let layout = collectionNode.collectionViewLayout as? VerticalContentOffsetPreservingLayout,
-           let oldFrame = layout.layoutAttributesForItem(at: indexPath)?.frame,
-           oldFrame.maxY <= collectionNode.contentOffset.y {
-            layout.isInsertingCellsAbove = true
-        }
-
         // Position the image before revealing it. Fading it in with its old frame
         // made newly loaded pages appear to jump in from the left.
         UIView.performWithoutAnimation {

@@ -380,7 +380,7 @@ extension ReaderWebtoonViewController {
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
         // The outer scroll view drives the collection. Its forwarded offset also
         // invokes the collection delegate; don't process the same frame twice.
-        guard scrollView === self.scrollView else { return }
+        guard scrollView === self.scrollView, !zoomView.isUpdatingContentGeometry else { return }
         super.scrollViewDidScroll(scrollView)
         guard !isRestoringChapter, pendingRestore == nil else { return }
 
@@ -764,7 +764,6 @@ extension ReaderWebtoonViewController {
 //                self.collectionNode.deleteSections(IndexSet(integer: self.pages.count - 1))
 //            }
 //        }
-        self.scrollView.contentOffset = self.collectionNode.contentOffset
         self.zoomView.adjustContentSize()
         CATransaction.commit()
         await trimLoadedChapters()
@@ -812,7 +811,6 @@ extension ReaderWebtoonViewController {
 //                collectionNode.deleteSections(IndexSet(integer: 0))
 //            }
 //        }
-        scrollView.contentOffset = self.collectionNode.contentOffset
         zoomView.adjustContentSize()
         CATransaction.commit()
         await trimLoadedChapters()
@@ -839,7 +837,6 @@ extension ReaderWebtoonViewController {
         }
         for index in above.reversed() { chapters.remove(at: index); pages.remove(at: index) }
         await collectionNode.performBatch(animated: false) { collectionNode.deleteSections(above) }
-        scrollView.contentOffset = collectionNode.contentOffset
         zoomView.adjustContentSize()
     }
 

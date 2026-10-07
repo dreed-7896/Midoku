@@ -10,6 +10,84 @@ import UIKit
 @MainActor
 @Suite("Reader resume and resource limits", .serialized)
 struct ReaderReliabilityTests {
+    @Test func imageResizesOnlyCompensateForGeometryAboveTheViewport() {
+        let layout = MCMeasuredWebtoonLayout()
+        let dataSource = MCWebtoonLayoutDataSource()
+        let collection = UICollectionView(frame: CGRect(x: 0, y: 0, width: 320, height: 600), collectionViewLayout: layout)
+        collection.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "page")
+        collection.dataSource = dataSource
+        collection.reloadData()
+        collection.layoutIfNeeded()
+        collection.contentOffset.y = 250
+        layout.prepare()
+        _ = layout.consumeOffsetAdjustment()
+
+        // Two images finish together, one above and one below the reader.
+        layout.pageHeights[0] = 150
+        layout.pageHeights[10] = 300
+        layout.invalidateLayout()
+        layout.prepare()
+        #expect(layout.consumeOffsetAdjustment() == 50)
+        #expect(layout.consumeOffsetAdjustment() == 0)
+        collection.contentOffset.y = 300
+        #expect(layout.indexPath(at: CGPoint(x: 10, y: 300))?.item == 2)
+
+        // A second layout before the first correction is applied must accumulate
+        // the true delta without changing which panel is anchored.
+        layout.pageHeights[0] = 175
+        layout.invalidateLayout()
+        layout.prepare()
+        layout.pageHeights[1] = 140
+        layout.invalidateLayout()
+        layout.prepare()
+        #expect(layout.consumeOffsetAdjustment() == 65)
+        collection.contentOffset.y = 365
+
+        layout.pageHeights[10] = 100
+        layout.invalidateLayout()
+        layout.prepare()
+        #expect(layout.consumeOffsetAdjustment() == 0)
+        #expect(collection.contentOffset.y == 365)
+    }
+
+    @Test func delayedContentSizeUpdatesKeepTheLiveScrollPosition() async {
+        let layout = MCFixedContentLayout()
+        let zoomView = ZoomableCollectionView(layout: layout)
+        zoomView.frame = CGRect(x: 0, y: 0, width: 320, height: 600)
+        zoomView.scrollNode.frame = zoomView.frame
+        zoomView.collectionNode.frame = zoomView.frame
+        zoomView.adjustContentSize()
+
+        for offset: CGFloat in [500, 420, 700, 300] {
+            zoomView.scheduleContentSizeUpdate()
+            zoomView.scrollNode.view.contentOffset.y = offset
+            // The collection can still hold the previous frame's mirrored offset.
+            zoomView.collectionNode.contentOffset.y = offset - 20
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            #expect(zoomView.scrollNode.view.contentOffset.y == offset)
+            #expect(zoomView.collectionNode.contentOffset.y == offset)
+        }
+    }
+
+    @Test func staticPanelsDoNotAllocateGIFAnimationState() {
+        let view = ReaderImageView(frame: CGRect(x: 0, y: 0, width: 32, height: 32))
+        view.image = UIGraphicsImageRenderer(size: view.bounds.size).image { context in
+            UIColor.white.setFill()
+            context.fill(view.bounds)
+        }
+        view.layer.setNeedsDisplay()
+        view.layer.displayIfNeeded()
+        #expect(view.animator == nil)
+
+        let gif = Data(base64Encoded: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")!
+        view.displayGIF(gif)
+        #expect(view.animator != nil)
+        view.clearGIF()
+        #expect(view.animator == nil)
+    }
+
     @Test func webtoonPagesKeepTheirCollectionPositionWhenAnImageLoads() {
         let node = ReaderWebtoonPageNode(
             source: nil,
@@ -289,10 +367,16 @@ private final class MCReaderStartProbe: UIViewController, ReaderReaderDelegate {
 private final class MCMeasuredWebtoonLayout: VerticalContentOffsetPreservingLayout {
     var measurements = 0
     var pageHeight: CGFloat = 100
+    var pageHeights: [Int: CGFloat] = [:]
     override func getHeight(for indexPath: IndexPath) -> CGFloat {
         measurements += 1
-        return pageHeight
+        return pageHeights[indexPath.item] ?? pageHeight
     }
+}
+
+@MainActor
+private final class MCFixedContentLayout: UICollectionViewLayout {
+    override var collectionViewContentSize: CGSize { CGSize(width: 320, height: 10_000) }
 }
 
 @MainActor

@@ -15,6 +15,7 @@ enum ReaderProgressStore {
     private static let writer = DispatchQueue(label: "Midoku.reader-progress", qos: .utility)
     private static var pendingFlush: Task<Void, Never>?
     private static var isDirty = false
+    private static var lastRecordTime = Date.distantPast
     private static let key = "Reader.lastPositions.v1"
     private static var positions: [ChapterIdentifier: Position] = {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -33,11 +34,18 @@ enum ReaderProgressStore {
         positions[identifier] = Position(identifier: identifier, page: page, scrollPosition: scrollPosition,
                                          updatedAt: Date(), slotID: slotID)
         isDirty = true
-        // Throttle disk snapshots during continuous scrolling. Resume reads the
-        // immediate in-memory position; encoding and disk writes use a serial queue.
+        lastRecordTime = .now
+        // Even background UserDefaults writes notify UI observers. Keep the
+        // in-memory resume position current, but persist only after reading rests.
+        // Explicit flushes on exit/background still save the latest position.
         if pendingFlush == nil {
             pendingFlush = Task {
-                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                    guard Date.now.timeIntervalSince(lastRecordTime) >= 2 else { continue }
+                    break
+                }
+                guard !Task.isCancelled else { return }
                 pendingFlush = nil
                 flush()
             }
