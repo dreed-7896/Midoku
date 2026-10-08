@@ -239,8 +239,11 @@ struct MangaView: View {
                     }
                 }
             }
-            .fullScreenCover(item: $openChapter) { chapter in
-                SwiftUIReaderNavigationController(
+            .onChange(of: openChapter) { _, chapter in
+                guard let chapter, let navigation = path.navigationController else { return }
+                let navigationBarHidden = navigation.isNavigationBarHidden
+                let toolbarHidden = navigation.isToolbarHidden
+                let reader = ReaderViewController(
                     source: viewModel.source,
                     manga: {
                         var mangaWithFilteredChapters = viewModel.manga
@@ -253,8 +256,14 @@ struct MangaView: View {
                     }(),
                     chapter: chapter
                 )
-                .ignoresSafeArea()
-                .navigationTransitionZoom(sourceID: chapter, in: transitionNamespace)
+                reader.isNavigationScreen = true
+                reader.hidesBottomBarWhenPushed = true
+                reader.onNavigationExit = {
+                    openChapter = nil
+                    navigation.setNavigationBarHidden(navigationBarHidden, animated: false)
+                    navigation.isToolbarHidden = toolbarHidden
+                }
+                path.push(reader)
             }
             .sheet(item: $addChapterToEntry) { chapter in
                 MCAddChapterToEntryView(manga: viewModel.manga, chapter: chapter)

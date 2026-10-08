@@ -131,6 +131,11 @@ class ReaderViewController: BaseObservingViewController {
     private var sessionStartDate: Date?
     private var sessionLastInteraction: Date?
     var showPanelsOnOpen = false
+    var isNavigationScreen = false
+    var onNavigateBack: (() -> Void)?
+    var onNavigationExit: (() -> Void)?
+    private lazy var popGestureDelegate = ReaderPopGestureDelegate(reader: self)
+    private let orientationRegistrationID = UUID()
     private var chapterLoadTask: Task<Void, Never>?
     private var hasExited = false
 
@@ -235,7 +240,7 @@ class ReaderViewController: BaseObservingViewController {
 
     override func configure() {
         node.backgroundColor = .systemBackground
-        navigationController?.navigationBar.prefersLargeTitles = false
+        if !isNavigationScreen { navigationController?.navigationBar.prefersLargeTitles = false }
 
         navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.isToolbarHidden = true
@@ -383,6 +388,9 @@ class ReaderViewController: BaseObservingViewController {
         addObserver(forName: ReaderTextTheme.changeNotification) { [weak self] _ in
             self?.updateTextThemeOverride()
         }
+        addObserver(forName: .readerOrientation) { [weak self] _ in
+            self?.registerScreenOrientation()
+        }
         addObserver(forName: UIScene.willDeactivateNotification) { [weak self] _ in
             guard let self else { return }
             Task {
@@ -430,7 +438,10 @@ class ReaderViewController: BaseObservingViewController {
             openPanels()
         }
 
-        disableSwipeGestures()
+        if isNavigationScreen, let navigationController {
+            popGestureDelegate.install(on: navigationController)
+            registerScreenOrientation()
+        }
         configureNavigationBarDismissTapGesture(enabled: isDictionarySingleTapLookupActiveForCurrentChapter)
 
         // resume auto scroll if it was paused when presenting a sheet
@@ -441,11 +452,21 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        (reader as? ReaderWebtoonViewController)?.captureReadingPosition()
         (reader as? ReaderWebtoonViewController)?.stopAutoScroll()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        popGestureDelegate.restore()
+        InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
+        if isNavigationScreen, let gesture = barDismissNavigationBarTapGesture {
+            gesture.view?.removeGestureRecognizer(gesture)
+            barDismissNavigationBarTapGesture = nil
+        }
+        if isNavigationScreen, isMovingFromParent || navigationController == nil {
+            finishNavigationExit()
+        }
 
         if !chaptersToRemoveDownload.isEmpty {
             let identifiers = chaptersToRemoveDownload.map { physicalIdentifier($0) }
@@ -484,27 +505,6 @@ extension ReaderViewController {
         let controller = UIHostingController(rootView: grid)
         if let sheet = controller.sheetPresentationController { sheet.detents = [.medium(), .large()] }
         present(controller, animated: true)
-    }
-
-    func disableSwipeGestures() {
-        // the view with the target gesture recognizers changes based on if it was presented from uikit or swiftui
-        let gestureRecognizers = (parent?.view.gestureRecognizers ?? []) + (parent?.view.superview?.superview?.gestureRecognizers ?? [])
-
-        for recognizer in gestureRecognizers {
-            switch String(describing: type(of: recognizer)) {
-                case "_UIParallaxTransitionPanGestureRecognizer": // swipe edge gesture
-                    recognizer.isEnabled = false // The reader owns a left-edge gesture for every reading mode.
-
-                case "_UIContentSwipeDismissGestureRecognizer": // swipe down gesture
-                    recognizer.isEnabled = false
-
-//                case "_UITransformGestureRecognizer": // pinch gesture
-//                    recognizer.isEnabled = true
-
-                default:
-                    break
-            }
-        }
     }
 
     private func stageReadPosition(
@@ -717,7 +717,31 @@ extension ReaderViewController {
         chapterLoadTask?.cancel()
         // viewDidDisappear saves the final position; temporary files are removed on deinit,
         // after page requests have released them (including cancelled interactive dismissals).
-        dismiss(animated: true)
+        if isNavigationScreen {
+            if let onNavigateBack { onNavigateBack() }
+            else { navigationController?.popViewController(animated: true) }
+        } else { dismiss(animated: true) }
+    }
+
+    func finishNavigationExit() {
+        (reader as? ReaderWebtoonViewController)?.captureReadingPosition()
+        hasExited = true
+        chapterLoadTask?.cancel()
+        popGestureDelegate.restore()
+        InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
+        onNavigationExit?()
+        onNavigationExit = nil
+    }
+
+    private func registerScreenOrientation() {
+        guard isNavigationScreen, viewIfLoaded?.window != nil else { return }
+        let orientations: UIInterfaceOrientationMask
+        switch UserDefaults.standard.string(forKey: "Reader.orientation") {
+        case "portrait": orientations = .portrait
+        case "landscape": orientations = .landscape
+        default: orientations = .all
+        }
+        InterfaceOrientationCoordinator.shared.register(orientations: orientations, id: orientationRegistrationID)
     }
 
     @objc func sliderMoved(_ sender: ReaderSliderView) {
@@ -833,7 +857,6 @@ extension ReaderViewController {
         configureDictionaryOverlayInteractionMode()
         configureDictionaryOverlayTapHandler()
         updateAutoScrollButton()
-        disableSwipeGestures()
         view.bringSubviewToFront(controlsView)
         updateTextThemeOverride()
     }
@@ -842,7 +865,8 @@ extension ReaderViewController {
         let theme = ReaderTextTheme.getCurrent()
         let isTextReader = reader is ReaderTextViewController || reader is ReaderPagedTextViewController
         let styleOverride: UIUserInterfaceStyle = isTextReader ? ReaderTextTheme.getInterfaceStyleOverride() : .unspecified
-        navigationController?.overrideUserInterfaceStyle = styleOverride
+        if isNavigationScreen { overrideUserInterfaceStyle = styleOverride }
+        else { navigationController?.overrideUserInterfaceStyle = styleOverride }
         // presented sheets don't inherit the override
         presentedViewController?.overrideUserInterfaceStyle = styleOverride
         let themed = isTextReader && (theme != .default || styleOverride != .unspecified)
@@ -852,7 +876,7 @@ extension ReaderViewController {
         let backgroundColor = ReaderTextTheme.getCurrentBackground()
         let textColor = ReaderTextTheme.getCurrentText()
         let titleColor = themed ? textColor : nil
-        if let navigationBar = navigationController?.navigationBar {
+        if !isNavigationScreen, let navigationBar = navigationController?.navigationBar {
             func applyTheme(_ appearance: UINavigationBarAppearance) {
                 if themed {
                     if #available(iOS 26.0, *), reader is ReaderTextViewController {

@@ -239,49 +239,52 @@ struct ReaderReliabilityTests {
     @Test func backGestureDoesNotMakeVerticalReaderPansWait() {
         let manga = AidokuRunner.Manga(sourceKey: "gesture", key: "book", title: "Book")
         let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))
-        let navigation = ReaderNavigationController(readerViewController: reader)
+        let navigation = UINavigationController(rootViewController: UIViewController())
         navigation.loadViewIfNeeded()
+        navigation.pushViewController(reader, animated: false)
         reader.loadViewIfNeeded()
         let scroll = UIScrollView()
         reader.view.addSubview(scroll)
-        let back = navigation.readerBackGesture
+        let delegate = ReaderPopGestureDelegate(reader: reader)
+        delegate.install(on: navigation)
+        defer { delegate.restore() }
+        let back = navigation.interactivePopGestureRecognizer!
         let pan = scroll.panGestureRecognizer
 
         for mode: ReadingMode in [.webtoon, .continuous, .vertical] {
             reader.readingMode = mode
-            #expect(navigation.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
-            #expect(!navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: pan))
+            #expect(delegate.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
         }
         for mode: ReadingMode in [.rtl, .ltr] {
             reader.readingMode = mode
-            #expect(!navigation.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
-            #expect(navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: pan))
+            #expect(!delegate.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
         }
         // Switching back from horizontal paging must not leave a permanent failure dependency.
         reader.readingMode = .webtoon
-        #expect(!navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: pan))
-        #expect(!back.delaysTouchesBegan && !back.delaysTouchesEnded && !back.cancelsTouchesInView)
-        #expect(back.maximumNumberOfTouches == 1)
+        #expect(delegate.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: pan))
         let unrelatedScroll = UIScrollView()
-        #expect(!navigation.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: unrelatedScroll.panGestureRecognizer))
-        #expect(!navigation.gestureRecognizer(back, shouldBeRequiredToFailBy: unrelatedScroll.panGestureRecognizer))
+        #expect(!delegate.gestureRecognizer(back, shouldRecognizeSimultaneouslyWith: unrelatedScroll.panGestureRecognizer))
     }
 
-    @Test func backGestureRejectsControlsInteriorTouchesAndVerticalMotion() {
+    @Test func readerUsesAndRestoresNativePopRecognizer() {
         let manga = AidokuRunner.Manga(sourceKey: "gesture", key: "book", title: "Book")
         let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))
-        let navigation = ReaderNavigationController(readerViewController: reader)
+        let navigation = UINavigationController(rootViewController: UIViewController())
         navigation.loadViewIfNeeded()
+        navigation.pushViewController(reader, animated: false)
         reader.loadViewIfNeeded()
-        #expect(navigation.acceptsReaderBackTouch(at: .init(x: 12, y: 200), touchedView: reader.view))
-        #expect(!navigation.acceptsReaderBackTouch(at: .init(x: 150, y: 200), touchedView: reader.view))
-        #expect(!navigation.acceptsReaderBackTouch(at: .init(x: 12, y: 200), touchedView: reader.controlsView.closeButton))
-        #expect(!navigation.acceptsReaderBackTouch(at: .init(x: 12, y: 200), touchedView: reader.controlsView.toolbar.sliderView))
-        #expect(ReaderNavigationController.shouldBeginReaderBack(velocity: .init(x: 200, y: 20)))
-        for velocity in [CGPoint.zero, .init(x: -200, y: 0), .init(x: 20, y: 200), .init(x: 20, y: -200), .init(x: 100, y: 100)] {
-            #expect(!ReaderNavigationController.shouldBeginReaderBack(velocity: velocity))
-        }
-        #expect(!ReaderNavigationController.shouldCloseReader(translation: .init(x: 120, y: 400), velocity: .zero, width: 390))
+        let recognizer = navigation.interactivePopGestureRecognizer!
+        let originalDelegate = recognizer.delegate
+        let count = navigation.view.gestureRecognizers?.count
+        let delegate = ReaderPopGestureDelegate(reader: reader)
+        delegate.install(on: navigation)
+        #expect(navigation.interactivePopGestureRecognizer === recognizer)
+        #expect(navigation.view.gestureRecognizers?.count == count)
+        #expect(recognizer.delegate === delegate)
+        navigation.setViewControllers([reader], animated: false)
+        #expect(!delegate.gestureRecognizerShouldBegin(recognizer))
+        delegate.restore()
+        #expect(recognizer.delegate === originalDelegate)
     }
 
     @Test func repeatedSwipeToHideDoesNotRetriggerReaderTransitions() {
@@ -372,6 +375,46 @@ struct ReaderReliabilityTests {
         await Task.yield()
     }
 
+    @Test func failedRefreshResetsStateAndPreservesChaptersOnRetry() async throws {
+        await SourceManager.shared.waitForSourcesLoad()
+        let sources = SourceStore.shared.sourcesByKey
+        let disabled = SourceStore.shared.disabledSourceKeys
+        defer { SourceStore.shared.update(sourcesByKey: sources, disabledSourceKeys: disabled) }
+        let key = "mc.refresh.failure.\(UUID().uuidString)"
+        var testSources = sources
+        testSources[key] = AidokuRunner.Source(url: nil, key: key, name: "Failure", version: 1,
+            languages: ["en"], contentRating: .safe, runner: MCFailedRefreshRunner())
+        SourceStore.shared.update(sourcesByKey: testSources, disabledSourceKeys: disabled)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("collection.json"))
+        let id = try store.add(.init(sourceKey: key, key: "one", title: "One"), chapters: [.init(key: "chapter")])
+        let slots = try #require(store.library.entry(id)?.slots)
+        for _ in 0..<2 {
+            await store.refresh()
+            #expect(!store.isRefreshing)
+            #expect(store.error?.contains("unexpected data") == true)
+            #expect(store.library.entry(id)?.slots.map(\.id) == slots.map(\.id))
+            #expect(store.chapterCount(entryID: id) == 1)
+        }
+    }
+
+    @Test func globalRefreshSkipsStaticGalleriesButExplicitRefreshReportsFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("collection.json"))
+        let key = "mc.static.unavailable.\(UUID().uuidString)"
+        let id = try store.add(.init(sourceKey: key, key: "one", title: "One", updateStrategy: .never),
+            chapters: [.init(key: "chapter")])
+        await store.refresh()
+        #expect(store.error == nil)
+        #expect(!store.isRefreshing)
+        await store.refresh(entryID: id)
+        #expect(store.error?.contains("source unavailable") == true)
+        #expect(!store.isRefreshing)
+        #expect(store.chapterCount(entryID: id) == 1)
+    }
+
     @Test func asyncPersistencePreservesAnEditMadeWhileEncoding() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -387,6 +430,17 @@ struct ReaderReliabilityTests {
         #expect(store.library.entry(id)?.descriptionOverride == "Refreshed")
         #expect(MCCollectionStore(fileURL: root.appendingPathComponent("collection.json")).library.entry(id)?.titleOverride == "My title")
     }
+}
+
+private struct MCFailedRefreshRunner: AidokuRunner.Runner {
+    let features = AidokuRunner.SourceFeatures()
+    func getMangaUpdate(manga: AidokuRunner.Manga, needsDetails: Bool, needsChapters: Bool) async throws -> AidokuRunner.Manga {
+        throw AidokuRunner.SourceError.jsonParseError
+    }
+    func getSearchMangaList(query: String?, page: Int, filters: [AidokuRunner.FilterValue]) async throws -> AidokuRunner.MangaPageResult {
+        .init(entries: [], hasNextPage: false)
+    }
+    func getPageList(manga: AidokuRunner.Manga, chapter: AidokuRunner.Chapter) async throws -> [AidokuRunner.Page] { [] }
 }
 
 private final class MCSlowRefreshRunner: AidokuRunner.Runner, @unchecked Sendable {

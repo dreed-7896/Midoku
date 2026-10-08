@@ -8,6 +8,12 @@
 import UIKit
 
 class NavigationController: UINavigationController {
+    override var childForStatusBarHidden: UIViewController? {
+        topViewController is ReaderViewController ? topViewController : super.childForStatusBarHidden
+    }
+    override var childForStatusBarStyle: UIViewController? {
+        topViewController is ReaderViewController ? topViewController : super.childForStatusBarStyle
+    }
     override func viewDidLoad() {
         super.viewDidLoad()
         interactivePopGestureRecognizer?.isEnabled = true

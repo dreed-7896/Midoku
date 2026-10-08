@@ -8,10 +8,9 @@
 import SwiftUI
 import AidokuRunner
 
-class ReaderNavigationController: UINavigationController, UIGestureRecognizerDelegate {
+class ReaderNavigationController: UINavigationController {
     let readerViewController: ReaderViewController
     let mangaInfo: MangaInfo?
-    private(set) lazy var readerBackGesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleReaderBack(_:)))
 
     init(readerViewController: ReaderViewController, mangaInfo: MangaInfo? = nil) {
         self.readerViewController = readerViewController
@@ -19,121 +18,80 @@ class ReaderNavigationController: UINavigationController, UIGestureRecognizerDel
         super.init(rootViewController: readerViewController)
     }
 
-    required init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        readerBackGesture.edges = .left
-        readerBackGesture.maximumNumberOfTouches = 1
-        readerBackGesture.cancelsTouchesInView = false
-        readerBackGesture.delaysTouchesBegan = false
-        readerBackGesture.delaysTouchesEnded = false
-        readerBackGesture.delegate = self
-        view.addGestureRecognizer(readerBackGesture)
-    }
-
-    private var usesVerticalScrolling: Bool {
-        guard let reader = topViewController as? ReaderViewController else { return false }
-        // Paginated novels always turn horizontally, regardless of the manga preference.
-        if reader.reader is ReaderPagedTextViewController { return false }
-        return reader.reader is ReaderWebtoonViewController
-            || reader.reader is ReaderTextViewController
-            || [.webtoon, .continuous, .vertical].contains(reader.readingMode)
-    }
-
-    private func isReaderScrollPan(_ gesture: UIGestureRecognizer) -> Bool {
-        guard let reader = topViewController as? ReaderViewController,
-              reader.isViewLoaded,
-              let scrollView = gesture.view as? UIScrollView,
-              gesture === scrollView.panGestureRecognizer else { return false }
-        return scrollView.isDescendant(of: reader.view)
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        // Vertical pans must start immediately, including drags near the left edge.
-        // The back gesture independently rejects vertical motion in shouldBegin.
-        gestureRecognizer === readerBackGesture
-            && usesVerticalScrolling
-            && isReaderScrollPan(otherGestureRecognizer)
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        // Only horizontal page turns compete with a horizontal back swipe. Resolve
-        // that conflict per gesture; never install permanent waits on every pan.
-        gestureRecognizer === readerBackGesture
-            && !usesVerticalScrolling
-            && isReaderScrollPan(otherGestureRecognizer)
-    }
-
-    func acceptsReaderBackTouch(at point: CGPoint, touchedView: UIView?) -> Bool {
-        guard point.x >= 0, point.x <= 32,
-              let reader = topViewController as? ReaderViewController,
-              presentedViewController == nil, reader.presentedViewController == nil else { return false }
-        if let webtoon = reader.reader as? ReaderWebtoonViewController,
-           webtoon.scrollView.zoomScale > webtoon.scrollView.minimumZoomScale + 0.01 {
-            return false
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var childForStatusBarHidden: UIViewController? { topViewController }
+    override var childForStatusBarStyle: UIViewController? { topViewController }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        switch UserDefaults.standard.string(forKey: "Reader.orientation") {
+        case "portrait": .portrait
+        case "landscape": .landscape
+        default: .all
         }
-        var candidate = touchedView
+    }
+}
+
+/// Use UIKit's existing pop recognizer and transition; no reader-owned swipe recognizer.
+@MainActor
+final class ReaderPopGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+    weak var reader: ReaderViewController?
+    private weak var navigation: UINavigationController?
+    private weak var originalDelegate: (any UIGestureRecognizerDelegate)?
+    private var originalContentPopEnabled = false
+    private var originalPopEnabled = false
+
+    init(reader: ReaderViewController) { self.reader = reader }
+
+    func install(on navigation: UINavigationController) {
+        guard self.navigation == nil else { return }
+        self.navigation = navigation
+        originalDelegate = navigation.interactivePopGestureRecognizer?.delegate
+        originalPopEnabled = navigation.interactivePopGestureRecognizer?.isEnabled ?? false
+        navigation.interactivePopGestureRecognizer?.delegate = self
+        navigation.interactivePopGestureRecognizer?.isEnabled = true
+        if #available(iOS 26.0, *) {
+            originalContentPopEnabled = navigation.interactiveContentPopGestureRecognizer?.isEnabled ?? false
+            // Edge swipe keeps horizontal page turns and zoomed panels independent.
+            navigation.interactiveContentPopGestureRecognizer?.isEnabled = false
+        }
+    }
+
+    func restore() {
+        guard let navigation else { return }
+        if navigation.interactivePopGestureRecognizer?.delegate === self {
+            navigation.interactivePopGestureRecognizer?.delegate = originalDelegate
+            navigation.interactivePopGestureRecognizer?.isEnabled = originalPopEnabled
+        }
+        if #available(iOS 26.0, *) {
+            navigation.interactiveContentPopGestureRecognizer?.isEnabled = originalContentPopEnabled
+        }
+        self.navigation = nil
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let navigation, navigation.viewControllers.count > 1,
+              navigation.transitionCoordinator == nil, navigation.presentedViewController == nil,
+              let reader, reader.presentedViewController == nil else { return false }
+        if let webtoon = reader.reader as? ReaderWebtoonViewController,
+           webtoon.scrollView.zoomScale > webtoon.scrollView.minimumZoomScale + 0.01 { return false }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var candidate = touch.view
         while let current = candidate {
-            if current is UIControl || current === reader.controlsView { return false }
-            if let scroll = current as? UIScrollView,
-               scroll.zoomScale > scroll.minimumZoomScale + 0.01 { return false }
+            if current is UIControl || current === reader?.controlsView { return false }
+            if let scroll = current as? UIScrollView, scroll.zoomScale > scroll.minimumZoomScale + 0.01 { return false }
             candidate = current.superview
         }
         return true
     }
 
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard gestureRecognizer === readerBackGesture else { return true }
-        return acceptsReaderBackTouch(at: touch.location(in: view), touchedView: touch.view)
-    }
-
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === readerBackGesture, presentedViewController == nil,
-              let reader = topViewController as? ReaderViewController,
-              reader.presentedViewController == nil else { return false }
-        return Self.shouldBeginReaderBack(velocity: readerBackGesture.velocity(in: view))
-    }
-
-    static func shouldBeginReaderBack(velocity: CGPoint) -> Bool {
-        velocity.x > 0 && velocity.x > abs(velocity.y) * 1.5
-    }
-
-    static func shouldCloseReader(translation: CGPoint, velocity: CGPoint, width: CGFloat) -> Bool {
-        guard translation.x > abs(translation.y) else { return false }
-        return translation.x > max(80, width * 0.2) || (translation.x > 16 && velocity.x > 600)
-    }
-
-    @objc private func handleReaderBack(_ gesture: UIScreenEdgePanGestureRecognizer) {
-        guard gesture.state == .ended,
-              Self.shouldCloseReader(translation: gesture.translation(in: view), velocity: gesture.velocity(in: view), width: view.bounds.width)
-        else { return }
-        (topViewController as? ReaderViewController)?.close()
-    }
-
-    override var childForStatusBarHidden: UIViewController? {
-        topViewController
-    }
-
-    override var childForStatusBarStyle: UIViewController? {
-        topViewController
-    }
-
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        switch UserDefaults.standard.string(forKey: "Reader.orientation") {
-            case "device": .all
-            case "portrait": .portrait
-            case "landscape": .landscape
-            default: .all
-        }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        guard let reader, let scroll = other.view as? UIScrollView,
+              other === scroll.panGestureRecognizer, scroll.isDescendant(of: reader.view) else { return false }
+        return reader.reader is ReaderWebtoonViewController || reader.reader is ReaderTextViewController
+            || [.webtoon, .continuous, .vertical].contains(reader.readingMode)
     }
 }
 

@@ -177,22 +177,28 @@ struct CollectionIntegrationTests {
         for slot in entry.slots {
             let sequence = try MCReaderSequence(entryID: id, slotID: slot.id, store: store)
             state.sheet = MCReaderSheet(sequence: sequence)
-            try #require(await Self.waitForPresentation { Self.presentedReader(in: host.presentedViewController) != nil })
-            let reader = try #require(Self.presentedReader(in: host.presentedViewController))
+            try #require(await Self.waitForPresentation { Self.presentedReader(in: host) != nil })
+            let reader = try #require(Self.presentedReader(in: host))
             try #require(await Self.waitForPresentation {
                 reader.viewIfLoaded?.window != nil && reader.transitionCoordinator == nil && !reader.pages.isEmpty
             })
             #expect(reader.collectionSequence === sequence)
             #expect(reader.chapter.key == sequence.initialKey)
             #expect(reader.pages.first?.sourceId == key)
+            #expect(host.presentedViewController == nil)
+            #expect(reader.isNavigationScreen)
+            #expect((reader.navigationController?.viewControllers.count ?? 0) > 1)
             reader.close()
-            try #require(await Self.waitForPresentation { state.sheet == nil && host.presentedViewController == nil })
+            try #require(await Self.waitForPresentation { state.sheet == nil && Self.presentedReader(in: host) == nil })
         }
     }
 
     private static func presentedReader(in controller: UIViewController?) -> ReaderViewController? {
         guard let controller else { return nil }
         if let reader = controller as? ReaderViewController { return reader }
+        if let navigation = controller as? UINavigationController {
+            return presentedReader(in: navigation.topViewController)
+        }
         return controller.children.lazy.compactMap { presentedReader(in: $0) }.first
     }
 
@@ -522,14 +528,6 @@ struct CollectionIntegrationTests {
         }
     }
 
-    @Test func readerBackSwipeRequiresIntentionalRightwardMovement() {
-        #expect(ReaderNavigationController.shouldCloseReader(translation: .init(x: 100, y: 5), velocity: .zero, width: 390))
-        #expect(ReaderNavigationController.shouldCloseReader(translation: .init(x: 20, y: 0), velocity: .init(x: 700, y: 0), width: 390))
-        #expect(!ReaderNavigationController.shouldCloseReader(translation: .init(x: 5, y: 0), velocity: .init(x: 700, y: 0), width: 390))
-        #expect(!ReaderNavigationController.shouldCloseReader(translation: .init(x: -100, y: 0), velocity: .init(x: -700, y: 0), width: 390))
-        #expect(!ReaderNavigationController.shouldCloseReader(translation: .init(x: 50, y: 0), velocity: .zero, width: 390))
-    }
-
 }
 
 @MainActor @Observable
@@ -540,7 +538,9 @@ private final class MCReaderPresentationTestState {
 private struct MCReaderPresentationTestHost: View {
     @Bindable var state: MCReaderPresentationTestState
     var body: some View {
-        Color.clear.modifier(MCReaderPresentation(sheet: $state.sheet))
+        NavigationStack {
+            Color.clear.modifier(MCReaderPresentation(sheet: $state.sheet))
+        }
     }
 }
 

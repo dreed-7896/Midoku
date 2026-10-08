@@ -5,6 +5,19 @@ import Foundation
 /// Late results are discarded, and each request owns exactly one continuation.
 @MainActor
 final class LibraryRefreshRequest {
+    static func failureDescription(_ error: any Error) -> String {
+        switch error {
+        case SourceError.jsonParseError, SourceError.deserializeError:
+            "The extension returned unexpected data. Update the extension and try again."
+        case SourceError.unimplemented:
+            "This extension does not support refreshing this title."
+        case SourceError.message(let message): message
+        case SourceError.networkError: "The source could not be reached. Try again later."
+        case let error as URLError where error.code == .timedOut:
+            "The source took too long to respond. Try again later."
+        default: error.localizedDescription
+        }
+    }
     private var continuation: CheckedContinuation<AidokuRunner.Manga, any Error>?
     private var request: Task<Void, Never>?
     private var timeout: Task<Void, Never>?

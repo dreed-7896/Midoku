@@ -610,7 +610,7 @@ struct MCCollectionRootView: View {
                 }
                 .padding(.horizontal)
                 .padding(.vertical)
-            }.refreshable { await store.refresh() }
+            }.mcRefreshable { await store.refresh() }
         }
     }
 
@@ -1075,7 +1075,7 @@ struct MCEntryCover: View {
                 SourceImageView(source: store.source(listing.identity.connectionID), imageUrl: cover.absoluteString,
                     width: geometry.size.width, height: geometry.size.height, contentMode: contentMode, placeholder: "MidokuCoverPlaceholder").clipped()
             } else {
-                Image("MidokuCoverPlaceholder").resizable().aspectRatio(contentMode: contentMode)
+                MCArtworkPlaceholder()
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()
             }
         }.clipped().contentShape(Rectangle()).accessibilityHidden(true)

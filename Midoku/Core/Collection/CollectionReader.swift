@@ -215,11 +215,15 @@ extension ReaderViewController {
 
 struct MCReaderView: UIViewControllerRepresentable {
     let sequence: MCReaderSequence
-    func makeUIViewController(context: Context) -> ReaderNavigationController {
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> ReaderViewController {
         guard let route = sequence.route(key: sequence.initialKey) else { preconditionFailure("Validated reader route missing") }
         let reader = ReaderViewController(source: route.source, manga: route.manga, chapter: route.displayChapter,
                                           startPage: startPage, collectionSequence: sequence)
         reader.showPanelsOnOpen = showPanels
+        reader.isNavigationScreen = true
+        reader.onNavigateBack = { dismiss() }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--reader-preview") {
             Task { @MainActor [weak reader] in
@@ -234,25 +238,28 @@ struct MCReaderView: UIViewControllerRepresentable {
             }
         }
         #endif
-        return ReaderNavigationController(readerViewController: reader)
+        return reader
     }
-    func updateUIViewController(_ uiViewController: ReaderNavigationController, context: Context) {}
+    func updateUIViewController(_ uiViewController: ReaderViewController, context: Context) {}
+    static func dismantleUIViewController(_ reader: ReaderViewController, coordinator: ()) {
+        reader.finishNavigationExit()
+    }
     var startPage: Int? = nil
     var showPanels = false
 }
 
-/// Present the reader from the bottom with its own navigation and edge dismissal.
+/// Push onto the title's navigation stack, preserving the native interactive back transition.
 struct MCReaderPresentation: ViewModifier {
     @Binding var sheet: MCReaderSheet?
 
     func body(content: Content) -> some View {
-        content.fullScreenCover(item: $sheet) {
-            MCReaderCover(route: $0)
+        content.navigationDestination(item: $sheet) {
+            MCReaderScreen(route: $0)
         }
     }
 }
 
-private struct MCReaderCover: View {
+private struct MCReaderScreen: View {
     let route: MCReaderSheet
     @AppStorage("Reader.orientation") private var orientation = "device"
     @State private var barsVisible = true
@@ -268,6 +275,7 @@ private struct MCReaderCover: View {
         MCReaderView(sequence: route.sequence, startPage: route.startPage, showPanels: route.showPanels)
             .ignoresSafeArea()
             .toolbar(.hidden, for: .navigationBar)
+            .navigationBarBackButtonHidden()
             .toolbar(.hidden, for: .tabBar)
             .statusBarHidden(!barsVisible)
             .interfaceOrientations(orientations)

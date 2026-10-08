@@ -79,17 +79,17 @@ struct SourceImageView: View {
                     .font(.title3).foregroundStyle(.tertiary)
                     .frame(width: width, height: height)
                     .background(Color(uiColor: .secondarySystemBackground))
-            } else {
-                let result = if let image = state.image {
-                    image
-                } else {
-                    Image(placeholder)
-                }
-                result
+            } else if let image = state.image {
+                image
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
                     .frame(width: width, height: height)
-                    .id(state.image != nil ? imageUrl : "placeholder") // ensures only opacity is animated
+                    .id(imageUrl)
+            } else if ["MangaPlaceholder", "MidokuCoverPlaceholder", "MidokuChapterPlaceholder"].contains(placeholder) {
+                MCArtworkPlaceholder().frame(width: width, height: height)
+            } else {
+                Image(placeholder).resizable().aspectRatio(contentMode: contentMode)
+                    .frame(width: width, height: height)
             }
         }
         .processors(processors)

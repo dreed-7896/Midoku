@@ -65,6 +65,8 @@ struct MangaUpdatesView: View {
             .refreshable {
                 guard !refreshing else { return }
                 refreshing = true
+                // Keep the control that started this pull alive through list/alert rebuilds.
+                let activeControl = refreshControl.list?.refreshControl
                 defer {
                     refreshing = false
                     loadingMore = false
@@ -72,6 +74,7 @@ struct MangaUpdatesView: View {
                     // End it explicitly after the complete refresh/load operation,
                     // including cancellation and early returns.
                     refreshControl.list?.refreshControl?.endRefreshing()
+                    activeControl?.endRefreshing()
                 }
                 loadingTask?.cancel()
                 loadingTask = nil
@@ -102,6 +105,7 @@ struct MangaUpdatesView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationTitle(NSLocalizedString("MANGA_UPDATES"))
+        .mcErrors(MCCollectionStore.shared)
         .onReceive(NotificationCenter.default.publisher(for: .mangaUpdatesViewed)) { notification in
             guard let objects = notification.object as? [MangaUpdateItem] else { return }
 

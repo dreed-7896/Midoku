@@ -442,11 +442,13 @@ final class MCCollectionStore {
     func refresh(entryID: UUID? = nil) async {
         if let refreshTask { await refreshTask.value; return }
         isRefreshing = true
+        error = nil
+        defer { refreshTask = nil; isRefreshing = false }
         let task = Task { await refreshListings(entryID: entryID) }
         refreshTask = task
-        await task.value
-        refreshTask = nil
-        isRefreshing = false
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: { task.cancel() }
     }
 
     private func refreshListings(entryID: UUID?) async {
@@ -454,27 +456,53 @@ final class MCCollectionStore {
         let listingIDs = Set(entries.flatMap(\.links)
             .filter { $0.followsNewChapters || $0.needsInitialImport == true }
             .map(\.listingID))
+        let initialImports = Set(entries.flatMap(\.links).filter { $0.needsInitialImport == true }.map(\.listingID))
         var failures: [String] = []
-        for listingID in listingIDs {
+        let eligible = listingIDs.filter { id in
+            guard let stored = snapshot.manga.first(where: { $0.listingID == id }) else { return false }
+            // Static, single-gallery sources such as nhentai do not publish new chapters.
+            return entryID != nil || initialImports.contains(id) || stored.manga.updateStrategy != .never
+        }
+        let ids = Array(eligible)
+        let deadline = Date().addingTimeInterval(90)
+        for offset in stride(from: 0, to: ids.count, by: 4) {
             guard !Task.isCancelled else { break }
-            guard let listing = library.listing(listingID),
-                  let stored = snapshot.manga.first(where: { $0.listingID == listingID }) else { continue }
-            guard let source = source(listing.identity.connectionID) else {
-                failures.append("\(sourceName(listing.identity.connectionID)): source unavailable")
-                continue
+            guard deadline.timeIntervalSinceNow > 0 else {
+                failures.append("Refresh timed out. Pull again to refresh remaining titles.")
+                break
             }
-            do {
-                let updated = try await LibraryRefreshRequest.fetch(source: source, manga: stored.manga, needsDetails: true)
-                guard let chapters = updated.chapters else { throw MCLibraryFailure.incomplete }
-                try await changeAsync { state in
-                    _ = try state.remember(updated, chapters: chapters, sourceName: source.name, complete: true)
-                    guard let current = state.library.listing(listingID) else { throw MCLibraryFailure.missing }
-                    let records = state.library.chapters.filter { $0.identity.listing == current.identity && $0.available }.map(\.record)
-                    try state.library.refresh(details: current.details, connectionID: current.identity.connectionID, records: records, language: nil)
+            await withTaskGroup(of: String?.self) { group in
+                for id in ids[offset..<min(offset + 4, ids.count)] {
+                    group.addTask { await self.refreshListing(id, timeout: max(0.1, min(45, deadline.timeIntervalSinceNow))) }
                 }
-            } catch { failures.append("\(source.name): \(error.localizedDescription)") }
+                for await failure in group {
+                    if let failure { failures.append(failure) }
+                }
+            }
         }
         if !failures.isEmpty { error = failures.joined(separator: "\n") }
+    }
+
+    private func refreshListing(_ listingID: UUID, timeout: Double) async -> String? {
+        guard !Task.isCancelled, let listing = library.listing(listingID),
+              let stored = snapshot.manga.first(where: { $0.listingID == listingID }) else { return nil }
+        guard let source = source(listing.identity.connectionID) else {
+            return "\(sourceName(listing.identity.connectionID)): source unavailable"
+        }
+        do {
+            let updated = try await LibraryRefreshRequest.fetch(source: source, manga: stored.manga,
+                needsDetails: true, timeoutSeconds: timeout)
+            try Task.checkCancellation()
+            guard let chapters = updated.chapters else { throw MCLibraryFailure.incomplete }
+            try await changeAsync { state in
+                _ = try state.remember(updated, chapters: chapters, sourceName: source.name, complete: true)
+                guard let current = state.library.listing(listingID) else { throw MCLibraryFailure.missing }
+                let records = state.library.chapters.filter { $0.identity.listing == current.identity && $0.available }.map(\.record)
+                try state.library.refresh(details: current.details, connectionID: current.identity.connectionID, records: records, language: nil)
+            }
+            return nil
+        } catch is CancellationError { return nil }
+        catch { return "\(source.name): \(LibraryRefreshRequest.failureDescription(error))" }
     }
 
     func resumeSlot(entryID: UUID) async -> UUID? {

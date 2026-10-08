@@ -194,7 +194,7 @@ struct MCEntryView: View {
                     }.padding(.vertical, 12)
                 }
                 .background(Color(uiColor: .systemBackground))
-                .refreshable { await store.refresh(entryID: entryID) }
+                .mcRefreshable { await store.refresh(entryID: entryID) }
                 .navigationTitle(store.library.title(entry)).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
