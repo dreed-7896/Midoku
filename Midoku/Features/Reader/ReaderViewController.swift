@@ -138,6 +138,8 @@ class ReaderViewController: BaseObservingViewController {
     private let orientationRegistrationID = UUID()
     private var chapterLoadTask: Task<Void, Never>?
     private var hasExited = false
+    private weak var readerTabBarController: UITabBarController?
+    private var previousTabBarHidden: Bool?
 
     weak var reader: ReaderReaderDelegate?
 
@@ -422,8 +424,15 @@ class ReaderViewController: BaseObservingViewController {
 
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        hideAppTabBar()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // SwiftUI can update its hosting navigation controller during the push.
+        hideAppTabBar()
 
         sessionReadPages = [self.currentPage]
         sessionStartDate = Date.now
@@ -729,8 +738,39 @@ extension ReaderViewController {
         chapterLoadTask?.cancel()
         popGestureDelegate.restore()
         InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
+        restoreAppTabBar()
         onNavigationExit?()
         onNavigationExit = nil
+    }
+
+    private func hideAppTabBar() {
+        guard isNavigationScreen, let controller = tabBarController else { return }
+        if previousTabBarHidden == nil {
+            readerTabBarController = controller
+            if #available(iOS 26.0, *) {
+                previousTabBarHidden = controller.isTabBarHidden
+            } else {
+                previousTabBarHidden = controller.tabBar.isHidden
+            }
+        }
+        // The app uses a UIKit tab controller outside the SwiftUI navigation stack.
+        // SwiftUI's tab-bar toolbar preference cannot hide that controller's Search tab.
+        if #available(iOS 26.0, *) {
+            controller.setTabBarHidden(true, animated: false)
+        } else {
+            controller.tabBar.isHidden = true
+        }
+    }
+
+    private func restoreAppTabBar() {
+        guard let controller = readerTabBarController, let hidden = previousTabBarHidden else { return }
+        previousTabBarHidden = nil
+        readerTabBarController = nil
+        if #available(iOS 26.0, *) {
+            controller.setTabBarHidden(hidden, animated: false)
+        } else {
+            controller.tabBar.isHidden = hidden
+        }
     }
 
     private func registerScreenOrientation() {

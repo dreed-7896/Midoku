@@ -461,7 +461,9 @@ final class MCCollectionStore {
         let eligible = listingIDs.filter { id in
             guard let stored = snapshot.manga.first(where: { $0.listingID == id }) else { return false }
             // Static, single-gallery sources such as nhentai do not publish new chapters.
-            return entryID != nil || initialImports.contains(id) || stored.manga.updateStrategy != .never
+            let isStaticGallery = stored.manga.sourceKey == "multi.nhentai"
+                || stored.manga.updateStrategy == .never
+            return entryID != nil || initialImports.contains(id) || !isStaticGallery
         }
         let ids = Array(eligible)
         let deadline = Date().addingTimeInterval(90)
