@@ -24,6 +24,10 @@ extension iOSViewVersion<ListType, UICollectionView> {
     public static let v27 = Self(for: .v27)
 }
 
+extension iOSViewVersion<ScrollViewType, UIScrollView> {
+    public static let v27 = Self(for: .v27)
+}
+
 extension iOSViewVersion<ListCellType, UICollectionViewCell> {
     public static let v27 = Self(for: .v27)
 }
