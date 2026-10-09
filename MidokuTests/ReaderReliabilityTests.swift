@@ -236,6 +236,60 @@ struct ReaderReliabilityTests {
         #expect(layout.shouldInvalidateLayout(forBoundsChange: CGRect(x: 0, y: 0, width: 600, height: 320)))
     }
 
+    @Test func nativeReaderDoesNotRestoreTransientHiddenTabBarState() {
+        guard #available(iOS 26.0, *) else { return }
+        let tabs = UITabBarController()
+        let navigation = UINavigationController(rootViewController: UIViewController())
+        tabs.setViewControllers([navigation], animated: false)
+        let manga = AidokuRunner.Manga(sourceKey: "tabs", key: "book", title: "Book")
+        for _ in 0..<3 {
+            let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))
+            reader.isNavigationScreen = true
+            reader.hidesBottomBarWhenPushed = true
+            navigation.pushViewController(reader, animated: false)
+            reader.loadViewIfNeeded()
+            // UIKit has already hidden the bar before reader appearance.
+            tabs.setTabBarHidden(true, animated: false)
+            reader.viewWillAppear(false)
+            // The native pop restores visibility before exit cleanup.
+            navigation.popViewController(animated: false)
+            tabs.setTabBarHidden(false, animated: false)
+            reader.finishNavigationExit()
+            #expect(!tabs.isTabBarHidden)
+        }
+    }
+
+    @Test func embeddedReaderRestoresTabsOnlyOnFinalExit() {
+        guard #available(iOS 26.0, *) else { return }
+        let tabs = UITabBarController()
+        let host = UIViewController()
+        tabs.setViewControllers([host], animated: false)
+        let manga = AidokuRunner.Manga(sourceKey: "tabs", key: "book", title: "Book")
+        for initiallyHidden in [false, false, true] {
+            tabs.setTabBarHidden(initiallyHidden, animated: false)
+            let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))
+            reader.isNavigationScreen = true
+            reader.managesAppTabBarVisibility = true
+            host.addChild(reader)
+            host.view.addSubview(reader.view)
+            reader.didMove(toParent: host)
+            reader.viewWillAppear(false)
+            #expect(tabs.isTabBarHidden)
+            // Covering the embedded reader is not a final navigation exit,
+            // even if its SwiftUI navigation controller is temporarily absent.
+            reader.viewDidDisappear(false)
+            #expect(tabs.isTabBarHidden)
+            reader.viewWillAppear(false)
+            reader.finishNavigationExit()
+            #expect(tabs.isTabBarHidden == initiallyHidden)
+            reader.finishNavigationExit()
+            #expect(tabs.isTabBarHidden == initiallyHidden)
+            reader.willMove(toParent: nil)
+            reader.view.removeFromSuperview()
+            reader.removeFromParent()
+        }
+    }
+
     @Test func backGestureDoesNotMakeVerticalReaderPansWait() {
         let manga = AidokuRunner.Manga(sourceKey: "gesture", key: "book", title: "Book")
         let reader = MCReaderGestureProbe(source: nil, manga: manga, chapter: .init(key: "one"))

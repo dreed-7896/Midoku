@@ -132,6 +132,10 @@ class ReaderViewController: BaseObservingViewController {
     private var sessionLastInteraction: Date?
     var showPanelsOnOpen = false
     var isNavigationScreen = false
+    // Only SwiftUI-embedded readers bridge visibility to the outer UIKit tab
+    // controller. Native pushes use hidesBottomBarWhenPushed and must never
+    // snapshot or restore UIKit's transient, already-hidden push state.
+    var managesAppTabBarVisibility = false
     var onNavigateBack: (() -> Void)?
     var onNavigationExit: (() -> Void)?
     private lazy var popGestureDelegate = ReaderPopGestureDelegate(reader: self)
@@ -473,7 +477,10 @@ class ReaderViewController: BaseObservingViewController {
             gesture.view?.removeGestureRecognizer(gesture)
             barDismissNavigationBarTapGesture = nil
         }
-        if isNavigationScreen, isMovingFromParent || navigationController == nil {
+        // An embedded reader's final exit is owned by representable dismantling.
+        // Temporary disappearance (sheets or cancelled transitions) is not exit.
+        if isNavigationScreen, !managesAppTabBarVisibility,
+           isMovingFromParent || navigationController == nil {
             finishNavigationExit()
         }
 
@@ -744,7 +751,8 @@ extension ReaderViewController {
     }
 
     private func hideAppTabBar() {
-        guard isNavigationScreen, let controller = tabBarController else { return }
+        guard isNavigationScreen, managesAppTabBarVisibility,
+              let controller = tabBarController else { return }
         if previousTabBarHidden == nil {
             readerTabBarController = controller
             if #available(iOS 26.0, *) {

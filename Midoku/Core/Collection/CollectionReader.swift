@@ -223,6 +223,7 @@ struct MCReaderView: UIViewControllerRepresentable {
                                           startPage: startPage, collectionSequence: sequence)
         reader.showPanelsOnOpen = showPanels
         reader.isNavigationScreen = true
+        reader.managesAppTabBarVisibility = true
         reader.onNavigateBack = { dismiss() }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--reader-preview") {
