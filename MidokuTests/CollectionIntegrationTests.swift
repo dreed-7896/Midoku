@@ -83,7 +83,8 @@ struct CollectionIntegrationTests {
         #expect(MCPanelBookmarks.all.count == 2)
         #expect(MCPanelBookmarks.bookmarkedSlotIDs == [slot.id])
         #expect(!MCPanelBookmarks.bookmarkedSlotIDs.contains(otherSlot.id))
-        let saved = try #require(MCPanelBookmarks.all.first(where: \.isChapter))
+        let savedBookmark = MCPanelBookmarks.all.first { $0.isChapter }
+        let saved = try #require(savedBookmark)
         let reader = try MCPanelBookmarks.reader(for: saved, store: store)
         #expect(reader.startPage == 1)
         let route = try #require(reader.sequence.route(key: reader.sequence.initialKey))
