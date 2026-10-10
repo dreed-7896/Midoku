@@ -18,11 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    permissions:
-      contents: write
+  collection_checks:
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 15
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
@@ -37,7 +35,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RUN_TESTS: ${{ inputs.run_tests }}
         run: |
-          if [[ "$RUN_TESTS" == "true" ]] || { [[ "$EVENT_NAME" == "push" ]] && ! git diff --quiet HEAD^ HEAD -- Package.swift Midoku/Core/Collection Midoku/Features/Collection Tests/Collection MidokuTests/CollectionIntegrationTests.swift; }; then
+          if [[ "$RUN_TESTS" == "true" ]] || { [[ "$EVENT_NAME" == "push" ]] && ! git diff --quiet HEAD^ HEAD -- .github/workflows/ios-ipa.yml Package.swift Midoku/Core/Collection Midoku/Features/Collection Tests/Collection MidokuTests/CollectionIntegrationTests.swift; }; then
             echo 'run=true' >> "$GITHUB_OUTPUT"
           fi
       - name: Test collection core
@@ -45,16 +43,39 @@ jobs:
         run: swift test
       - name: Test collection integration on simulator
         if: steps.collection_changes.outputs.run == 'true'
+        timeout-minutes: 10
         shell: bash
         run: |
           set -euo pipefail
           simulator_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for runtime, items in devices.items() if "iOS-27" in runtime for d in items if "iPhone" in d["name"]))')
+          xcrun simctl boot "$simulator_id" || true
+          xcrun simctl bootstatus "$simulator_id" -b
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
             -destination "platform=iOS Simulator,id=$simulator_id" -derivedDataPath build/TestDerivedData \
             -skipPackagePluginValidation -parallel-testing-enabled NO \
             -only-testing:MidokuTests/CollectionIntegrationTests \
-            CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO test \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test \
             2>&1 | tee collection-tests.log
+      - name: Upload collection test logs
+        if: always() && steps.collection_changes.outputs.run == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Midoku-collection-tests-${{ github.sha }}
+          path: |
+            collection-tests.log
+            build/TestDerivedData/Logs/Test/*.xcresult
+          if-no-files-found: ignore
+  build:
+    permissions:
+      contents: write
+    runs-on: xcode-27
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Test SideStore publishing
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build unsigned device app
