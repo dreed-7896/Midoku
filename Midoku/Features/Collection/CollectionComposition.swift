@@ -4,6 +4,8 @@ import SwiftUI
 struct MCAddChapterToEntryView: View {
     let manga: AidokuRunner.Manga
     let chapter: AidokuRunner.Chapter
+    var excludingEntryID: UUID? = nil
+    var initialChapterName: String? = nil
     @State private var store = MCCollectionStore.shared
     @State private var chapterName = ""
     @State private var query = ""
@@ -13,7 +15,7 @@ struct MCAddChapterToEntryView: View {
 
     private var entries: [MCPersonalEntry] {
         store.library.entries
-            .filter { query.isEmpty || store.library.title($0).localizedCaseInsensitiveContains(query) }
+            .filter { $0.id != excludingEntryID && (query.isEmpty || store.library.title($0).localizedCaseInsensitiveContains(query)) }
             .sorted { store.library.title($0).localizedStandardCompare(store.library.title($1)) == .orderedAscending }
     }
 
@@ -79,8 +81,9 @@ struct MCAddChapterToEntryView: View {
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
-                chapterName = chapter.formattedTitle()
-                selectedEntryID = store.entryID(for: manga)
+                chapterName = initialChapterName ?? chapter.formattedTitle()
+                let existing = store.entryID(for: manga)
+                selectedEntryID = existing == excludingEntryID ? nil : existing
                 if let selectedEntryID { chapterName = store.suggestedChapterName(for: selectedEntryID) }
             }
             .mcErrors(store)

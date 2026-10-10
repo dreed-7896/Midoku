@@ -229,6 +229,22 @@ final class MCCollectionStore {
         catch { self.error = error.localizedDescription; return false }
     }
 
+    func groupEntries(_ ids: [UUID], details: MCEntryDetails, mode: MCEntryGroupingMode,
+                      naming: MCMergedChapterNaming) throws -> UUID {
+        let originalEntries = library.entriesIncludingDescendants(of: Set(ids))
+        let originalIDs = Set(originalEntries.map(\.id))
+        let originalSlots = Set(originalEntries.flatMap(\.slots).map(\.id))
+        var id: UUID?
+        try change { state in
+            id = try state.library.groupEntries(ids, details: details, mode: mode, naming: naming)
+        }
+        guard let id else { throw MCLibraryFailure.missing }
+        if mode == .mergeChapters {
+            MCPanelBookmarks.reassign(entryIDs: originalIDs, slotIDs: originalSlots, to: id, store: self)
+        }
+        return id
+    }
+
     /// Built once per saved snapshot instead of scanning every chapter on each category swipe.
     func unreadCount(entryID: UUID) -> Int { entryChapterCounts[entryID]?.unread ?? 0 }
     func chapterCount(entryID: UUID) -> Int { entryChapterCounts[entryID]?.total ?? 0 }

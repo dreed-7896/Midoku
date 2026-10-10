@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run collection core and simulator regression checks
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +29,32 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 2
+      - name: Detect collection changes
+        id: collection_changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_TESTS: ${{ inputs.run_tests }}
+        run: |
+          if [[ "$RUN_TESTS" == "true" ]] || { [[ "$EVENT_NAME" == "push" ]] && ! git diff --quiet HEAD^ HEAD -- Package.swift Midoku/Core/Collection Midoku/Features/Collection Tests/Collection MidokuTests/CollectionIntegrationTests.swift; }; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Test collection core
+        if: steps.collection_changes.outputs.run == 'true'
+        run: swift test
+      - name: Test collection integration on simulator
+        if: steps.collection_changes.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for runtime, items in devices.items() if "iOS-27" in runtime for d in items if "iPhone" in d["name"]))')
+          xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
+            -destination "platform=iOS Simulator,id=$simulator_id" -derivedDataPath build/TestDerivedData \
+            -skipPackagePluginValidation -parallel-testing-enabled NO \
+            -only-testing:MidokuTests/CollectionIntegrationTests \
+            CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO test \
+            2>&1 | tee collection-tests.log
       - name: Test SideStore publishing
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build unsigned device app

@@ -4,6 +4,91 @@ import Testing
 
 @Suite("Nested titles")
 struct HierarchyTests {
+    @Test func mergingFlattensNestedTitlesAndPreservesSlotsEditsProgressAndUpdates() throws {
+        var (state, x, y, z, connection) = try fixture()
+        let other = try state.createManual(title: "Other")
+        let original = state.flattenedChapters(entryID: x)
+        let edited = original[1].slot.id
+        let cover = MCLibraryCover(url: URL(string: "https://example.com/chapter.jpg")!, sourceKey: nil)
+        state.covers.append(cover)
+        try state.editEntry(y) {
+            $0.slots[0].variants[0].edits = .init(title: "Personal chapter", number: "42", volume: "3", coverID: cover.id)
+            $0.slots[0].completionOverride = true
+            $0.lastReadAt = Date(timeIntervalSince1970: 100)
+        }
+        try state.editEntry(x) { $0.links[0].followsNewChapters = false }
+        state.readingEntryIDs = [y, other, z]
+        let updateChapter = try #require(original[2].slot.preferred?.chapterID)
+        state.updates = [.init(entryID: z, chapterID: updateChapter)]
+        let merged = try state.groupEntries([other, x], details: .init(title: "Merged"), mode: .mergeChapters)
+        let entry = try #require(state.entry(merged))
+        #expect(state.entries.map(\.id) == [merged])
+        #expect(entry.slots.map(\.id) == original.map(\.slot.id))
+        #expect(state.contents(of: entry) == entry.slots.map { .chapter($0.id) })
+        #expect(entry.manualOrder && entry.primaryListingID == nil && entry.links.count == 3)
+        let variant = try #require(entry.slots.first { $0.id == edited }?.preferred)
+        #expect(variant.edits.title == "Personal chapter" && variant.edits.number == "42")
+        #expect(variant.edits.volume == "3" && variant.edits.coverID == cover.id)
+        #expect(state.isRead(try #require(entry.slots.first { $0.id == edited })))
+        #expect(entry.lastReadAt == Date(timeIntervalSince1970: 100))
+        #expect(entry.links.first { $0.listingID == state.listings.first { $0.details.id == "X" }?.id }?.followsNewChapters == false)
+        #expect(state.readingIDs == [merged])
+        #expect(state.updates.first?.entryID == merged && state.updates.first?.chapterID == updateChapter)
+        #expect(state.chapters.count == 5)
+        let restored = try JSONDecoder().decode(MCLibraryState.self, from: JSONEncoder().encode(state))
+        #expect(restored.entry(merged)?.slots.map(\.id) == entry.slots.map(\.id))
+        try restored.validate(connections: [connection], categories: [])
+    }
+
+    @Test func mergeNumbersAllVariantsInTitleOrderWithoutChangingPhysicalRecords() throws {
+        var (state, x, y, z, connection) = try fixture()
+        let other = try state.add(details: .init(id: "Other", title: "Other", description: "", coverURL: nil),
+            connectionID: connection, records: [.init(id: "ten", title: "Original ten", number: "10", ordinal: 0, language: nil)], language: nil)
+        let otherChapter = try #require(state.entry(other)?.slots.first?.preferred?.chapterID)
+        let physicalIDs = state.flattenedChapters(entryID: x).compactMap(\.slot.preferred).map(\.chapterID)
+        let merged = try state.groupEntries([other, z, x, y], details: .init(title: "Merged"), mode: .mergeChapters, naming: .numberInOrder)
+        let entry = try #require(state.entry(merged))
+        #expect(entry.slots.compactMap(\.preferred).map(\.chapterID) == [otherChapter] + physicalIDs)
+        #expect(entry.slots.compactMap(\.preferred).map { state.chapterDisplayTitle($0) } == (1...6).map { "Chapter \($0)" })
+        #expect(entry.slots.flatMap(\.variants).compactMap { state.number($0) } == (1...6).map(String.init))
+        #expect(state.chapter(otherChapter)?.record.number == "10" && state.chapter(otherChapter)?.record.title == "Original ten")
+        try state.validate(connections: [connection], categories: [])
+    }
+
+    @Test func mergingCopiesOfSameSourceDeduplicatesPhysicalChaptersAndKeepsRefreshExclusions() throws {
+        var state = MCLibraryState()
+        let connection = UUID()
+        let details = MCMangaDetails(id: "book", title: "Book", description: "", coverURL: nil)
+        let records = (1...3).map { MCChapterRecord(id: String($0), title: "Chapter \($0)", number: String($0), ordinal: $0, language: nil) }
+        let a = try state.add(details: details, connectionID: connection, records: records, language: nil)
+        let b = try state.createManual(title: "Copy")
+        let first = try #require(state.entry(a)?.slots.first?.preferred)
+        try state.addChapter(entryID: b, variant: .init(chapterID: first.chapterID, edits: .init(title: "Edited copy")))
+        let removed = try #require(state.entry(a)?.slots.last)
+        try state.removeSlots(entryID: a, slotIDs: [removed.id])
+        try state.editEntry(a) { $0.links[0].followsNewChapters = false }
+        let merged = try state.groupEntries([b, a], details: .init(title: "Merged"), mode: .mergeChapters)
+        let entry = try #require(state.entry(merged))
+        #expect(entry.slots.count == 2 && entry.links.count == 1)
+        #expect(entry.slots.first?.preferred?.edits.title == "Edited copy")
+        #expect(entry.exclusions.contains(try #require(removed.preferred?.chapterID)))
+        try state.editEntry(merged) { $0.links[0].followsNewChapters = true }
+        try state.refresh(details: details, connectionID: connection,
+            records: records + [.init(id: "4", title: "New", number: "4", ordinal: 4, language: nil)], language: nil)
+        #expect(state.entry(merged)?.slots.compactMap(\.preferred).compactMap { state.chapter($0.chapterID)?.record.id } == ["1", "2", "4"])
+        #expect(state.entry(merged)?.slots.first?.preferred?.edits.title == "Edited copy")
+        try state.validate(connections: [connection], categories: [])
+    }
+
+    @Test func mergeRejectsInvalidSelectionsWithoutRemovingAnyTitles() throws {
+        var (state, x, _, _, connection) = try fixture()
+        let entryIDs = state.entries.map(\.id), slotIDs = state.entries.flatMap(\.slots).map(\.id)
+        #expect(throws: MCLibraryFailure.self) { try state.groupEntries([x, UUID()], details: .init(title: "Merged"), mode: .mergeChapters) }
+        #expect(throws: MCLibraryFailure.self) { try state.groupEntries([x, x], details: .init(title: "Merged"), mode: .mergeChapters) }
+        #expect(state.entries.map(\.id) == entryIDs && state.entries.flatMap(\.slots).map(\.id) == slotIDs)
+        try state.validate(connections: [connection], categories: [])
+    }
+
     @Test func groupingCopiesEditableDetailsWithoutCopyingChaptersOrSourceLinks() throws {
         var (state, x, y, z, connection) = try fixture()
         let other = try state.createManual(title: "Other")

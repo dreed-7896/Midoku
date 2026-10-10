@@ -108,6 +108,34 @@ enum MCPanelBookmarks {
         Set(all.filter(\.isChapter).compactMap(\.slotID))
     }
 
+    /// A merge keeps physical identities; only the bookmark's title and slot ownership change.
+    static func reassign(entryIDs: Set<UUID>, slotIDs: Set<UUID>, to entryID: UUID, store: MCCollectionStore) {
+        guard let entry = store.library.entry(entryID) else { return }
+        let chapterIDs = Dictionary(uniqueKeysWithValues: store.library.chapters.map { ($0.identity, $0.id) })
+        let connections = Dictionary(uniqueKeysWithValues: store.snapshot.connections.map { ($0.sourceKey, $0.id) })
+        let slotsByChapter = Dictionary(uniqueKeysWithValues: entry.slots.flatMap { slot in
+            slot.variants.map { ($0.chapterID, slot) }
+        })
+        var items: [MCPanelBookmark] = []
+        for bookmark in all {
+            var moved = bookmark
+            let belongsToMerge = bookmark.slotID.map(slotIDs.contains) == true
+                || UUID(uuidString: bookmark.titleKey).map(entryIDs.contains) == true
+            if belongsToMerge, let connection = connections[bookmark.sourceKey],
+               let chapterID = chapterIDs[.init(listing: .init(connectionID: connection, externalID: bookmark.mangaKey), externalID: bookmark.chapterKey)],
+               let slot = slotsByChapter[chapterID], let variant = slot.variants.first(where: { $0.chapterID == chapterID }) {
+                moved = .init(id: bookmark.id, titleKey: entryID.uuidString, title: store.library.title(entry), slotID: slot.id,
+                    sourceKey: bookmark.sourceKey, mangaKey: bookmark.mangaKey, chapterKey: bookmark.chapterKey,
+                    chapterTitle: store.library.chapterDisplayTitle(variant),
+                    chapterNumber: store.library.number(variant).flatMap(Float.init), page: bookmark.page,
+                    preview: bookmark.preview, kind: bookmark.kind)
+            }
+            if !items.contains(where: { moved.replaces($0) }) { items.append(moved) }
+        }
+        UserDefaults.standard.set(try? JSONEncoder().encode(items), forKey: key)
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
     static func toggleChapter(entryID: UUID, slotID: UUID, store: MCCollectionStore? = nil) throws {
         let existing = all.filter { $0.isChapter && $0.slotID == slotID }
         if !existing.isEmpty {

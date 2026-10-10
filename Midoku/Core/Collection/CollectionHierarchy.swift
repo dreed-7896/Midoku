@@ -27,6 +27,18 @@ nonisolated struct MCEntryDetails: Sendable {
     var hidesCover = false
 }
 
+nonisolated enum MCEntryGroupingMode: String, CaseIterable, Identifiable, Sendable {
+    case nested, mergeChapters
+    var id: Self { self }
+    var title: String { self == .nested ? "Keep nested titles" : "Merge chapters" }
+}
+
+nonisolated enum MCMergedChapterNaming: String, CaseIterable, Identifiable, Sendable {
+    case keepOriginal, numberInOrder
+    var id: Self { self }
+    var title: String { self == .keepOriginal ? "Keep original names" : "Number chapters in order" }
+}
+
 nonisolated extension MCLibraryState {
     var rootEntries: [MCPersonalEntry] { entries.filter { $0.parentEntryID == nil } }
 
@@ -41,7 +53,9 @@ nonisolated extension MCLibraryState {
     }
 
     @discardableResult
-    mutating func groupEntries(_ ids: [UUID], details: MCEntryDetails) throws -> UUID {
+    mutating func groupEntries(_ ids: [UUID], details: MCEntryDetails,
+                              mode: MCEntryGroupingMode = .nested,
+                              naming: MCMergedChapterNaming = .keepOriginal) throws -> UUID {
         var seen = Set<UUID>()
         let orderedIDs = ids.filter { seen.insert($0).inserted }
         guard orderedIDs.count >= 2 else { throw MCLibraryFailure.invalid }
@@ -60,10 +74,83 @@ nonisolated extension MCLibraryState {
             $0.coverID = details.hidesCover ? nil : details.cover?.id
             $0.hidesCover = details.hidesCover
         }
-        for child in topLevel { try candidate.moveEntry(child, into: id) }
+        switch mode {
+        case .nested:
+            for child in topLevel { try candidate.moveEntry(child, into: id) }
+        case .mergeChapters:
+            try candidate.mergeChapters(from: topLevel, into: id, naming: naming)
+        }
         candidate.normalizeContentOrders()
         self = candidate
         return id
+    }
+
+    /// Move presentation slots while leaving physical chapters, downloads and history intact.
+    private mutating func mergeChapters(from roots: [UUID], into id: UUID, naming: MCMergedChapterNaming) throws {
+        let sourceEntries = roots.flatMap { entriesIncludingDescendants(of: [$0]) }
+        let sourceIDs = Set(sourceEntries.map(\.id))
+        var includedChapters = Set<UUID>()
+        var slots: [MCChapterSlot] = []
+        for item in roots.flatMap({ flattenedChapters(entryID: $0) }) {
+            var slot = item.slot
+            // The same physical chapter can belong to several titles, but only once in an entry.
+            slot.variants = slot.variants.filter { includedChapters.insert($0.chapterID).inserted }
+            guard let first = slot.variants.first else { continue }
+            if !slot.variants.contains(where: { $0.id == slot.preferredID }) { slot.preferredID = first.id }
+            if naming == .numberInOrder {
+                for index in slot.variants.indices {
+                    slot.variants[index].edits.title = "Chapter \(slots.count + 1)"
+                    slot.variants[index].edits.number = String(slots.count + 1)
+                }
+            }
+            slots.append(slot)
+        }
+
+        var links: [MCEntrySourceLink] = []
+        var seenListings = Set<UUID>()
+        let listingsByIdentity = Dictionary(uniqueKeysWithValues: listings.map { ($0.identity, $0.id) })
+        let chaptersByListing = Dictionary(grouping: chapters) { listingsByIdentity[$0.identity.listing] }
+        for original in sourceEntries.flatMap(\.links) where seenListings.insert(original.listingID).inserted {
+            let owners = sourceEntries.filter { $0.links.contains { $0.listingID == original.listingID } }
+            let originals = owners.compactMap { entry in entry.links.first { $0.listingID == original.listingID } }
+            var link = original
+            link.followsNewChapters = originals.contains { $0.followsNewChapters }
+            link.needsInitialImport = originals.contains { $0.needsInitialImport == true }
+            if originals.contains(where: { $0.language != original.language }) { link.language = nil }
+            // Do not reintroduce known chapters that were removed or intentionally never imported.
+            let known = chaptersByListing[original.listingID] ?? []
+            link.followBaseline = Set(known.filter { chapter in
+                !owners.contains { owner in
+                    guard let source = owner.links.first(where: { $0.listingID == original.listingID }) else { return false }
+                    return (source.followsNewChapters || source.needsInitialImport == true)
+                        && (source.language == nil || source.language == chapter.record.language)
+                        && !owner.exclusions.contains(chapter.id)
+                        && !(source.followBaseline ?? []).contains(chapter.id)
+                }
+            }.map(\.id))
+            links.append(link)
+        }
+        let exclusions = sourceEntries.reduce(into: Set<UUID>()) { $0.formUnion($1.exclusions) }.subtracting(includedChapters)
+        let lastRead = sourceEntries.compactMap(\.lastReadAt).max()
+        try editEntry(id) { entry in
+            entry.manualOrder = true
+            entry.slots = slots
+            entry.contentOrder = slots.map { .chapter($0.id) }
+            entry.links = links
+            entry.exclusions = exclusions
+            entry.lastReadAt = lastRead
+            entry.readerOverride = roots.first.flatMap { root in sourceEntries.first { $0.id == root }?.readerOverride }
+        }
+        var seenUpdates = Set<String>()
+        updates = updates.compactMap { update in
+            var moved = update
+            if sourceIDs.contains(moved.entryID) { moved.entryID = id }
+            return seenUpdates.insert("\(moved.entryID):\(moved.chapterID)").inserted ? moved : nil
+        }
+        var seenReading = Set<UUID>()
+        readingEntryIDs = readingIDs.map { sourceIDs.contains($0) ? id : $0 }.filter { seenReading.insert($0).inserted }
+        // Slots and variants retain their IDs, so chapter bookmarks can follow the new owner.
+        removeEntries(sourceIDs)
     }
 
     /// Every title is one random candidate, including descendants of Reading titles.

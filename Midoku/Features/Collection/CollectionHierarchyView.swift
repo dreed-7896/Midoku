@@ -73,7 +73,7 @@ struct MCEntryPlacementView: View {
     }
 
     private var navigationTitle: String {
-        switch mode { case .move: "Move into title"; case .addInside: "Add nested title" }
+        switch mode { case .move: "Add to entry"; case .addInside: "Add nested title" }
     }
     private var sectionTitle: String {
         switch mode { case .move: "Choose parent title"; case .addInside: "Move an existing title here" }

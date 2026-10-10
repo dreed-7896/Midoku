@@ -25,7 +25,7 @@ private struct MCRemoteCoverField: View {
 
 struct MCEntryEditor: View {
     let entryID: UUID?
-    private let groupingEntryIDs: [UUID]
+    @State private var groupingEntryIDs: [UUID]
     private let onCreated: ((UUID) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
@@ -45,16 +45,18 @@ struct MCEntryEditor: View {
     @State private var loaded = false
     @State private var resetConfirm = false
     @State private var inheritedTitle: String?
+    @State private var groupingMode = MCEntryGroupingMode.nested
+    @State private var chapterNaming = MCMergedChapterNaming.keepOriginal
 
     init(entryID: UUID) {
         self.entryID = entryID
-        groupingEntryIDs = []
+        _groupingEntryIDs = State(initialValue: [])
         onCreated = nil
     }
 
     init(grouping entryIDs: [UUID], onCreated: @escaping (UUID) -> Void) {
         entryID = nil
-        groupingEntryIDs = entryIDs
+        _groupingEntryIDs = State(initialValue: entryIDs)
         self.onCreated = onCreated
     }
 
@@ -63,11 +65,17 @@ struct MCEntryEditor: View {
             Form {
                 if entryID == nil {
                     Section {
+                        Picker("Combine titles", selection: $groupingMode) {
+                            ForEach(MCEntryGroupingMode.allCases) { Text($0.title).tag($0) }
+                        }
+                        if groupingMode == .mergeChapters {
+                            Picker("Chapter names", selection: $chapterNaming) {
+                                ForEach(MCMergedChapterNaming.allCases) { Text($0.title).tag($0) }
+                            }
+                        }
                         Menu("Inherit details from…", systemImage: "doc.on.doc") {
-                            ForEach(groupingEntryIDs, id: \.self) { id in
-                                if let entry = store.library.entry(id) {
-                                    Button(store.library.title(entry)) { inheritDetails(from: entry) }
-                                }
+                            ForEach(groupingEntryIDs.compactMap { store.library.entry($0) }) { entry in
+                                Button(store.library.title(entry)) { inheritDetails(from: entry) }
                             }
                         }.disabled(loadingCoverURL)
                         if let inheritedTitle {
@@ -76,7 +84,22 @@ struct MCEntryEditor: View {
                     } header: {
                         Text("Group \(groupingEntryIDs.count) titles")
                     } footer: {
-                        Text("Creates a new parent title. Existing chapters, progress, update settings, and nested titles stay intact. Inheriting replaces the fields below; you can edit them before creating.")
+                        Text(groupingMode == .nested
+                             ? "Creates a parent title and keeps the selected titles nested inside it. Inherited details can be edited below."
+                             : "Moves all chapters, including chapters in nested titles, into one new title. The original titles are replaced. Progress, source links and chapter edits are kept; duplicate source chapters are included once. Inherited details can be edited below.")
+                    }
+                    Section {
+                        ForEach(groupingEntryIDs, id: \.self) { id in
+                            if let entry = store.library.entry(id) {
+                                Text(store.library.title(entry))
+                            }
+                        }.onMove { from, to in groupingEntryIDs.move(fromOffsets: from, toOffset: to) }
+                    } header: {
+                        Text("Title order")
+                    } footer: {
+                        Text(groupingMode == .mergeChapters && chapterNaming == .numberInOrder
+                             ? "Drag to reorder titles. Their chapters become Chapter 1, Chapter 2, and so on in this order, keeping each title’s personal chapter order."
+                             : "Drag to choose the order of titles and their chapters.")
                     }
                 }
                 Section("Details") {
@@ -111,6 +134,7 @@ struct MCEntryEditor: View {
                     Section { Button("Reset edits", role: .destructive) { resetConfirm = true } }
                 }
             }
+            .environment(\.editMode, .constant(entryID == nil ? .active : .inactive))
             .navigationTitle(entryID == nil ? "Group into new title" : "Edit entry").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -174,15 +198,15 @@ struct MCEntryEditor: View {
 
     private func save() {
         guard let entryID else {
-            var createdID: UUID?
-            if store.perform({ state in
+            do {
                 let details = MCEntryDetails(title: title, description: summary, author: author, artist: artist,
-                    status: status, categoryIDs: categories.intersection(Set(state.categories.map(\.id))),
+                    status: status, categoryIDs: categories.intersection(Set(store.snapshot.categories.map(\.id))),
                     cover: cover, hidesCover: clearCover)
-                createdID = try state.library.groupEntries(groupingEntryIDs, details: details)
-            }), let createdID {
+                let createdID = try store.groupEntries(groupingEntryIDs, details: details, mode: groupingMode, naming: chapterNaming)
                 dismiss()
                 onCreated?(createdID)
+            } catch {
+                store.error = error.localizedDescription
             }
             return
         }
@@ -216,6 +240,7 @@ struct MCEntryEditor: View {
 struct MCChapterEditor: View {
     let entryID: UUID
     let slotID: UUID
+    let resetThumbnail: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var title = ""
@@ -225,6 +250,7 @@ struct MCChapterEditor: View {
     @State private var coverURL = ""
     @State private var loadingCoverURL = false
     @State private var loaded = false
+    @State private var confirmReset = false
     private var variant: MCChapterVariant? { store.library.entry(entryID)?.slots.first { $0.id == slotID }?.preferred }
     var body: some View {
         NavigationStack {
@@ -236,17 +262,29 @@ struct MCChapterEditor: View {
                     Task { await useCoverURL() }
                 }
                 if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 120, height: 180)).frame(width: 120, height: 180) }
-                Button("Reset edits") { save(reset: true) }
+                Section {
+                    Button("Reset thumbnail", systemImage: "photo.badge.arrow.down") {
+                        resetThumbnail()
+                        cover = nil; coverURL = ""
+                    }.disabled(loadingCoverURL)
+                    Button("Reset edits", systemImage: "arrow.counterclockwise", role: .destructive) { confirmReset = true }
+                        .disabled(loadingCoverURL)
+                }
             }.navigationTitle("Edit chapter").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { save(reset: false) } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Save") { save(reset: false) }.disabled(loadingCoverURL) }
                 }
                 .onAppear {
                     guard !loaded, let variant else { return }; loaded = true
                     title = store.library.chapterDisplayTitle(variant); number = store.library.number(variant) ?? ""
                     volume = variant.edits.volume ?? store.library.chapter(variant.chapterID)?.record.volume ?? ""
+                    cover = store.library.covers.first { $0.id == variant.edits.coverID }
+                    coverURL = cover?.url?.absoluteString ?? ""
                 }
+                .confirmationDialog("Reset chapter edits?", isPresented: $confirmReset) {
+                    Button("Reset edits", role: .destructive) { save(reset: true) }
+                } message: { Text("Restores the source title, number, volume and thumbnail.") }
                 .mcErrors(store)
         }
     }
@@ -270,7 +308,7 @@ struct MCChapterEditor: View {
     private func save(reset: Bool) {
         guard let variant else { return }
         if store.perform({ state in
-            if let cover, !reset { state.library.covers.append(cover) }
+            if let cover, !reset, !state.library.covers.contains(where: { $0.id == cover.id }) { state.library.covers.append(cover) }
             try state.library.editEntry(entryID) { entry in
                 guard let s = entry.slots.firstIndex(where: { $0.id == slotID }),
                       let v = entry.slots[s].variants.firstIndex(where: { $0.id == variant.id }) else { throw MCLibraryFailure.missing }

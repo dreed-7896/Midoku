@@ -89,7 +89,7 @@ struct MCEntryView: View {
     @State private var store = MCCollectionStore.shared
     @State private var showEdit = false
     @State private var showAddNested = false
-    @State private var showMove = false
+    @State private var movingEntry: MCID?
     @State private var showCover = false
     @State private var showSources = false
     @State private var showRemovedChapters = false
@@ -97,7 +97,7 @@ struct MCEntryView: View {
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var editingChapter: MCID?
-    @State private var resettingChapter: MCID?
+    @State private var addingChapter: MCID?
     @State private var reader: MCReaderSheet?
     @State private var showBookmarks = false
     @State private var selectedBookmark: MCPanelBookmark?
@@ -201,7 +201,7 @@ struct MCEntryView: View {
                         Menu {
                             Button("Edit entry", systemImage: "square.and.pencil") { showEdit = true }
                             Button("Add title", systemImage: "plus.rectangle.on.rectangle") { showAddNested = true }
-                            Button("Move title", systemImage: "folder") { showMove = true }
+                            Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: entryID) }
                             if entry.parentEntryID != nil {
                                 Button("Move to library", systemImage: "arrow.up.left") {
                                     store.perform { try $0.library.moveEntry(entryID, into: nil) }
@@ -231,7 +231,7 @@ struct MCEntryView: View {
             } else { ContentUnavailableView("Entry unavailable", systemImage: "book.closed") }
         }
         .sheet(isPresented: $showAddNested) { MCEntryPlacementView(mode: .addInside(entryID)) }
-        .sheet(isPresented: $showMove) { MCEntryPlacementView(mode: .move(entryID)) }
+        .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
         .fullScreenCover(isPresented: $showCover) { if let entry { MCFullscreenCoverView(entry: entry) } }
         .sheet(isPresented: $showStatusEditor) { MCEntryStatusEditor(entryID: entryID) }
@@ -241,7 +241,16 @@ struct MCEntryView: View {
         .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
         .sheet(item: $migrationTarget) { MCEntryMigrationSheet(manga: $0.manga) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
-        .sheet(item: $editingChapter) { MCChapterEditor(entryID: entryID, slotID: $0.id) }
+        .sheet(item: $editingChapter) { item in
+            MCChapterEditor(entryID: entryID, slotID: item.id, resetThumbnail: { resetChapterThumbnails(slotIDs: [item.id]) })
+        }
+        .sheet(item: $addingChapter) { item in
+            if let variant = entry?.slots.first(where: { $0.id == item.id })?.preferred,
+               let chapter = store.library.chapter(variant.chapterID), let physical = store.physical(chapter.identity) {
+                MCAddChapterToEntryView(manga: physical.manga, chapter: physical.chapter,
+                    excludingEntryID: entryID, initialChapterName: store.library.chapterDisplayTitle(variant))
+            }
+        }
         .sheet(isPresented: $showBookmarks, onDismiss: {
             if let bookmark = selectedBookmark { selectedBookmark = nil; openBookmark(bookmark) }
         }) {
@@ -265,9 +274,6 @@ struct MCEntryView: View {
         .confirmationDialog("Reset all chapter thumbnails?", isPresented: $confirmResetThumbnails) {
             Button("Reset thumbnails", role: .destructive) { resetChapterThumbnails() }
         } message: { Text("Custom and generated thumbnails for this entry will be cleared. Chapter details and reading progress are kept.") }
-        .confirmationDialog("Reset chapter edits?", isPresented: Binding(get: { resettingChapter != nil }, set: { if !$0 { resettingChapter = nil } }), presenting: resettingChapter) { item in
-            Button("Reset edits", role: .destructive) { store.perform { try $0.library.resetChapterDetails(entryID: entryID, slotID: item.id) } }
-        } message: { _ in Text("Restores the source title, number, volume and thumbnail.") }
         .confirmationDialog("Remove selected chapters?", isPresented: $confirmRemoveChapters) {
             Button("Remove chapters", role: .destructive) {
                 if store.perform({ try $0.library.removeSlots(entryID: entryID, slotIDs: selected) }) { selected.removeAll(); selecting = false }
@@ -512,6 +518,7 @@ struct MCEntryView: View {
                 .buttonStyle(.plain)
                 .disabled(selecting)
                 .contextMenu {
+                    Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: id) }
                     Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: [id], read: true) }
                     Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [id], read: false) }
                     Button("Move to library", systemImage: "arrow.up.left") {
@@ -573,7 +580,7 @@ struct MCEntryView: View {
                     Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
                 }
                 Button("Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
-                Button("Reset edits", systemImage: "arrow.counterclockwise") { resettingChapter = MCID(id: slot.id) }
+                Button("Add to entry", systemImage: "text.badge.plus") { addingChapter = MCID(id: slot.id) }
                 Menu("Reading progress", systemImage: "checkmark.circle") {
                     Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: true) }
                     Button("Mark unread", systemImage: "circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: false) }
@@ -582,7 +589,6 @@ struct MCEntryView: View {
                     Button("Read all next", systemImage: "checkmark.circle.fill") { store.setRead(entryID: entryID, slotIDs: next, read: true) }.disabled(next.isEmpty)
                     Button("Unread all next", systemImage: "circle.dashed") { store.setRead(entryID: entryID, slotIDs: next, read: false) }.disabled(next.isEmpty)
                 }
-                Button("Reset thumbnail", systemImage: "photo.badge.arrow.down") { resetChapterThumbnails(slotIDs: [slot.id]) }
                 Button("Download", systemImage: "arrow.down.circle") {
                     guard let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID), let physical = store.physical(chapter.identity) else { return }
                     Task { await DownloadManager.shared.download(manga: physical.manga, chapters: [physical.chapter]) }

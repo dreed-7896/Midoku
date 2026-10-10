@@ -43,6 +43,11 @@ private struct MCLibraryGroupPage: Identifiable {
     let entryIDs: Set<UUID>
 }
 
+private struct MCGroupingSelection: Identifiable {
+    let id = UUID()
+    let entryIDs: [UUID]
+}
+
 @Observable private final class MCLibrarySwipePosition {
     var page: CGFloat = 0
     var requestedID: String?
@@ -85,8 +90,7 @@ struct MCCollectionRootView: View {
     @State private var showCategories = false
     @State private var showBatchCategories = false
     @State private var showBatchArtist = false
-    @State private var showGroupTitles = false
-    @State private var groupingEntryIDs: [UUID] = []
+    @State private var groupingSelection: MCGroupingSelection?
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var confirmDelete = false
@@ -364,8 +368,8 @@ struct MCCollectionRootView: View {
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
             .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
-            .sheet(isPresented: $showGroupTitles) {
-                MCEntryEditor(grouping: groupingEntryIDs) { id in
+            .sheet(item: $groupingSelection) { selection in
+                MCEntryEditor(grouping: selection.entryIDs) { id in
                     selected.removeAll(); selecting = false
                     path.append(id)
                 }
@@ -554,8 +558,7 @@ struct MCCollectionRootView: View {
                 Button("Group into new title", systemImage: "rectangle.stack.badge.plus") {
                     let visible = entries(in: nil).map(\.id).filter { selected.contains($0) }
                     let visibleIDs = Set(visible)
-                    groupingEntryIDs = visible + store.library.entries.map(\.id).filter { selected.contains($0) && !visibleIDs.contains($0) }
-                    showGroupTitles = true
+                    groupingSelection = MCGroupingSelection(entryIDs: visible + store.library.entries.map(\.id).filter { selected.contains($0) && !visibleIDs.contains($0) })
                 }.disabled(selected.count < 2)
                 Divider()
                 Button("Remove from Library", systemImage: "trash", role: .destructive) { confirmDelete = true }
@@ -648,7 +651,7 @@ struct MCCollectionRootView: View {
             Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [entry.id], read: false) }
             if !readingMode {
                 Divider()
-                Button("Move into title", systemImage: "folder") { movingEntry = MCID(id: entry.id) }
+                Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: entry.id) }
                 if entry.parentEntryID != nil {
                     Button("Move to library", systemImage: "arrow.up.left") {
                         store.perform { try $0.library.moveEntry(entry.id, into: nil) }

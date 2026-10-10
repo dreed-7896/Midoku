@@ -9,6 +9,58 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func mergedChaptersPersistWithExactRoutingAndReassignedBookmarks() throws {
+        let defaultsKey = "Reader.panelBookmarks.v1"
+        let previous = UserDefaults.standard.data(forKey: defaultsKey)
+        defer { UserDefaults.standard.set(previous, forKey: defaultsKey) }
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        let a = try store.add(.init(sourceKey: "merge.a", key: "book", title: "A"), chapters: [.init(key: "one", chapterNumber: 10)])
+        let b = try store.add(.init(sourceKey: "merge.b", key: "book", title: "B"), chapters: [.init(key: "one", chapterNumber: 20)])
+        let slot = try #require(store.library.entry(a)?.slots.first)
+        try MCPanelBookmarks.toggleChapter(entryID: a, slotID: slot.id, store: store)
+        MCPanelBookmarks.add(.init(id: UUID(), titleKey: a.uuidString, slotID: slot.id,
+            sourceKey: "merge.a", mangaKey: "book", chapterKey: "one", chapterTitle: "Chapter 10",
+            chapterNumber: 10, page: 3, preview: nil))
+        let merged = try store.groupEntries([b, a], details: .init(title: "Merged"), mode: .mergeChapters, naming: .numberInOrder)
+        #expect(store.chapterCount(entryID: merged) == 2 && store.library.entries.count == 1)
+        #expect(MCPanelBookmarks.all.count == 2)
+        #expect(MCPanelBookmarks.all.allSatisfy { $0.titleKey == merged.uuidString && $0.slotID == slot.id && $0.chapterTitle == "Chapter 2" })
+        let reopened = MCCollectionStore(fileURL: file)
+        for bookmark in MCPanelBookmarks.all {
+            let reader = try MCPanelBookmarks.reader(for: bookmark, store: reopened)
+            let route = try #require(reader.sequence.route(key: reader.sequence.initialKey))
+            #expect(route.entryID == merged && route.slotID == slot.id)
+            #expect(route.identifier.sourceKey == "merge.a" && route.identifier.chapterKey == "one")
+            #expect(reader.startPage == (bookmark.isChapter ? 1 : 3))
+        }
+    }
+
+    @Test func failedMergeSaveLeavesOriginalEntriesAndBookmarksIntact() throws {
+        let defaultsKey = "Reader.panelBookmarks.v1"
+        let previous = UserDefaults.standard.data(forKey: defaultsKey)
+        defer { UserDefaults.standard.set(previous, forKey: defaultsKey) }
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("collection.json")
+        let store = MCCollectionStore(fileURL: file)
+        let a = try store.add(.init(sourceKey: "merge.a", key: "book", title: "A"), chapters: [.init(key: "one")])
+        let b = try store.add(.init(sourceKey: "merge.b", key: "book", title: "B"), chapters: [.init(key: "one")])
+        try MCPanelBookmarks.toggleChapter(entryID: a, slotID: try #require(store.library.entry(a)?.slots.first?.id), store: store)
+        let bookmarks = UserDefaults.standard.data(forKey: defaultsKey)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        #expect(throws: (any Error).self) {
+            try store.groupEntries([a, b], details: .init(title: "Merged"), mode: .mergeChapters, naming: .numberInOrder)
+        }
+        #expect(store.library.entries.map(\.id) == [a, b])
+        #expect(UserDefaults.standard.data(forKey: defaultsKey) == bookmarks)
+    }
+
     @Test func chapterBookmarksKeepPanelsAndExactPhysicalRouting() throws {
         let defaultsKey = "Reader.panelBookmarks.v1"
         let previous = UserDefaults.standard.data(forKey: defaultsKey)
