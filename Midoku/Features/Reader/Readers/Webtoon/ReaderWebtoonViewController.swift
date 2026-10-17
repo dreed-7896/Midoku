@@ -557,7 +557,9 @@ extension ReaderWebtoonViewController: UIContextMenuInteractionDelegate {
             let translateAction = UIAction(title: "Translate", image: UIImage(systemName: "character.bubble")) { [weak self] _ in
                 guard let self else { return }
                 self.stopAutoScroll()
-                self.present(UIHostingController(rootView: TranslationModalView(images: [image], webtoon: true)), animated: true)
+                let controller = UIHostingController(rootView: TranslationModalView(images: [image], webtoon: true))
+                controller.modalPresentationStyle = .fullScreen
+                self.present(controller, animated: true)
             }
             let bookmark = self.delegate?.bookmarkPanelAction(image: image, chapterKey: node.page.chapterId,
                                                                page: indexPath.row)

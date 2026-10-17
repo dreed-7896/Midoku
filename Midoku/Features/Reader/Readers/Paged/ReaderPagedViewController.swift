@@ -1330,7 +1330,9 @@ extension ReaderPagedViewController: UIContextMenuInteractionDelegate {
             if #available(iOS 18.0, *), let image = pageView.image {
                 actions.insert(UIAction(title: "Translate", image: UIImage(systemName: "character.bubble")) { [weak self] _ in
                     guard let self else { return }
-                    self.present(UIHostingController(rootView: TranslationModalView(images: [image], webtoon: false)), animated: true)
+                    let controller = UIHostingController(rootView: TranslationModalView(images: [image], webtoon: false))
+                    controller.modalPresentationStyle = .fullScreen
+                    self.present(controller, animated: true)
                 }, at: 0)
             }
             if let image = pageView.image,
