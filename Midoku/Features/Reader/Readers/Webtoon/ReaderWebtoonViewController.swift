@@ -557,9 +557,7 @@ extension ReaderWebtoonViewController: UIContextMenuInteractionDelegate {
             let translateAction = UIAction(title: "Translate", image: UIImage(systemName: "character.bubble")) { [weak self] _ in
                 guard let self else { return }
                 self.stopAutoScroll()
-                let controller = UIHostingController(rootView: TranslationModalView(images: [image], webtoon: true))
-                controller.modalPresentationStyle = .fullScreen
-                self.present(controller, animated: true)
+                (self.delegate as? ReaderViewController)?.translationCoordinator.setEnabled(true)
             }
             let bookmark = self.delegate?.bookmarkPanelAction(image: image, chapterKey: node.page.chapterId,
                                                                page: indexPath.row)
@@ -1163,5 +1161,34 @@ extension ReaderWebtoonViewController: ASCollectionDataSource {
                 )
             }
         }
+    }
+}
+
+// MARK: - Inline translation pages
+extension ReaderWebtoonViewController: ReaderTranslationReader {
+    func translationSurfaces() -> [ReaderTranslationSurface] {
+        collectionNode.visibleNodes.compactMap { node in
+            guard let cell = node as? ReaderWebtoonPageNode, !cell.page.isTextPage,
+                  let imageView = cell.imageNode.imageView, imageView.image != nil else { return nil }
+            return ReaderTranslationSurface(page: cell.page, imageView: imageView)
+        }.sorted { lhs, rhs in
+            lhs.imageView.convert(lhs.imageView.bounds, to: view).minY
+                < rhs.imageView.convert(rhs.imageView.bounds, to: view).minY
+        }
+    }
+
+    func nextTranslationPage() -> Page? {
+        guard let path = collectionNode.view.indexPathsForVisibleItems.max(), pages.indices.contains(path.section) else { return nil }
+        let section = pages[path.section]
+        if let next = section.dropFirst(path.item + 1).first(where: { $0.type == .imagePage && !$0.isTextPage }) {
+            return next
+        }
+        guard pages.indices.contains(path.section + 1) else { return nil }
+        return pages[path.section + 1].first(where: { $0.type == .imagePage && !$0.isTextPage })
+    }
+
+    func revealTranslation(_ rect: CGRect, in imageView: UIImageView) {
+        let target = imageView.convert(rect, to: scrollView).insetBy(dx: -24, dy: -24)
+        scrollView.scrollRectToVisible(target, animated: true)
     }
 }

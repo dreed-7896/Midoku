@@ -215,6 +215,8 @@ class ReaderPageViewController: BaseObservingViewController {
                 onAspectRatioUpdated?()
             }
 
+            (delegate as? ReaderViewController)?.translationCoordinator.pageImageChanged()
+
             // Notify when image loading is complete with wide image status
             onImageisWideImage?(isWideImage)
 

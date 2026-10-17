@@ -48,6 +48,7 @@ class GIFImageNode: ASControlNode {
         didSet {
             guard image !== oldValue else { return }
             Task { @MainActor in
+                if let imageView { ReaderTranslationImageOverlay.remove(from: imageView) }
                 imageView?.image = image
             }
         }
@@ -104,6 +105,7 @@ class GIFImageNode: ASControlNode {
         animatedData = nil
 
         Task { @MainActor [weak imageView] in
+            if let imageView { ReaderTranslationImageOverlay.remove(from: imageView) }
             imageView?.clearGIF()
             imageView?.image = nil
         }

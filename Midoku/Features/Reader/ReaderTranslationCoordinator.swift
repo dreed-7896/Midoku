@@ -1,0 +1,467 @@
+import Combine
+import CryptoKit
+import SwiftUI
+import Translation
+import UIKit
+
+@MainActor
+final class ReaderTranslationCoordinator: NSObject, ObservableObject {
+    private weak var owner: ReaderViewController?
+    private(set) var isEnabled = false
+    @Published var appleConfiguration: TranslationSession.Configuration?
+    var appleRequest: ReaderAppleTranslationRequest?
+    private weak var sessionHost: UIViewController?
+    private var timer: Timer?
+    private var displayLink: CADisplayLink?
+    private let displayTarget = ReaderTranslationDisplayTarget()
+    private var overlays: [ReaderTranslationImageOverlay] = []
+    private var surfaces: [(ReaderTranslationSurface, String)] = []
+    private var cache: [String: ReaderTranslationRecord] = [:]
+    private var cacheOrder: [String] = []
+    private var failures: [String: String] = [:]
+    private var prefetched: [String: String] = [:]
+    private let fingerprints = NSMapTable<UIImage, NSString>(keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
+    private var activeTask: Task<Void, Never>?
+    private var activeToken: UUID?
+    private var activeKey: String?
+    private var activeRegions: [TranslationRegion] = []
+    private var activeLocator: String?
+    private var pendingRecord: ReaderTranslationRecord?
+    private var selected: (key: String, id: Int)?
+    private var showAll = false
+    private var original = false
+    private let callout = TranslationCalloutView()
+    private let connector = CAShapeLayer()
+    private let accessory = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+    private let statusLabel = UILabel()
+    private let allButton = UIButton(type: .system)
+    private let listButton = UIButton(type: .system)
+    private let originalButton = UIButton(type: .system)
+    private let retryButton = UIButton(type: .system)
+    private let appearanceButton = UIButton(type: .system)
+    private let offButton = UIButton(type: .system)
+    private var bottomConstraint: NSLayoutConstraint?
+    private var controlsVisible: Bool?
+
+    init(owner: ReaderViewController) {
+        self.owner = owner
+        super.init()
+        displayTarget.coordinator = self
+        callout.onClose = { [weak self] in self?.select(key: nil, id: nil) }
+    }
+
+    deinit {
+        timer?.invalidate()
+        displayLink?.invalidate()
+        activeTask?.cancel()
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        guard !enabled || owner?.reader is ReaderTranslationReader else { return }
+        isEnabled = enabled
+        if enabled {
+            installUI()
+            let timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.refresh() }
+            }
+            self.timer = timer
+            RunLoop.main.add(timer, forMode: .common)
+            let link = CADisplayLink(target: displayTarget, selector: #selector(ReaderTranslationDisplayTarget.tick))
+            link.isPaused = true
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+            refresh()
+        } else {
+            stopWork()
+            timer?.invalidate(); timer = nil
+            displayLink?.invalidate(); displayLink = nil
+            overlays.forEach { $0.removeFromSuperview() }; overlays = []
+            surfaces = []
+            selected = nil
+            original = false
+            accessory.isHidden = true
+            callout.isHidden = true
+            connector.path = nil
+        }
+        owner?.translationModeChanged()
+    }
+
+    func stop() { setEnabled(false) }
+
+    func readerChanged() {
+        guard isEnabled else { return }
+        overlays.forEach { $0.removeFromSuperview() }; overlays = []
+        surfaces = []
+        select(key: nil, id: nil)
+        stopWork()
+        if owner?.reader is ReaderTranslationReader { refresh() } else { stop() }
+    }
+
+    private var providerKey: String {
+        TranslationSettings.usesOpenAI
+            ? "api|\(TranslationSettings.endpoint)|\(TranslationSettings.model)"
+            : "apple-ja-en"
+    }
+
+    private func key(page: Page, image: UIImage) -> String {
+        let digest: String
+        if let known = fingerprints.object(forKey: image) {
+            digest = known as String
+        } else {
+            let bytes: Data
+            if let raw = image.cgImage?.dataProvider?.data { bytes = raw as Data }
+            else { bytes = image.pngData() ?? Data() }
+            digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+                + "|\(image.size.width)x\(image.size.height)|\(image.imageOrientation.rawValue)"
+            fingerprints.setObject(digest as NSString, forKey: image)
+        }
+        let identity = owner?.translationIdentity(for: page)
+        // Content fingerprint distinguishes split halves and processing settings. Physical tuples
+        // distinguish collection variants that use the same chapter key on different sources.
+        let components = [identity?.sourceKey ?? page.sourceId, identity?.mangaKey ?? "", identity?.chapterKey ?? page.chapterId,
+                          digest, providerKey,
+                          owner?.readingMode == .webtoon || owner?.readingMode == .continuous ? "scroll" : "paged"]
+        return String(decoding: (try? JSONEncoder().encode(components)) ?? Data(), as: UTF8.self)
+    }
+
+    private func locator(for page: Page) -> String {
+        let identity = owner?.translationIdentity(for: page)
+        return "\(identity?.sourceKey ?? page.sourceId)|\(identity?.mangaKey ?? "")|\(identity?.chapterKey ?? page.chapterId)"
+            + "|\(page.imageURL ?? "")|\(page.zipURL ?? "")|\(page.base64?.hashValue ?? 0)"
+            + "|\(page.image.map { ObjectIdentifier($0).hashValue } ?? 0)|\(ImageProcessingSettingsKey.getProcessorSettingsKey())|\(providerKey)"
+    }
+
+    func pageImageChanged() {
+        guard isEnabled else { return }
+        refresh()
+    }
+
+    private func refresh() {
+        guard isEnabled, let owner, owner.viewIfLoaded?.window != nil,
+              let reader = owner.reader as? ReaderTranslationReader else { return }
+        let visible = Array(reader.translationSurfaces().prefix(6))
+        surfaces = visible.compactMap { surface in
+            guard let image = surface.imageView.image else { return nil }
+            return (surface, key(page: surface.page, image: image))
+        }
+        let liveViews = Set(visible.map { ObjectIdentifier($0.imageView) })
+        overlays.removeAll { overlay in
+            let keep = overlay.imageView.map { liveViews.contains(ObjectIdentifier($0)) && $0.image === overlay.expectedImage && overlay.superview === $0 } ?? false
+            if !keep { overlay.removeFromSuperview() }
+            return !keep
+        }
+        if let selected, !surfaces.contains(where: { $0.1 == selected.key }) { self.selected = nil }
+        for (surface, key) in surfaces {
+            let overlay: ReaderTranslationImageOverlay
+            if let existing = overlays.first(where: { $0.imageView === surface.imageView }) {
+                overlay = existing
+            } else if let image = surface.imageView.image {
+                overlay = ReaderTranslationImageOverlay(imageView: surface.imageView, image: image)
+                overlays.append(overlay)
+            } else { continue }
+            overlay.key = key
+            overlay.onSelect = { [weak self] id in self?.select(key: key, id: id) }
+            surface.imageView.bringSubviewToFront(overlay)
+            overlay.configure(record: cache[key] ?? (activeKey == key ? pendingRecord : nil),
+                              selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll, original: original)
+        }
+        let needed = surfaces.first { cache[$0.1] == nil && failures[$0.1] == nil }
+        if let needed {
+            // New visible pages take priority over an off-screen request or speculative prefetch.
+            if activeToken != nil, activeKey != needed.1, !surfaces.contains(where: { $0.1 == activeKey }) { stopWork() }
+            if activeToken == nil, let image = needed.0.imageView.image {
+                start(page: needed.0.page, image: image, key: needed.1, locator: nil)
+            }
+        } else if activeToken == nil, !surfaces.isEmpty, let next = reader.nextTranslationPage(), !next.isTextPage {
+            let locator = locator(for: next)
+            if prefetched[locator].flatMap({ cache[$0] }) == nil, failures[locator] == nil {
+                prefetch(page: next, locator: locator)
+            }
+        }
+        updateStatus()
+        positionCallout()
+    }
+
+    private func start(page: Page, image: UIImage, key: String, locator: String?) {
+        let token = UUID()
+        activeToken = token
+        activeKey = key
+        activeLocator = locator
+        activeTask = Task { [weak self] in
+            guard let self else { return }
+            await recognize(image: image, webtoon: owner?.readingMode == .webtoon || owner?.readingMode == .continuous, token: token)
+        }
+    }
+
+    private func prefetch(page: Page, locator: String) {
+        let token = UUID()
+        activeToken = token
+        activeLocator = locator
+        activeTask = Task { [weak self] in
+            guard let self, let owner = self.owner else { return }
+            guard let image = await owner.loadTranslationImage(for: page), !Task.isCancelled, activeToken == token else {
+                if activeToken == token { finish(token: token, translations: [:], error: "Next page could not be loaded.") }
+                return
+            }
+            let cacheKey = self.key(page: page, image: image)
+            activeKey = cacheKey
+            prefetched[locator] = cacheKey
+            if cache[cacheKey] != nil { stopWork(); return }
+            await recognize(image: image, webtoon: owner.readingMode == .webtoon || owner.readingMode == .continuous, token: token)
+        }
+    }
+
+    private func recognize(image: UIImage, webtoon: Bool, token: UUID) async {
+        let regions = await PageTranslator.recognize([image], webtoon: webtoon)
+        guard !Task.isCancelled, activeToken == token else { return }
+        activeRegions = regions
+        pendingRecord = ReaderTranslationRecord(regions: regions, translations: [:])
+        render()
+        if regions.isEmpty { finish(token: token, translations: [:], error: nil); return }
+        if TranslationSettings.usesOpenAI {
+            do {
+                let translations = try await PageTranslator.translateWithAPI(regions)
+                guard !Task.isCancelled, activeToken == token else { return }
+                finish(token: token, translations: translations, error: nil)
+            } catch {
+                guard !Task.isCancelled, activeToken == token else { return }
+                finish(token: token, translations: [:], error: error.localizedDescription)
+            }
+        } else {
+            appleRequest = ReaderAppleTranslationRequest(token: token, regions: regions)
+            if appleConfiguration == nil {
+                appleConfiguration = TranslationSession.Configuration(source: Locale.Language(identifier: "ja"),
+                                                                      target: Locale.Language(identifier: "en"))
+            } else { appleConfiguration?.invalidate() }
+        }
+    }
+
+    func appleFinished(token: UUID, translations: [Int: String], error: String?) {
+        finish(token: token, translations: translations, error: error)
+    }
+
+    private func finish(token: UUID, translations: [Int: String], error: String?) {
+        guard activeToken == token else { return }
+        if let error {
+            if let key = activeKey { failures[key] = error }
+            if let locator = activeLocator { failures[locator] = error }
+        } else if let key = activeKey {
+            if failures.count > 80 { failures.removeAll() }
+            if prefetched.count > 80 { prefetched.removeAll() }
+            cache[key] = ReaderTranslationRecord(regions: activeRegions, translations: translations)
+            cacheOrder.removeAll { $0 == key }
+            cacheOrder.append(key)
+            while cacheOrder.count > 40 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
+        }
+        stopWork()
+        render()
+    }
+
+    private func stopWork() {
+        activeToken = nil
+        activeKey = nil
+        activeLocator = nil
+        activeRegions = []
+        pendingRecord = nil
+        activeTask?.cancel()
+        activeTask = nil
+        appleRequest = nil
+        appleConfiguration = nil
+    }
+
+    private func render() {
+        for overlay in overlays {
+            overlay.configure(record: cache[overlay.key] ?? (activeKey == overlay.key ? pendingRecord : nil),
+                              selectedID: selected?.key == overlay.key ? selected?.id : nil, showAll: showAll, original: original)
+        }
+        updateStatus()
+        positionCallout()
+    }
+
+    private func updateStatus() {
+        let error = surfaces.compactMap { failures[$0.1] }.first
+        let records = surfaces.compactMap { cache[$0.1] }
+        if let error { statusLabel.text = error }
+        else if surfaces.isEmpty { statusLabel.text = "Translation on · swipe pages or scroll normally" }
+        else if records.count < surfaces.count { statusLabel.text = "Translating page… · keep reading" }
+        else if records.allSatisfy({ $0.regions.isEmpty }) { statusLabel.text = "No Japanese dialogue found" }
+        else { statusLabel.text = showAll ? "Tap a translation to expand" : "Tap marked text · swipe pages or scroll normally" }
+        retryButton.isHidden = error == nil
+        listButton.isEnabled = !overlays.allSatisfy { $0.record?.regions.isEmpty != false }
+        allButton.setImage(UIImage(systemName: showAll ? "hand.tap" : "text.bubble"), for: .normal)
+        allButton.accessibilityLabel = showAll ? "Use tap translation" : "Show all translations"
+        updateControlPosition()
+    }
+
+    private func select(key: String?, id: Int?) {
+        selected = key.flatMap { key in id.map { (key: key, id: $0) } }
+        render()
+    }
+
+    func handleTap(at point: CGPoint) -> Bool {
+        guard isEnabled, !original, let owner else { return false }
+        for overlay in overlays {
+            let local = owner.view.convert(point, to: overlay)
+            if let region = overlay.region(at: local) { select(key: overlay.key, id: region.id); return true }
+        }
+        if selected != nil { select(key: nil, id: nil); return true }
+        return false
+    }
+
+    @objc private func toggleAll() { showAll.toggle(); render() }
+    @objc private func showOriginal() { original = true; render() }
+    @objc private func hideOriginal() { original = false; render() }
+    @objc private func disable() { stop() }
+    @objc private func retry() { failures.removeAll(); refresh() }
+
+    private func pageLabel(for key: String) -> String {
+        if let surface = surfaces.first(where: { $0.1 == key })?.0,
+           let index = owner?.pages.firstIndex(of: surface.page) { return "Page \(index + 1)" }
+        let index = surfaces.firstIndex(where: { $0.1 == key }) ?? 0
+        return "Visible page \(index + 1)"
+    }
+
+    @objc private func openList() {
+        let items = overlays.flatMap { overlay in
+            (overlay.record?.regions ?? []).map {
+                ReaderTranslationListItem(key: overlay.key, region: $0, pageLabel: pageLabel(for: overlay.key),
+                                          translation: overlay.record?.translations[$0.id] ?? "Translating…")
+            }
+        }
+        let current = selected.map { "\($0.key):\($0.id)" }
+        let list = ReaderTranslationListView(items: items, selected: current) { [weak self] item in
+            guard let self, let owner, let overlay = overlays.first(where: { $0.key == item.key }), let imageView = overlay.imageView else { return }
+            select(key: item.key, id: item.region.id)
+            (owner.reader as? ReaderTranslationReader)?.revealTranslation(overlay.rect(for: item.region), in: imageView)
+        }
+        (owner?.reader as? ReaderWebtoonViewController)?.pauseAutoScroll()
+        let view = list.onDisappear { [weak self] in
+            (self?.owner?.reader as? ReaderWebtoonViewController)?.resumeAutoScroll()
+        }
+        owner?.present(UIHostingController(rootView: view), animated: true)
+    }
+
+    @objc private func openAppearance() {
+        (owner?.reader as? ReaderWebtoonViewController)?.pauseAutoScroll()
+        let view = ReaderTranslationAppearanceView().onDisappear { [weak self] in
+            (self?.owner?.reader as? ReaderWebtoonViewController)?.resumeAutoScroll()
+        }
+        owner?.present(UIHostingController(rootView: view), animated: true)
+    }
+
+    private func installUI() {
+        guard let owner else { return }
+        if sessionHost == nil {
+            let host = UIHostingController(rootView: ReaderTranslationSessionView(coordinator: self))
+            owner.addChild(host)
+            host.view.backgroundColor = .clear
+            host.view.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            owner.view.addSubview(host.view)
+            host.didMove(toParent: owner)
+            sessionHost = host
+        }
+        if accessory.superview == nil {
+            accessory.layer.cornerRadius = 18
+            accessory.clipsToBounds = true
+            let buttons = [allButton, listButton, originalButton, appearanceButton, retryButton, offButton]
+            let symbols = ["text.bubble", "list.number", "eye", "textformat.size", "arrow.clockwise", "xmark"]
+            let labels = ["Show all translations", "Dialogue list", "Hold to show original", "Translation appearance", "Retry translation", "Disable translation"]
+            for (index, button) in buttons.enumerated() {
+                button.setImage(UIImage(systemName: symbols[index]), for: .normal)
+                button.accessibilityLabel = labels[index]
+                button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            }
+            allButton.addTarget(self, action: #selector(toggleAll), for: .touchUpInside)
+            listButton.addTarget(self, action: #selector(openList), for: .touchUpInside)
+            originalButton.addTarget(self, action: #selector(showOriginal), for: .touchDown)
+            originalButton.addTarget(self, action: #selector(hideOriginal), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
+            appearanceButton.addTarget(self, action: #selector(openAppearance), for: .touchUpInside)
+            retryButton.addTarget(self, action: #selector(retry), for: .touchUpInside)
+            offButton.addTarget(self, action: #selector(disable), for: .touchUpInside)
+            let row = UIStackView(arrangedSubviews: buttons)
+            row.distribution = .fillEqually
+            statusLabel.font = .preferredFont(forTextStyle: .caption2)
+            statusLabel.textColor = .secondaryLabel
+            statusLabel.textAlignment = .center
+            statusLabel.numberOfLines = 2
+            let stack = UIStackView(arrangedSubviews: [statusLabel, row])
+            stack.axis = .vertical
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            accessory.contentView.addSubview(stack)
+            accessory.translatesAutoresizingMaskIntoConstraints = false
+            owner.view.addSubview(accessory)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: accessory.contentView.leadingAnchor, constant: 8),
+                stack.trailingAnchor.constraint(equalTo: accessory.contentView.trailingAnchor, constant: -8),
+                stack.topAnchor.constraint(equalTo: accessory.contentView.topAnchor, constant: 8),
+                stack.bottomAnchor.constraint(equalTo: accessory.contentView.bottomAnchor, constant: -4),
+                accessory.centerXAnchor.constraint(equalTo: owner.view.centerXAnchor),
+                accessory.widthAnchor.constraint(lessThanOrEqualToConstant: 340),
+                accessory.leadingAnchor.constraint(greaterThanOrEqualTo: owner.view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+                accessory.trailingAnchor.constraint(lessThanOrEqualTo: owner.view.safeAreaLayoutGuide.trailingAnchor, constant: -12)
+            ])
+            let width = accessory.widthAnchor.constraint(equalToConstant: 340)
+            width.priority = .defaultHigh
+            width.isActive = true
+            connector.strokeColor = UIColor.systemBlue.cgColor
+            connector.fillColor = UIColor.clear.cgColor
+            connector.lineWidth = 2
+            owner.view.layer.addSublayer(connector)
+            owner.view.addSubview(callout)
+        }
+        accessory.isHidden = false
+        owner.view.bringSubviewToFront(accessory)
+        owner.view.bringSubviewToFront(callout)
+        updateControlPosition()
+    }
+
+    func updateControlPosition() {
+        guard isEnabled, let owner, accessory.superview != nil else { return }
+        guard controlsVisible != owner.readerControlsVisible || bottomConstraint == nil else { return }
+        controlsVisible = owner.readerControlsVisible
+        bottomConstraint?.isActive = false
+        bottomConstraint = owner.readerControlsVisible
+            ? accessory.bottomAnchor.constraint(equalTo: owner.controlsView.topAnchor, constant: -8)
+            : accessory.bottomAnchor.constraint(equalTo: owner.view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
+        bottomConstraint?.isActive = true
+    }
+
+    func positionCallout() {
+        displayLink?.isPaused = selected == nil || original
+        guard isEnabled, !original, let owner, let selected,
+              let overlay = overlays.first(where: { $0.key == selected.key }), overlay.superview != nil,
+              overlay.imageView?.image === overlay.expectedImage,
+              let region = overlay.record?.regions.first(where: { $0.id == selected.id }) else {
+            callout.isHidden = true; connector.path = nil; return
+        }
+        let available = owner.view.bounds.inset(by: owner.view.safeAreaInsets)
+        let maxY = accessory.isHidden ? available.maxY : accessory.frame.minY - 8
+        let viewport = CGRect(x: available.minX + 12, y: available.minY + 12,
+                              width: max(0, available.width - 24), height: max(0, maxY - available.minY - 24))
+        let anchor = overlay.convert(overlay.rect(for: region), to: owner.view).intersection(viewport)
+        guard viewport.width > 40, viewport.height > 80, !anchor.isNull, !anchor.isEmpty else {
+            callout.isHidden = true; connector.path = nil; return
+        }
+        let font = UserDefaults.standard.object(forKey: "Translation.overlayFontSize") as? Double ?? 14
+        callout.configure(number: region.id + 1, text: overlay.record?.translations[region.id] ?? "Translating…",
+                          fontSize: font, pageLabel: pageLabel(for: selected.key))
+        let width = min(300, viewport.width)
+        let height = callout.fittingHeight(width: width, maximum: min(240, viewport.height * 0.5))
+        let x = min(max(viewport.minX, anchor.midX - width / 2), viewport.maxX - width)
+        let below = anchor.maxY + 14
+        let y = below + height <= viewport.maxY ? below : max(viewport.minY, anchor.minY - height - 14)
+        callout.frame = CGRect(x: x, y: y, width: width, height: height)
+        callout.isHidden = false
+        let cardBelow = callout.frame.midY > anchor.midY
+        let start = CGPoint(x: anchor.midX, y: cardBelow ? anchor.maxY : anchor.minY)
+        let end = CGPoint(x: min(max(start.x, x + 16), x + width - 16), y: cardBelow ? y : y + height)
+        let path = UIBezierPath(); path.move(to: start); path.addLine(to: end)
+        connector.path = path.cgPath
+    }
+}
+
+private final class ReaderTranslationDisplayTarget: NSObject {
+    weak var coordinator: ReaderTranslationCoordinator?
+    @MainActor @objc func tick() { coordinator?.positionCallout() }
+}

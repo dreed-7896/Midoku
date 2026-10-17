@@ -19,6 +19,7 @@ class ReaderPageView: UIView {
 
     private let temporaryPageStore: ReaderTemporaryPageStore
 
+    var enablesImageAnalysis = true
     let imageView = GIFImageView()
     let progressView = CircularProgressView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
 
@@ -138,6 +139,7 @@ class ReaderPageView: UIView {
 
 extension ReaderPageView {
     func clearPage() {
+        ReaderTranslationImageOverlay.remove(from: imageView)
         imageTask?.cancel()
         imageTask = nil
         cancelLiveTextAnalysis()
@@ -482,13 +484,16 @@ extension ReaderPageView {
     }
 
     func setPageImage(_ image: UIImage?, gifData: Data? = nil) {
+        if imageView.image !== image { ReaderTranslationImageOverlay.remove(from: imageView) }
         imageView.image = image
         if let gifData {
             imageView.animate(withGIFData: gifData)
         }
         fixImageSize()
-        startLiveTextAnalysis()
-        scheduleDictionaryTextAnalysis()
+        if enablesImageAnalysis {
+            startLiveTextAnalysis()
+            scheduleDictionaryTextAnalysis()
+        }
     }
 }
 

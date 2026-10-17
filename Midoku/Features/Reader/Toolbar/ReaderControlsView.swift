@@ -9,6 +9,7 @@ final class ReaderControlsView: UIVisualEffectView {
     let settingsButton = UIButton(type: .system)
     let webButton = UIButton(type: .system)
     let autoScrollButton = UIButton(type: .system)
+    let translationButton = UIButton(type: .system)
 
     init() {
         super.init(effect: UIBlurEffect(style: .systemThinMaterial))
@@ -21,6 +22,7 @@ final class ReaderControlsView: UIVisualEffectView {
             (chaptersButton, "list.bullet", "Chapters"),
             (panelsButton, "square.grid.3x3", "View panels"),
             (autoScrollButton, "play.fill", "Start auto scroll"),
+            (translationButton, "character.bubble", "Enable translation"),
             (settingsButton, "slider.horizontal.3", "Settings")
         ] {
             var configuration = UIButton.Configuration.plain()
@@ -31,7 +33,7 @@ final class ReaderControlsView: UIVisualEffectView {
             button.accessibilityLabel = label
             button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         }
-        let actions = UIStackView(arrangedSubviews: [closeButton, webButton, chaptersButton, panelsButton, autoScrollButton, settingsButton])
+        let actions = UIStackView(arrangedSubviews: [closeButton, webButton, chaptersButton, panelsButton, autoScrollButton, translationButton, settingsButton])
         actions.axis = .horizontal
         actions.alignment = .center
         actions.distribution = .fillEqually

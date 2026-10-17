@@ -1327,12 +1327,10 @@ extension ReaderPagedViewController: UIContextMenuInteractionDelegate {
             }
 
             var actions = [shareAction, saveToPhotosAction, reloadAction]
-            if #available(iOS 18.0, *), let image = pageView.image {
+            if #available(iOS 18.0, *), pageView.image != nil {
                 actions.insert(UIAction(title: "Translate", image: UIImage(systemName: "character.bubble")) { [weak self] _ in
                     guard let self else { return }
-                    let controller = UIHostingController(rootView: TranslationModalView(images: [image], webtoon: false))
-                    controller.modalPresentationStyle = .fullScreen
-                    self.present(controller, animated: true)
+                    (self.delegate as? ReaderViewController)?.translationCoordinator.setEnabled(true)
                 }, at: 0)
             }
             if let image = pageView.image,
@@ -1509,5 +1507,35 @@ extension ReaderPagedViewController {
 
     private func saveSplitPosition(for key: String, page: Int, offset: Int) {
         Self.splitPosition[key] = (page, offset)
+    }
+}
+
+// MARK: - Inline translation pages
+extension ReaderPagedViewController: ReaderTranslationReader {
+    func translationSurfaces() -> [ReaderTranslationSurface] {
+        visiblePageControllers().compactMap { controller in
+            guard let page = controller.page, !page.isTextPage,
+                  let imageView = controller.pageView?.imageView, imageView.image != nil else { return nil }
+            return ReaderTranslationSurface(page: page, imageView: imageView)
+        }
+    }
+
+    func nextTranslationPage() -> Page? {
+        let next = currentPage + (usesDoublePages ? 2 : 1)
+        guard next > 0, next <= displayPageCount else { return nil }
+        let actual = actualPageIndex(from: next)
+        if let split = splitPages[actual] {
+            return split[safe: splitIndex(for: next, actualPageIndex: actual)]
+        }
+        return viewModel.pages[safe: actual - 1]
+    }
+
+    func revealTranslation(_ rect: CGRect, in imageView: UIImageView) {
+        let controllers = visiblePageControllers()
+        if let controller = controllers.first(where: { $0.pageView?.imageView === imageView }),
+           let zoom = controller.zoomView, let content = zoom.zoomView, zoom.zoomEnabled {
+            let target = imageView.convert(rect, to: content).insetBy(dx: -24, dy: -24)
+            zoom.zoom(to: target, animated: true)
+        }
     }
 }

@@ -504,6 +504,7 @@ extension ReaderWebtoonPageNode {
 
             Task { @MainActor [weak self] in
                 self?.delegate?.scheduleImageFeaturesIfIdle()
+                (self?.delegate?.delegate as? ReaderViewController)?.translationCoordinator.pageImageChanged()
             }
         } else if let text {
             progressNode.isHidden = true

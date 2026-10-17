@@ -149,6 +149,8 @@ class ReaderViewController: BaseObservingViewController {
     weak var reader: ReaderReaderDelegate?
 
     // Dictionary popup state
+    lazy var translationCoordinator = ReaderTranslationCoordinator(owner: self)
+
     private lazy var dictionaryCoordinator = ReaderDictionaryCoordinator(owner: self)
     private var _dictionaryLongPressSelection: Any?
     @available(iOS 18.0, *)
@@ -157,7 +159,7 @@ class ReaderViewController: BaseObservingViewController {
         set { _dictionaryLongPressSelection = newValue }
     }
     private var isDictionaryOCRActiveForCurrentChapter: Bool {
-        AppSettings.dictionary.isOCREnabled(language: chapter.language ?? source?.languages.first)
+        !translationCoordinator.isEnabled && AppSettings.dictionary.isOCREnabled(language: chapter.language ?? source?.languages.first)
     }
     private var isDictionarySingleTapLookupActiveForCurrentChapter: Bool {
         AppSettings.dictionary.lookupGesture.get() == .singleTap && isDictionaryOCRActiveForCurrentChapter
@@ -257,6 +259,7 @@ class ReaderViewController: BaseObservingViewController {
         controlsView.settingsButton.addTarget(self, action: #selector(openReaderSettings), for: .touchUpInside)
         controlsView.webButton.addTarget(self, action: #selector(openWebView), for: .touchUpInside)
         controlsView.autoScrollButton.addTarget(self, action: #selector(toggleAutoScroll), for: .touchUpInside)
+        controlsView.translationButton.addTarget(self, action: #selector(toggleTranslation), for: .touchUpInside)
         loadNavbarTitle()
 
         toolbarView.sliderView.addTarget(self, action: #selector(sliderMoved(_:)), for: .valueChanged)
@@ -754,6 +757,7 @@ extension ReaderViewController {
     @objc func close() {
         (reader as? ReaderWebtoonViewController)?.captureReadingPosition()
         hasExited = true
+        translationCoordinator.stop()
         chapterLoadTask?.cancel()
         // viewDidDisappear saves the final position; temporary files are removed on deinit,
         // after page requests have released them (including cancelled interactive dismissals).
@@ -766,6 +770,7 @@ extension ReaderViewController {
     func finishNavigationExit() {
         (reader as? ReaderWebtoonViewController)?.captureReadingPosition()
         hasExited = true
+        translationCoordinator.stop()
         chapterLoadTask?.cancel()
         popGestureDelegate.restore()
         InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
@@ -929,6 +934,8 @@ extension ReaderViewController {
         configureDictionaryOverlayInteractionMode()
         configureDictionaryOverlayTapHandler()
         updateAutoScrollButton()
+        controlsView.translationButton.isHidden = !(reader is ReaderTranslationReader)
+        translationCoordinator.readerChanged()
         view.bringSubviewToFront(controlsView)
         updateTextThemeOverride()
     }
@@ -1180,6 +1187,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         let page = max(1, min(pages.lowerBound, totalPages))
         let changedPage = displayedPages != pages || displayedChapterKey != chapter.key
         if changedPage {
+            translationCoordinator.pageImageChanged()
             displayedPages = pages
             displayedChapterKey = chapter.key
             needsDescriptionUpdate = true
@@ -1492,6 +1500,7 @@ extension ReaderViewController {
 
     @objc func handleTap(_ gestureRecognizer: UITapGestureRecognizer) {
         let point = gestureRecognizer.location(in: view)
+        if translationCoordinator.handleTap(at: point) { return }
         let overlayModeEnabled = AppSettings.dictionary.textOverlayMode.get()
         let singleTapLookupEnabled = isDictionarySingleTapLookupActiveForCurrentChapter
         let singleTapOCRLookupEnabled = singleTapLookupEnabled && !overlayModeEnabled
@@ -1684,7 +1693,7 @@ extension ReaderViewController {
     private func configureDictionaryOverlayTapHandler() {
         guard #available(iOS 18.0, *), let reader = reader as? ReaderDictionaryReader else { return }
         reader.setDictionaryOverlayTapHandler { [weak self] text, contextText, rect, charRects in
-            guard let self, AppSettings.dictionary.textOverlayMode.get() else { return }
+            guard let self, !translationCoordinator.isEnabled, AppSettings.dictionary.textOverlayMode.get() else { return }
             _ = dictionaryCoordinator.performLookup(
                 text: text,
                 contextText: contextText,
@@ -1710,6 +1719,7 @@ extension ReaderViewController {
         // used to rebuild constraints and animate a layout pass during deceleration.
         guard visible != readerControlsVisible else { return }
         readerControlsVisible = visible
+        translationCoordinator.updateControlPosition()
         statusBarHidden = !visible
         navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.isToolbarHidden = true
@@ -1758,7 +1768,7 @@ extension ReaderViewController: UIGestureRecognizerDelegate {
 
         var view: UIView? = touch.view
         while let currentView = view {
-            if currentView is UIControl || currentView === controlsView {
+            if currentView is UIControl || currentView is TranslationCalloutView || currentView === controlsView {
                 return false
             }
             view = currentView.superview
@@ -1845,3 +1855,40 @@ extension ReaderViewController {
     }
 }
 
+// MARK: - Inline translation
+extension ReaderViewController {
+    @objc private func toggleTranslation() {
+        translationCoordinator.setEnabled(!translationCoordinator.isEnabled)
+    }
+
+    func translationModeChanged() {
+        controlsView.translationButton.configuration?.baseForegroundColor = translationCoordinator.isEnabled ? .systemBlue : .label
+        controlsView.translationButton.accessibilityLabel = translationCoordinator.isEnabled ? "Disable translation" : "Enable translation"
+        dictionaryCoordinator.dismissAllPopups()
+        configureDictionaryLookupGesture()
+        configureDictionaryOverlayInteractionMode()
+        configureBarToggleTapGestures()
+    }
+
+    func translationIdentity(for page: Page) -> ChapterIdentifier {
+        collectionSequence?.route(key: page.chapterId)?.identifier
+            ?? ChapterIdentifier(sourceKey: page.sourceId, mangaKey: manga.key, chapterKey: page.chapterId)
+    }
+
+    func loadTranslationImage(for page: Page) async -> UIImage? {
+        let loader = ReaderPageView(temporaryPageStore: temporaryPageStore)
+        loader.enablesImageAnalysis = false
+        let loaded = await withTaskCancellationHandler {
+            await loader.setPage(page, sourceId: page.sourceId, skipProcessing: page.image != nil)
+        } onCancel: {
+            Task { @MainActor in loader.clearPage() }
+        }
+        guard loaded, !Task.isCancelled else {
+            loader.clearPage()
+            return nil
+        }
+        let image = loader.imageView.image
+        loader.clearPage()
+        return image
+    }
+}
