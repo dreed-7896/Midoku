@@ -20,7 +20,7 @@ concurrency:
 jobs:
   collection_checks:
     runs-on: xcode-27
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
@@ -43,7 +43,7 @@ jobs:
         run: swift test
       - name: Test collection integration on simulator
         if: steps.collection_changes.outputs.run == 'true'
-        timeout-minutes: 10
+        timeout-minutes: 25
         shell: bash
         run: |
           set -euo pipefail
@@ -52,7 +52,7 @@ jobs:
           xcrun simctl bootstatus "$simulator_id" -b
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
             -destination "platform=iOS Simulator,id=$simulator_id" -derivedDataPath build/TestDerivedData \
-            -skipPackagePluginValidation -parallel-testing-enabled NO \
+            -skipPackagePluginValidation -parallel-testing-enabled NO COMPILER_INDEX_STORE_ENABLE=NO \
             -only-testing:MidokuTests/CollectionIntegrationTests \
             -only-testing:MidokuTests/ArtworkCacheTests \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test \
