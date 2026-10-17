@@ -65,7 +65,22 @@ nonisolated extension MCLibraryState {
                   entry.createdAt.timeIntervalSince1970.isFinite, entry.updatedAt.timeIntervalSince1970.isFinite,
                   entry.lastReadAt?.timeIntervalSince1970.isFinite != false, entry.sequenceRevision >= 0 else { throw MCLibraryFailure.invalid }
             let memberships = entry.slots.flatMap(\.variants).map(\.chapterID)
-            guard unique(memberships), Set(memberships).isSubset(of: chapterIDs), Set(memberships).isDisjoint(with: entry.exclusions) else { throw MCLibraryFailure.invalid }
+            guard Set(memberships).isSubset(of: chapterIDs), Set(memberships).isDisjoint(with: entry.exclusions) else { throw MCLibraryFailure.invalid }
+            // Repeated physical chapters are valid only as distinct parts of one split plan.
+            for variants in Dictionary(grouping: entry.slots.flatMap(\.variants), by: \.chapterID).values {
+                if variants.count > 1 {
+                    guard let plan = variants.first?.pageSelection,
+                          Set(variants.compactMap { $0.pageSelection?.part }).count == variants.count,
+                          variants.allSatisfy({ $0.pageSelection?.originID == plan.originID && $0.pageSelection?.ranges == plan.ranges && $0.pageSelection?.excluded == plan.excluded }) else { throw MCLibraryFailure.invalid }
+                }
+                for variant in variants {
+                    if let plan = variant.pageSelection {
+                        guard plan.part >= 0, plan.part < max(1, plan.ranges.count),
+                              try MCPageRange.parse(plan.ranges.map(\.text).joined(separator: ","), disjoint: true) == plan.ranges,
+                              try MCPageRange.parse(plan.excluded.map(\.text).joined(separator: ",")) == plan.excluded else { throw MCLibraryFailure.invalid }
+                    }
+                }
+            }
             for slot in entry.slots {
                 guard !slot.variants.isEmpty, slot.variants.contains(where: { $0.id == slot.preferredID }), slot.variants.allSatisfy({ valid($0.edits) }) else { throw MCLibraryFailure.invalid }
                 for variant in slot.variants {

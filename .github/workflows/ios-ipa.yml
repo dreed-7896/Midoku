@@ -54,6 +54,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$simulator_id" -derivedDataPath build/TestDerivedData \
             -skipPackagePluginValidation -parallel-testing-enabled NO \
             -only-testing:MidokuTests/CollectionIntegrationTests \
+            -only-testing:MidokuTests/ArtworkCacheTests \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test \
             2>&1 | tee collection-tests.log
       - name: Upload collection test logs

@@ -100,8 +100,8 @@ class ReaderPagedViewModel {
         let language = chapter.language ?? source?.languages.first
         let isDownloaded = DownloadManager.shared.isChapterDownloaded(chapter: identifier)
         if isDownloaded {
-            return await DownloadManager.shared.getDownloadedPages(for: identifier)
-                .map {
+            let downloaded = await DownloadManager.shared.getDownloadedPages(for: identifier)
+            return (route?.selectedPages(downloaded) ?? downloaded).map {
                     $0.toOld(sourceId: sourceId, chapterId: chapter.key, language: language)
                 }
         } else {
@@ -112,6 +112,7 @@ class ReaderPagedViewModel {
                 return []
             }
 
+            if let route { sourcePages = route.selectedPages(sourcePages) }
             var pages: [Page] = []
             pages.reserveCapacity(sourcePages.count)
 

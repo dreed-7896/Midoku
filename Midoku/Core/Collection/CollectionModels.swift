@@ -58,6 +58,7 @@ nonisolated struct MCChapterVariant: Codable, Identifiable, Sendable {
     var id = UUID()
     var chapterID: UUID
     var edits = MCChapterEdits()
+    var pageSelection: MCChapterPageSelection?
 }
 
 nonisolated struct MCChapterSlot: Codable, Identifiable, Sendable {
@@ -161,6 +162,7 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     func isRead(_ slot: MCChapterSlot) -> Bool {
         if let override = slot.completionOverride { return override }
         guard let variant = slot.preferred, let source = chapter(variant.chapterID) else { return false }
+        if variant.pageSelection != nil { return false }
         return completed.contains(source.identity)
     }
     func readerContext(identity: MCSourceChapterIdentity, preferredEntryID: UUID? = nil) -> (entryID: UUID, slotID: UUID)? {
@@ -184,7 +186,7 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         }
         let sequence = flattenedChapters(entryID: entry.id).map(\.slot)
         return sequence.first(where: { slot in
-            !(slot.completionOverride ?? slot.preferred.flatMap { identities[$0.chapterID] }.map(completed.contains) ?? false)
+            !isRead(slot)
         })?.id ?? sequence.first?.id
     }
 
@@ -194,7 +196,9 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         guard Set(records.map(\.id)).count == records.count else { throw MCLibraryFailure.invalid }
         let listingID: UUID
         if let index = listings.firstIndex(where: { $0.identity == identity }) {
-            listings[index].details = details
+            var refreshed = details
+            if refreshed.coverURL == nil { refreshed.coverURL = listings[index].details.coverURL }
+            listings[index].details = refreshed
             if complete { listings[index].refreshedAt = Date(); listings[index].lastError = nil }
             listingID = listings[index].id
         } else {
@@ -250,13 +254,13 @@ nonisolated struct MCLibraryState: Codable, Sendable {
     mutating func setRead(entryID: UUID, slotIDs: Set<UUID>, read: Bool) throws -> Set<MCSourceChapterIdentity> {
         guard entry(entryID) != nil else { throw MCLibraryFailure.missing }
         let selected = flattenedChapters(entryID: entryID).filter { slotIDs.contains($0.slot.id) }
-        let identities = Set(selected.compactMap(\.slot.preferred).compactMap { chapter($0.chapterID)?.identity })
+        let identities = Set(selected.compactMap(\.slot.preferred).filter { $0.pageSelection == nil }.compactMap { chapter($0.chapterID)?.identity })
         if read { completed.formUnion(identities) } else { completed.subtract(identities) }
         for (owner, values) in Dictionary(grouping: selected, by: \.entryID) {
             let ids = Set(values.map(\.slot.id))
             try editEntry(owner) { entry in
                 for index in entry.slots.indices where ids.contains(entry.slots[index].id) {
-                    entry.slots[index].completionOverride = nil
+                    entry.slots[index].completionOverride = entry.slots[index].preferred?.pageSelection == nil ? nil : read
                 }
             }
         }
@@ -397,8 +401,9 @@ nonisolated struct MCLibraryState: Codable, Sendable {
 
     mutating func removeSlots(entryID: UUID, slotIDs: Set<UUID>) throws {
         try editEntry(entryID) { entry in
-            entry.exclusions.formUnion(entry.slots.filter { slotIDs.contains($0.id) }.flatMap(\.variants).map(\.chapterID))
+            let removed = Set(entry.slots.filter { slotIDs.contains($0.id) }.flatMap(\.variants).map(\.chapterID))
             entry.slots.removeAll { slotIDs.contains($0.id) }
+            entry.exclusions.formUnion(removed.subtracting(entry.slots.flatMap(\.variants).map(\.chapterID)))
         }
     }
     mutating func restoreChapter(entryID: UUID, chapterID: UUID) throws {

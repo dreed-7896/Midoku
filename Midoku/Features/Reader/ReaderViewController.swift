@@ -544,6 +544,8 @@ extension ReaderViewController {
         let position = scrollPosition ?? currentPosition
 
         let chapterId = physicalIdentifier(chapter)
+        // Split positions belong to the personal slot; never write a partial page count over physical history.
+        if collectionSequence?.route(chapter)?.pageSelection != nil { return }
         pendingProgress[chapterId] = PendingProgress(
             identifier: chapterId,
             chapter: physicalChapter(chapter),
@@ -570,6 +572,16 @@ extension ReaderViewController {
         stageReadPosition()
         stageReadingSession()
         ReaderProgressStore.flush()
+        let splitCompletions = pendingSplitCompletions
+        pendingSplitCompletions.removeAll()
+        if !splitCompletions.isEmpty {
+            MCCollectionStore.shared.perform { state in
+                for (slotID, entryID) in splitCompletions {
+                    guard state.library.entry(entryID)?.slots.contains(where: { $0.id == slotID }) == true else { continue }
+                    try state.library.setRead(entryID: entryID, slotIDs: [slotID], read: true)
+                }
+            }
+        }
 
         let progress = Array(pendingProgress.values)
         let completions = pendingCompletions
@@ -636,8 +648,9 @@ extension ReaderViewController {
                 CoreDataManager.shared.getProgress(chapterId: identifier, context: context)
             }
             guard let self, !hasExited, !Task.isCancelled, chapter == requestedChapter else { return }
-            let local = ReaderProgressStore.position(for: identifier)
-            currentPage = max(1, explicitPage ?? local?.page ?? historyPage ?? 1)
+            let route = collectionSequence?.route(requestedChapter)
+            let local = ReaderProgressStore.position(for: identifier, slotID: route?.pageSelection == nil ? nil : route?.slotID)
+            currentPage = max(1, explicitPage ?? local?.page ?? (route?.pageSelection == nil ? historyPage : nil) ?? 1)
             currentPosition = explicitPage == nil ? local?.scrollPosition : nil
             reader?.setChapter(requestedChapter, startPage: currentPage)
         }
@@ -1284,15 +1297,21 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
         toolbarView.sliderView.currentValue = offset
     }
 
+    private var pendingSplitCompletions: [UUID: UUID] = [:]
+
     func setCompleted() {
         guard !AppSettings.general.incognitoMode.get(), !chaptersToMark.isEmpty else { return }
 
         for chapter in chaptersToMark {
-            pendingCompletions[physicalIdentifier(chapter)] = physicalChapter(chapter)
+            if let route = collectionSequence?.route(chapter), route.pageSelection != nil {
+                pendingSplitCompletions[route.slotID] = route.entryID
+            } else {
+                pendingCompletions[physicalIdentifier(chapter)] = physicalChapter(chapter)
+            }
         }
         chaptersToMark.removeAll()
 
-        if AppSettings.downloads.deleteDownloadAfterReading.get() {
+        if AppSettings.downloads.deleteDownloadAfterReading.get(), collectionSequence?.route(chapter)?.pageSelection == nil {
             chaptersToRemoveDownload.append(chapter)
         }
     }

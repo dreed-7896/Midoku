@@ -1,5 +1,6 @@
 import Testing
 import UIKit
+import Nuke
 @testable import Midoku
 
 @MainActor
@@ -39,6 +40,36 @@ struct ArtworkCacheTests {
         #expect(!cache.needsReload(for: key))
         cache.removeAll()
         #expect(await cache.image(for: key) == nil)
+    }
+
+    @Test func cancelledCellDoesNotCancelSharedCoverLoadAndDiskCacheSkipsRequests() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("source.png")
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 18)).image { context in
+            UIColor.systemBlue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 12, height: 18))
+        }
+        try #require(image.pngData()).write(to: file)
+        let cacheDirectory = directory.appendingPathComponent("cache")
+        let cache = MCArtworkCache(directory: cacheDirectory)
+        let key = MCArtworkCache.key(url: file.absoluteString, sourceKey: "test")
+        var requests = 0
+        let cell = Task { await cache.load(key: key) {
+            requests += 1
+            try? await Task.sleep(for: .milliseconds(100))
+            return ImageRequest(url: file)
+        } }
+        await Task.yield()
+        cell.cancel()
+        let nextCell = await cache.load(key: key) { requests += 1; return ImageRequest(url: file) }
+        #expect(nextCell != nil)
+        #expect(await cell.value != nil)
+        #expect(requests == 1)
+        await cache.flush()
+        let restarted = MCArtworkCache(directory: cacheDirectory)
+        #expect(await restarted.load(key: key) { requests += 1; return nil } != nil)
+        #expect(requests == 1)
     }
 
     @Test func chapterButtonsAndPageSliderShareACenterLine() {

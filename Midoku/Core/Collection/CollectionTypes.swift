@@ -102,7 +102,7 @@ nonisolated struct MCMangaDetails: Codable, Sendable, Identifiable {
     let id: String
     let title: String
     let description: String
-    let coverURL: URL?
+    var coverURL: URL?
     var authors: [String]? = nil
     var artists: [String]? = nil
     var status: String? = nil

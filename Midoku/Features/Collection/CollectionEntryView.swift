@@ -579,7 +579,7 @@ struct MCEntryView: View {
                 if let url = chapterWebURL(slot) {
                     Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
                 }
-                Button("Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
+                Button(slot.preferred?.pageSelection?.ranges.isEmpty == false ? "Edit chapter / splits" : "Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
                 Button("Add to entry", systemImage: "text.badge.plus") { addingChapter = MCID(id: slot.id) }
                 Menu("Reading progress", systemImage: "checkmark.circle") {
                     Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: true) }

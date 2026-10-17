@@ -13,6 +13,11 @@ final class MCReaderSequence {
         let manga: AidokuRunner.Manga
         let chapter: AidokuRunner.Chapter
         let displayChapter: AidokuRunner.Chapter
+        let pageSelection: MCChapterPageSelection?
+        func selectedPages<T>(_ pages: [T]) -> [T] {
+            guard let pageSelection else { return pages }
+            return pageSelection.indices(pageCount: pages.count).map { pages[$0] }
+        }
         var identifier: ChapterIdentifier {
             .init(sourceKey: manga.sourceKey, mangaKey: manga.key, chapterKey: chapter.key)
         }
@@ -50,7 +55,7 @@ final class MCReaderSequence {
                 volumeNumber: variant.edits.volume.flatMap(Float.init) ?? original.volumeNumber,
                 dateUploaded: original.dateUploaded, scanlators: original.scanlators,
                 url: original.url, language: original.language, thumbnail: original.thumbnail, locked: original.locked)
-            routes.append(Route(entryID: item.entryID, slotID: slot.id, initiallyRead: store.library.isRead(slot), identity: libraryChapter.identity, manga: physicalManga, chapter: original, displayChapter: display))
+            routes.append(Route(entryID: item.entryID, slotID: slot.id, initiallyRead: store.library.isRead(slot), identity: libraryChapter.identity, manga: physicalManga, chapter: original, displayChapter: display, pageSelection: variant.pageSelection))
             if slot.id == slotID { initial = display.key }
         }
         guard let initial else { throw MCLibraryFailure.missing }
@@ -113,9 +118,9 @@ enum MCPanelBookmarks {
         guard let entry = store.library.entry(entryID) else { return }
         let chapterIDs = Dictionary(uniqueKeysWithValues: store.library.chapters.map { ($0.identity, $0.id) })
         let connections = Dictionary(uniqueKeysWithValues: store.snapshot.connections.map { ($0.sourceKey, $0.id) })
-        let slotsByChapter = Dictionary(uniqueKeysWithValues: entry.slots.flatMap { slot in
+        let slotsByChapter = Dictionary(entry.slots.flatMap { slot in
             slot.variants.map { ($0.chapterID, slot) }
-        })
+        }, uniquingKeysWith: { first, _ in first })
         var items: [MCPanelBookmark] = []
         for bookmark in all {
             var moved = bookmark
@@ -123,7 +128,7 @@ enum MCPanelBookmarks {
                 || UUID(uuidString: bookmark.titleKey).map(entryIDs.contains) == true
             if belongsToMerge, let connection = connections[bookmark.sourceKey],
                let chapterID = chapterIDs[.init(listing: .init(connectionID: connection, externalID: bookmark.mangaKey), externalID: bookmark.chapterKey)],
-               let slot = slotsByChapter[chapterID], let variant = slot.variants.first(where: { $0.chapterID == chapterID }) {
+               let slot = entry.slots.first(where: { $0.id == bookmark.slotID }) ?? slotsByChapter[chapterID], let variant = slot.variants.first(where: { $0.chapterID == chapterID }) {
                 moved = .init(id: bookmark.id, titleKey: entryID.uuidString, title: store.library.title(entry), slotID: slot.id,
                     sourceKey: bookmark.sourceKey, mangaKey: bookmark.mangaKey, chapterKey: bookmark.chapterKey,
                     chapterTitle: store.library.chapterDisplayTitle(variant),

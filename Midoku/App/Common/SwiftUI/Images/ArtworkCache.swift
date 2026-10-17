@@ -1,5 +1,6 @@
 import CryptoKit
 import UIKit
+import Nuke
 
 /// Keeps the final, decoded artwork independently of source headers and Cloudflare state.
 /// Artwork survives source/header changes, with a bounded disk cache.
@@ -21,6 +22,7 @@ final class MCArtworkCache {
     private let diskQueue = DispatchQueue(label: "com.raahat.Midoku.artwork-cache", qos: .utility)
     private var revisions: [String: Int] = [:]
     private var epoch = 0
+    private var loads: [String: (id: UUID, task: Task<Artwork?, Never>)] = [:]
     private var reloadKeys = Set<String>()
 
     init(directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -71,7 +73,31 @@ final class MCArtworkCache {
         return artwork
     }
 
+    /// Cell lifetimes never own shared work. Refreshing a list cannot cancel a cover download.
+    func load(key: String, request: @escaping @MainActor () async -> ImageRequest?) async -> Artwork? {
+        if let cached = memoryImage(for: key) { return cached }
+        if let pending = loads[key] { return await pending.task.value }
+        let id = UUID()
+        let revision = revision(for: key)
+        let task = Task<Artwork?, Never> { [self] in
+            if let cached = await image(for: key) { return cached }
+            guard let request = await request(), !Task.isCancelled else { return nil }
+            do {
+                let response = try await ImagePipeline.shared.imageTask(with: request).response
+                guard !Task.isCancelled else { return nil }
+                return store(image: response.image, animatedData: response.container.type == .gif ? response.container.data : nil,
+                             for: key, revision: revision)
+            } catch { return nil }
+        }
+        loads[key] = (id, task)
+        let result = await task.value
+        if loads[key]?.id == id { loads[key] = nil }
+        return result
+    }
+
     func reset(_ key: String) {
+        loads[key]?.task.cancel()
+        loads[key] = nil
         revisions[key, default: 0] += 1
         reloadKeys.insert(key)
         memory.removeObject(forKey: key as NSString)
@@ -91,6 +117,8 @@ final class MCArtworkCache {
     }
 
     func removeAll() {
+        for load in loads.values { load.task.cancel() }
+        loads.removeAll()
         epoch += 1
         memory.removeAllObjects()
         let directory = directory

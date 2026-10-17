@@ -84,7 +84,7 @@ class TabBarController: UITabBarController {
 
         let libraryViewController = UIHostingController(rootView: MCCollectionRootView())
         collectionViewController = libraryViewController
-        let browseViewController = NavigationController(rootViewController: BrowseViewController())
+        let browseViewController = NavigationController(rootViewController: DiscoverViewController())
         let searchViewController = NavigationController(rootViewController: searchController)
         searchNavigationController = searchViewController
 
@@ -128,18 +128,18 @@ class TabBarController: UITabBarController {
             searchTab.automaticallyActivatesSearch = true
             let fixedTabs = [
                 UITab(
-                    title: NSLocalizedString("LIBRARY"),
-                    image: UIImage(systemName: "books.vertical.fill"),
-                    identifier: "0"
-                ) { _ in
-                    libraryViewController
-                },
-                UITab(
                     title: NSLocalizedString("BROWSE"),
                     image: UIImage(systemName: "globe"),
                     identifier: "1"
                 ) { _ in
                     browseViewController
+                },
+                UITab(
+                    title: NSLocalizedString("LIBRARY"),
+                    image: UIImage(systemName: "books.vertical.fill"),
+                    identifier: "0"
+                ) { _ in
+                    libraryViewController
                 },
                 UITab(
                     title: "Updates",
@@ -185,8 +185,8 @@ class TabBarController: UITabBarController {
                 tag: 4
             )
             viewControllers = [
-                libraryViewController,
                 browseViewController,
+                libraryViewController,
                 historyViewController,
                 searchViewController,
                 settingsViewController
@@ -462,8 +462,8 @@ extension TabBarController {
             }
         } else {
             selectedIndex = switch openingTab {
-            case .library: 0
-            case .browse: 1
+            case .library: 1
+            case .browse: 0
             case .history: 2
             case .search: 3
             case .settings: 4

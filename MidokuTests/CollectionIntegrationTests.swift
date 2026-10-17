@@ -9,6 +9,47 @@ import UIKit
 @MainActor
 @Suite("Collection persistence and physical reader routing", .serialized)
 struct CollectionIntegrationTests {
+    @Test func splitReaderLoadsOnlyItsSourcePagesAndKeepsSlotProgressIndependent() async throws {
+        let sources = SourceStore.shared.sourcesByKey
+        let disabled = SourceStore.shared.disabledSourceKeys
+        defer { SourceStore.shared.update(sourcesByKey: sources, disabledSourceKeys: disabled) }
+        let key = "mc.split.test"
+        var installed = sources
+        installed[key] = AidokuRunner.Source(url: nil, key: key, name: "Split", version: 1,
+            languages: ["en"], contentRating: .safe, runner: MCSplitPageRunner())
+        SourceStore.shared.update(sourcesByKey: installed, disabledSourceKeys: disabled)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MCCollectionStore(fileURL: root.appendingPathComponent("library.json"))
+        let manga = AidokuRunner.Manga(sourceKey: key, key: UUID().uuidString, title: "Combined")
+        let id = try store.add(manga, chapters: [.init(key: "physical", chapterNumber: 1)])
+        let slot = try #require(store.library.entry(id)?.slots.first)
+        try store.change { state in
+            try state.library.setChapterPages(entryID: id, slotID: slot.id,
+                ranges: MCPageRange.parse("1-4,5-", disjoint: true), excluded: MCPageRange.parse("2,6-7"))
+        }
+        let reopened = MCCollectionStore(fileURL: root.appendingPathComponent("library.json"))
+        let parts = try #require(reopened.library.entry(id)).slots
+        let sequence = try MCReaderSequence(entryID: id, slotID: parts[0].id, store: reopened)
+        #expect(sequence.chapters.count == 2)
+        let model = ReaderPagedViewModel(source: installed[key], manga: manga)
+        model.collectionSequence = sequence
+        await model.loadPages(chapter: sequence.chapters[0])
+        #expect(model.pages.compactMap(\.text) == ["Page 1", "Page 3", "Page 4"])
+        await model.preload(chapter: sequence.chapters[1])
+        await model.loadPages(chapter: sequence.chapters[1])
+        #expect(model.pages.compactMap(\.text) == ["Page 5", "Page 8", "Page 9", "Page 10"])
+        let route = try #require(sequence.route(sequence.chapters[1]))
+        #expect(route.identifier.chapterKey == "physical")
+        #expect(route.selectedPages(Array(1...12)) == [5,8,9,10,11,12])
+        defer { ReaderProgressStore.remove(chapterIDs: [route.identifier]) }
+        ReaderProgressStore.record(identifier: route.identifier, page: 3, scrollPosition: nil, slotID: parts[0].id)
+        ReaderProgressStore.record(identifier: route.identifier, page: 1, scrollPosition: nil, slotID: parts[1].id)
+        #expect(ReaderProgressStore.position(for: route.identifier, slotID: parts[0].id)?.page == 3)
+        #expect(ReaderProgressStore.position(for: route.identifier, slotID: parts[1].id)?.page == 1)
+        #expect(await reopened.resumeSlot(entryID: id) == parts[1].id)
+    }
+
     @Test func mergedChaptersPersistWithExactRoutingAndReassignedBookmarks() throws {
         let defaultsKey = "Reader.panelBookmarks.v1"
         let previous = UserDefaults.standard.data(forKey: defaultsKey)
@@ -605,5 +646,14 @@ private struct MCPageRoutingRunner: AidokuRunner.Runner {
     func getMangaUpdate(manga: AidokuRunner.Manga, needsDetails: Bool, needsChapters: Bool) async throws -> AidokuRunner.Manga { manga }
     func getPageList(manga: AidokuRunner.Manga, chapter: AidokuRunner.Chapter) async throws -> [AidokuRunner.Page] {
         [.init(content: .text("\(manga.sourceKey)/\(manga.key)/\(chapter.key)"))]
+    }
+}
+
+private struct MCSplitPageRunner: AidokuRunner.Runner {
+    let features = AidokuRunner.SourceFeatures()
+    func getSearchMangaList(query: String?, page: Int, filters: [AidokuRunner.FilterValue]) async throws -> AidokuRunner.MangaPageResult { .init(entries: [], hasNextPage: false) }
+    func getMangaUpdate(manga: AidokuRunner.Manga, needsDetails: Bool, needsChapters: Bool) async throws -> AidokuRunner.Manga { manga }
+    func getPageList(manga: AidokuRunner.Manga, chapter: AidokuRunner.Chapter) async throws -> [AidokuRunner.Page] {
+        (1...10).map { .init(content: .text("Page \($0)")) }
     }
 }

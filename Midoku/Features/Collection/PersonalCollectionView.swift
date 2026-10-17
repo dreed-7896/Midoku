@@ -86,7 +86,19 @@ struct MCCollectionRootView: View {
     @State private var sources = Set<UUID>()
     @State private var progressFilter = MCLibraryProgressFilter.all
     @AppStorage("Midoku.libraryGrouping") private var grouping = MCLibraryGrouping.category
-    @State private var sort = MCLibrarySort.recentlyAdded
+    @AppStorage("Midoku.librarySortByGroup.v1") private var savedSorts = Data()
+    private func sort(in page: String?) -> MCLibrarySort {
+        let values = (try? JSONDecoder().decode([String: String].self, from: savedSorts)) ?? [:]
+        return values[page ?? "all"].flatMap(MCLibrarySort.init(rawValue:)) ?? .recentlyAdded
+    }
+    private var sortBinding: Binding<MCLibrarySort> {
+        Binding(get: { sort(in: groupPage) }, set: { value in
+            var values = (try? JSONDecoder().decode([String: String].self, from: savedSorts)) ?? [:]
+            values[groupPage ?? "all"] = value.rawValue
+            savedSorts = (try? JSONEncoder().encode(values)) ?? Data()
+        })
+    }
+    @State private var categoryEntry: MCID?
     @State private var showCategories = false
     @State private var showBatchCategories = false
     @State private var showBatchArtist = false
@@ -133,7 +145,7 @@ struct MCCollectionRootView: View {
                 (sources.isEmpty || !sources.isDisjoint(with: Set(sourceIDs))) &&
                 matchesProgress(entry)
         }.sorted { lhs, rhs in
-            switch sort {
+            switch sort(in: groupPage) {
             case .title: store.library.title(lhs).localizedStandardCompare(store.library.title(rhs)) == .orderedAscending
             case .recentlyRead: (lhs.lastReadAt ?? .distantPast) > (rhs.lastReadAt ?? .distantPast)
             case .recentlyAdded: lhs.createdAt > rhs.createdAt
@@ -324,7 +336,7 @@ struct MCCollectionRootView: View {
                                 query = ""
                                 selecting = true; selected.removeAll()
                             }
-                            Picker("Sort", selection: $sort) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
+                            Picker("Sort", selection: sortBinding) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
                             Toggle("Cover grid", isOn: $grid)
                             Toggle("Chapter grid", isOn: $chapterGrid)
                             Button("Categories", systemImage: "folder") { showCategories = true }
@@ -355,6 +367,7 @@ struct MCCollectionRootView: View {
             } message: { Text("Your library entries and reading progress will stay unchanged.") }
             .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
+            .sheet(item: $categoryEntry) { MCBatchCategoryEditor(entryIDs: [$0.id], singleEntry: true) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
             .sheet(isPresented: $showBookmarks, onDismiss: {
                 guard let bookmark = selectedBookmark else { return }
@@ -658,7 +671,7 @@ struct MCCollectionRootView: View {
                     }
                 }
                 Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
-                Button("Select entry", systemImage: "checkmark.circle") { selected.insert(entry.id); selecting = true }
+                Button("Edit category", systemImage: "folder") { categoryEntry = MCID(id: entry.id) }
                 Button("Remove from library", systemImage: "trash", role: .destructive) {
                     selected = [entry.id]; confirmDelete = true
                 }
@@ -953,6 +966,7 @@ private struct MCReadingAddSheet: View {
 
 private struct MCBatchCategoryEditor: View {
     let entryIDs: Set<UUID>
+    var singleEntry = false
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var mode = MCBatchCategoryMode.add
@@ -962,7 +976,7 @@ private struct MCBatchCategoryEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
+                if !singleEntry { Section {
                     Picker("Change", selection: $mode) {
                         ForEach(MCBatchCategoryMode.allCases) { Text($0.title).tag($0) }
                     }
@@ -975,6 +989,7 @@ private struct MCBatchCategoryEditor: View {
                         : "Removes only the selected categories.")
                 }
 
+                }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { category in
                         Toggle(category.name, isOn: Binding(
@@ -985,7 +1000,12 @@ private struct MCBatchCategoryEditor: View {
                     Button("Manage Categories") { showCategories = true }
                 }
             }
-            .navigationTitle("Edit Categories")
+            .onAppear {
+                if singleEntry, let id = entryIDs.first, let entry = store.library.entry(id) {
+                    mode = .replace; categories = entry.categoryIDs
+                }
+            }
+            .navigationTitle(singleEntry ? "Edit category" : "Edit Categories")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

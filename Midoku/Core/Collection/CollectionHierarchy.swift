@@ -90,11 +90,26 @@ nonisolated extension MCLibraryState {
         let sourceEntries = roots.flatMap { entriesIncludingDescendants(of: [$0]) }
         let sourceIDs = Set(sourceEntries.map(\.id))
         var includedChapters = Set<UUID>()
+        var chosenSplitGroups: [UUID: UUID] = [:]
+        var splitParts: [UUID: Set<Int>] = [:]
         var slots: [MCChapterSlot] = []
         for item in roots.flatMap({ flattenedChapters(entryID: $0) }) {
             var slot = item.slot
             // The same physical chapter can belong to several titles, but only once in an entry.
-            slot.variants = slot.variants.filter { includedChapters.insert($0.chapterID).inserted }
+            slot.variants = slot.variants.filter { variant in
+                if let plan = variant.pageSelection {
+                    if let chosen = chosenSplitGroups[variant.chapterID] {
+                        guard chosen == plan.originID else { return false }
+                    } else {
+                        guard !includedChapters.contains(variant.chapterID) else { return false }
+                        chosenSplitGroups[variant.chapterID] = plan.originID
+                    }
+                    guard splitParts[variant.chapterID, default: []].insert(plan.part).inserted else { return false }
+                    includedChapters.insert(variant.chapterID)
+                    return true
+                }
+                return includedChapters.insert(variant.chapterID).inserted
+            }
             guard let first = slot.variants.first else { continue }
             if !slot.variants.contains(where: { $0.id == slot.preferredID }) { slot.preferredID = first.id }
             if naming == .numberInOrder {
@@ -268,7 +283,7 @@ nonisolated extension MCLibraryState {
         var remaining = Dictionary(grouping: entries.filter { $0.parentEntryID != nil }, by: { $0.parentEntryID! }).mapValues(\.count)
         var counts = Dictionary(uniqueKeysWithValues: entries.map { entry in
             (entry.id, (total: entry.slots.count, unread: entry.slots.filter {
-                !($0.completionOverride ?? $0.preferred.map { completedIDs.contains($0.chapterID) } ?? false)
+                !($0.completionOverride ?? $0.preferred.map { $0.pageSelection == nil && completedIDs.contains($0.chapterID) } ?? false)
             }.count))
         })
         var ready = entries.filter { remaining[$0.id, default: 0] == 0 }.map(\.id)

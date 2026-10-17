@@ -22,10 +22,8 @@ struct SourceImageView: View {
     var placeholderSymbol: String?
     var pageImage = false
 
-    @State private var imageRequest: ImageRequest?
     @State private var artwork: MCArtworkCache.Artwork?
     @State private var loadedKey: String?
-    @State private var cacheRevision = ""
 
     private var cacheKey: String {
         MCArtworkCache.key(url: imageUrl, sourceKey: source?.key, pageImage: pageImage, width: downsampleWidth)
@@ -63,76 +61,36 @@ struct SourceImageView: View {
     }
 
     private var remoteImage: some View {
-        LazyImage(
-            request: imageRequest,
-            transaction: .init(animation: nil)
-        ) { state in
-            if state.imageContainer?.type == .gif, let data = state.imageContainer?.data {
-                GIFImage(
-                    data: data,
-                    contentMode: contentMode
-                )
-                    .frame(width: width, height: height)
-                    .id(state.image != nil ? imageUrl : "placeholder") // ensures only opacity is animated
-            } else if state.image == nil, let placeholderSymbol {
-                Image(systemName: placeholderSymbol)
-                    .font(.title3).foregroundStyle(.tertiary)
-                    .frame(width: width, height: height)
-                    .background(Color(uiColor: .secondarySystemBackground))
-            } else if let image = state.image {
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-                    .frame(width: width, height: height)
-                    .id(imageUrl)
+        Group {
+            if let placeholderSymbol {
+                Image(systemName: placeholderSymbol).font(.title3).foregroundStyle(.tertiary)
+                    .frame(width: width, height: height).background(Color(uiColor: .secondarySystemBackground))
             } else if ["MangaPlaceholder", "MidokuCoverPlaceholder", "MidokuChapterPlaceholder"].contains(placeholder) {
                 MCArtworkPlaceholder().frame(width: width, height: height)
             } else {
-                Image(placeholder).resizable().aspectRatio(contentMode: contentMode)
-                    .frame(width: width, height: height)
+                Image(placeholder).resizable().aspectRatio(contentMode: contentMode).frame(width: width, height: height)
             }
         }
-        .processors(processors)
-        .onDisappear(.lowerPriority)
-        .onCompletion { result in
-            guard case .success(let response) = result, loadedKey == cacheKey else { return }
-            artwork = MCArtworkCache.shared.store(
-                image: response.image,
-                animatedData: response.container.type == .gif ? response.container.data : nil,
-                for: cacheKey, revision: cacheRevision
-            )
-        }
-        .id(cacheKey)
     }
 
     func loadImageRequest(url: String) async {
         let key = cacheKey
         loadedKey = key
-        imageRequest = nil
-        artwork = MCArtworkCache.shared.memoryImage(for: key)
-        cacheRevision = MCArtworkCache.shared.revision(for: key)
-        if artwork != nil { return }
-        if let cached = await MCArtworkCache.shared.image(for: key) {
-            guard !Task.isCancelled, key == cacheKey else { return }
-            artwork = cached
-            return
+        if let cached = MCArtworkCache.shared.memoryImage(for: key) { artwork = cached; return }
+        let source = source
+        let processors = processors
+        let pageImage = pageImage
+        let loaded = await MCArtworkCache.shared.load(key: key) {
+            guard let url = URL(string: url) else { return nil }
+            let options: ImageRequest.Options = MCArtworkCache.shared.needsReload(for: key) ? .reloadIgnoringCachedData : []
+            if let fileURL = url.toMidokuFileUrl() { return ImageRequest(url: fileURL, processors: processors, options: options) }
+            let request = if let source, !url.isFileURL {
+                await source.getModifiedImageRequest(url: url, context: nil)
+            } else { URLRequest(url: url) }
+            return ImageRequest(urlRequest: request, processors: processors, options: options,
+                userInfo: [.processesKey: (pageImage && source?.features.processesPages == true) || source?.features.processesCovers == true])
         }
         guard !Task.isCancelled, key == cacheKey else { return }
-        let url = URL(string: url)
-        if let fileUrl = url?.toMidokuFileUrl() {
-            imageRequest = ImageRequest(url: fileUrl)
-            return
-        }
-        guard let source, let url, !url.isFileURL else {
-            imageRequest = ImageRequest(url: url, options: MCArtworkCache.shared.needsReload(for: key) ? .reloadIgnoringCachedData : [])
-            return
-        }
-        let request = await source.getModifiedImageRequest(url: url, context: nil)
-        guard !Task.isCancelled, key == cacheKey else { return }
-        imageRequest = ImageRequest(
-            urlRequest: request,
-            options: MCArtworkCache.shared.needsReload(for: key) ? .reloadIgnoringCachedData : [],
-            userInfo: [.processesKey: (pageImage && source.features.processesPages) || source.features.processesCovers]
-        )
+        artwork = loaded
     }
 }

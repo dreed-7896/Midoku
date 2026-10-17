@@ -21,7 +21,15 @@ enum ReaderProgressStore {
         return Dictionary(saved.map { ($0.identifier, $0) }, uniquingKeysWith: { _, last in last })
     }()
 
-    static func position(for identifier: ChapterIdentifier) -> Position? { positions[identifier] }
+    private static let slotKey = "Reader.slotPositions.v1"
+    private static var slotPositions: [UUID: Position] = {
+        guard let data = UserDefaults.standard.data(forKey: slotKey), let values = try? JSONDecoder().decode([Position].self, from: data) else { return [:] }
+        return Dictionary(values.compactMap { value in value.slotID.map { ($0, value) } }, uniquingKeysWith: { _, last in last })
+    }()
+    static func position(for identifier: ChapterIdentifier, slotID: UUID? = nil) -> Position? {
+        if let slotID { return slotPositions[slotID] }
+        return positions[identifier]
+    }
 
     static func latest(in identifiers: Set<ChapterIdentifier>) -> Position? {
         positions.values.filter { identifiers.contains($0.identifier) }.max { $0.updatedAt < $1.updatedAt }
@@ -31,6 +39,7 @@ enum ReaderProgressStore {
         guard page > 0, !AppSettings.general.incognitoMode.get() else { return }
         positions[identifier] = Position(identifier: identifier, page: page, scrollPosition: scrollPosition,
                                          updatedAt: Date(), slotID: slotID)
+        if let slotID { slotPositions[slotID] = positions[identifier] }
         isDirty = true
         // Reading only updates memory. The reader explicitly flushes on exit or
         // backgrounding; even a pause between swipes must not start disk work.
@@ -40,8 +49,11 @@ enum ReaderProgressStore {
         guard isDirty else { return }
         isDirty = false
         let snapshot = Array(positions.values)
+        let slots = Array(slotPositions.values)
+        let slotsKey = slotKey
         let storageKey = key
         writer.async {
+            if let data = try? JSONEncoder().encode(slots) { UserDefaults.standard.set(data, forKey: slotsKey) }
             if let data = try? JSONEncoder().encode(snapshot) {
                 UserDefaults.standard.set(data, forKey: storageKey)
             }
@@ -50,17 +62,20 @@ enum ReaderProgressStore {
 
     static func remove(chapterIDs: [ChapterIdentifier]) {
         for id in chapterIDs { positions[id] = nil }
+        slotPositions = slotPositions.filter { !chapterIDs.contains($0.value.identifier) }
         isDirty = true
         flush()
     }
 
     static func remove(mangaID: MangaIdentifier) {
+        slotPositions = slotPositions.filter { $0.value.identifier.mangaIdentifier != mangaID }
         positions = positions.filter { $0.key.mangaIdentifier != mangaID }
         isDirty = true
         flush()
     }
 
     static func clear(keeping mangaIDs: Set<MangaIdentifier> = []) {
+        slotPositions = slotPositions.filter { mangaIDs.contains($0.value.identifier.mangaIdentifier) }
         positions = positions.filter { mangaIDs.contains($0.key.mangaIdentifier) }
         isDirty = true
         flush()

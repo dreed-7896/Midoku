@@ -243,6 +243,8 @@ struct MCChapterEditor: View {
     let resetThumbnail: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
+    @State private var splitRanges = ""
+    @State private var excludedPages = ""
     @State private var title = ""
     @State private var number = ""
     @State private var volume = ""
@@ -263,6 +265,13 @@ struct MCChapterEditor: View {
                 }
                 if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 120, height: 180)).frame(width: 120, height: 180) }
                 Section {
+                    TextField("1-20,21-45,46-", text: $splitRanges).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Exclude pages: 3,8-10", text: $excludedPages).textInputAutocapitalization(.never).autocorrectionDisabled()
+                } header: { Text(variant?.pageSelection?.ranges.isEmpty == false ? "Edit chapter splits" : "Split into chapters") }
+                footer: {
+                    Text("Use original page numbers, starting at 1. An open range (21-) includes future pages. Exclusions apply to every part. Edit any part to change this setup; clear the split ranges to rejoin. Each part’s title can be edited separately.")
+                }
+                Section {
                     Button("Reset thumbnail", systemImage: "photo.badge.arrow.down") {
                         resetThumbnail()
                         cover = nil; coverURL = ""
@@ -281,6 +290,8 @@ struct MCChapterEditor: View {
                     volume = variant.edits.volume ?? store.library.chapter(variant.chapterID)?.record.volume ?? ""
                     cover = store.library.covers.first { $0.id == variant.edits.coverID }
                     coverURL = cover?.url?.absoluteString ?? ""
+                    splitRanges = variant.pageSelection?.ranges.map(\.text).joined(separator: ",") ?? ""
+                    excludedPages = variant.pageSelection?.excluded.map(\.text).joined(separator: ",") ?? ""
                 }
                 .confirmationDialog("Reset chapter edits?", isPresented: $confirmReset) {
                     Button("Reset edits", role: .destructive) { save(reset: true) }
@@ -307,11 +318,19 @@ struct MCChapterEditor: View {
 
     private func save(reset: Bool) {
         guard let variant else { return }
+        let ranges: [MCPageRange], excluded: [MCPageRange]
+        do {
+            ranges = reset ? [] : try MCPageRange.parse(splitRanges, disjoint: true)
+            excluded = reset ? [] : try MCPageRange.parse(excludedPages)
+        } catch { store.error = error.localizedDescription; return }
         if store.perform({ state in
+            if !reset {
+                try state.library.setChapterPages(entryID: entryID, slotID: slotID, ranges: ranges, excluded: excluded)
+            }
             if let cover, !reset, !state.library.covers.contains(where: { $0.id == cover.id }) { state.library.covers.append(cover) }
             try state.library.editEntry(entryID) { entry in
-                guard let s = entry.slots.firstIndex(where: { $0.id == slotID }),
-                      let v = entry.slots[s].variants.firstIndex(where: { $0.id == variant.id }) else { throw MCLibraryFailure.missing }
+                guard let s = entry.slots.firstIndex(where: { $0.id == slotID }) ?? entry.slots.firstIndex(where: { $0.preferred?.pageSelection?.originID == variant.pageSelection?.originID && variant.pageSelection != nil }),
+                      let v = entry.slots[s].variants.firstIndex(where: { $0.id == variant.id }) ?? (entry.slots[s].variants.count == 1 ? 0 : nil) else { throw MCLibraryFailure.missing }
                 if reset { entry.slots[s].variants[v].edits = MCChapterEdits() }
                 else {
                     if title != store.library.chapterDisplayTitle(variant) { entry.slots[s].variants[v].edits.title = title }
