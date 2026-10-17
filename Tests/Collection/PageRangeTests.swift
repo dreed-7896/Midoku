@@ -54,10 +54,10 @@ struct PageRangeTests {
         #expect(library.entry(id)?.slots.map(\.id) == parts.map(\.id))
         #expect(library.listings.first?.details.coverURL == details.coverURL)
         try library.validate(connections: [connection], categories: [])
-        try library.setChapterPages(entryID: id, slotID: parts[2].id, ranges: [], excluded: [])
+        let joinedSlotID = try library.setChapterPages(entryID: id, slotID: parts[2].id, ranges: [], excluded: [])
         let restored = try #require(library.entry(id)?.slots.first)
         #expect(library.entry(id)?.slots.count == 1)
-        #expect(restored.id == slot.id && restored.preferred?.pageSelection == nil)
+        #expect(restored.id == slot.id && restored.id == joinedSlotID && restored.preferred?.pageSelection == nil)
         #expect(library.chapterTitle(try #require(restored.preferred)) == "Combined")
         try library.validate(connections: [connection], categories: [])
     }

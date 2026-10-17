@@ -324,12 +324,10 @@ struct MCChapterEditor: View {
             excluded = reset ? [] : try MCPageRange.parse(excludedPages)
         } catch { store.error = error.localizedDescription; return }
         if store.perform({ state in
-            if !reset {
-                try state.library.setChapterPages(entryID: entryID, slotID: slotID, ranges: ranges, excluded: excluded)
-            }
+            let targetSlotID = reset ? slotID : try state.library.setChapterPages(entryID: entryID, slotID: slotID, ranges: ranges, excluded: excluded)
             if let cover, !reset, !state.library.covers.contains(where: { $0.id == cover.id }) { state.library.covers.append(cover) }
             try state.library.editEntry(entryID) { entry in
-                guard let s = entry.slots.firstIndex(where: { $0.id == slotID }) ?? entry.slots.firstIndex(where: { $0.preferred?.pageSelection?.originID == variant.pageSelection?.originID && variant.pageSelection != nil }),
+                guard let s = entry.slots.firstIndex(where: { $0.id == targetSlotID }),
                       let v = entry.slots[s].variants.firstIndex(where: { $0.id == variant.id }) ?? (entry.slots[s].variants.count == 1 ? 0 : nil) else { throw MCLibraryFailure.missing }
                 if reset { entry.slots[s].variants[v].edits = MCChapterEdits() }
                 else {

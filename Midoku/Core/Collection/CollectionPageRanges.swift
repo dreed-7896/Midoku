@@ -82,11 +82,12 @@ nonisolated struct MCChapterPageSelection: Codable, Sendable {
 
 nonisolated extension MCLibraryState {
     /// Reuses existing part identities and their edits. Clearing ranges rejoins the source chapter.
-    mutating func setChapterPages(entryID: UUID, slotID: UUID, ranges: [MCPageRange], excluded: [MCPageRange]) throws {
+    @discardableResult
+    mutating func setChapterPages(entryID: UUID, slotID: UUID, ranges: [MCPageRange], excluded: [MCPageRange]) throws -> UUID {
         guard let entry = entry(entryID), let slot = entry.slots.first(where: { $0.id == slotID }), let variant = slot.preferred else { throw MCLibraryFailure.missing }
         let old = variant.pageSelection
-        if old == nil && ranges.isEmpty && excluded.isEmpty { return }
-        if old?.ranges == ranges && old?.excluded == excluded { return }
+        if old == nil && ranges.isEmpty && excluded.isEmpty { return slotID }
+        if old?.ranges == ranges && old?.excluded == excluded { return slotID }
         guard slot.variants.count == 1 else { throw MCPageRangeError.variants }
         let group = old?.originID ?? variant.id
         let siblings = entry.slots.filter { $0.preferred?.pageSelection?.originID == group || $0.id == slotID }
@@ -96,7 +97,7 @@ nonisolated extension MCLibraryState {
         let baseTitle = original.title ?? chapter(variant.chapterID)?.record.title ?? "Chapter"
         let siblingIDs = Set(siblings.map(\.id))
         let replacements: [MCChapterSlot] = (0..<max(1, ranges.count)).map { part in
-            var result = siblings.first(where: { ($0.preferred?.pageSelection?.part ?? 0) == part }) ?? MCChapterSlot(variant: MCChapterVariant(chapterID: variant.chapterID))
+            var result = (ranges.isEmpty ? siblings.first : siblings.first(where: { ($0.preferred?.pageSelection?.part ?? 0) == part })) ?? MCChapterSlot(variant: MCChapterVariant(chapterID: variant.chapterID))
             result.completionOverride = false
             if ranges.isEmpty {
                 result.variants[0].edits = original
@@ -123,5 +124,6 @@ nonisolated extension MCLibraryState {
                 value.contentOrder = result
             }
         }
+        return replacements.first(where: { $0.id == slotID })?.id ?? replacements[0].id
     }
 }
