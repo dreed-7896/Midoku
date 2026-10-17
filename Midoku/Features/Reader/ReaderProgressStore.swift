@@ -10,6 +10,7 @@ enum ReaderProgressStore {
         let scrollPosition: Double?
         let updatedAt: Date
         let slotID: UUID?
+        var selectionSignature: String? = nil
     }
 
     private static let writer = DispatchQueue(label: "Midoku.reader-progress", qos: .utility)
@@ -35,11 +36,13 @@ enum ReaderProgressStore {
         positions.values.filter { identifiers.contains($0.identifier) }.max { $0.updatedAt < $1.updatedAt }
     }
 
-    static func record(identifier: ChapterIdentifier, page: Int, scrollPosition: Double?, slotID: UUID?) {
+    static func record(identifier: ChapterIdentifier, page: Int, scrollPosition: Double?, slotID: UUID?, sourcePage: Int? = nil, selectionSignature: String? = nil) {
         guard page > 0, !AppSettings.general.incognitoMode.get() else { return }
-        positions[identifier] = Position(identifier: identifier, page: page, scrollPosition: scrollPosition,
-                                         updatedAt: Date(), slotID: slotID)
-        if let slotID { slotPositions[slotID] = positions[identifier] }
+        let local = Position(identifier: identifier, page: page, scrollPosition: scrollPosition,
+                             updatedAt: Date(), slotID: slotID, selectionSignature: selectionSignature)
+        positions[identifier] = Position(identifier: identifier, page: sourcePage ?? page,
+            scrollPosition: scrollPosition, updatedAt: local.updatedAt, slotID: slotID)
+        if let slotID { slotPositions[slotID] = local }
         isDirty = true
         // Reading only updates memory. The reader explicitly flushes on exit or
         // backgrounding; even a pause between swipes must not start disk work.

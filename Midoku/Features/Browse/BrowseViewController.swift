@@ -26,7 +26,7 @@ class BrowseViewController: BaseTableViewController {
     override func configure() {
         super.configure()
 
-        title = NSLocalizedString("BROWSE")
+        title = "Extensions"
 
         navigationController?.navigationBar.prefersLargeTitles = false
         navigationItem.largeTitleDisplayMode = .never

@@ -298,10 +298,11 @@ nonisolated struct MCLibraryState: Codable, Sendable {
             for slot in entry.slots.indices where slotIDs == nil || slotIDs!.contains(entry.slots[slot].id) {
                 for variant in entry.slots[slot].variants.indices {
                     entry.slots[slot].variants[variant].edits.coverID = nil
+                    entry.slots[slot].variants[variant].pageSelection?.originalEdits.coverID = nil
                 }
             }
         }
-        let usedCoverIDs = Set(entries.compactMap(\.coverID) + entries.flatMap(\.slots).flatMap(\.variants).compactMap(\.edits.coverID))
+        let usedCoverIDs = Set(entries.compactMap(\.coverID) + entries.flatMap(\.slots).flatMap(\.variants).compactMap(\.edits.coverID) + entries.flatMap(\.slots).flatMap(\.variants).compactMap { $0.pageSelection?.originalEdits.coverID })
         covers.removeAll { !usedCoverIDs.contains($0.id) }
     }
 

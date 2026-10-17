@@ -43,10 +43,11 @@ struct CollectionIntegrationTests {
         #expect(route.identifier.chapterKey == "physical")
         #expect(route.selectedPages(Array(1...12)) == [5,8,9,10,11,12])
         defer { ReaderProgressStore.remove(chapterIDs: [route.identifier]) }
-        ReaderProgressStore.record(identifier: route.identifier, page: 3, scrollPosition: nil, slotID: parts[0].id)
-        ReaderProgressStore.record(identifier: route.identifier, page: 1, scrollPosition: nil, slotID: parts[1].id)
+        ReaderProgressStore.record(identifier: route.identifier, page: 3, scrollPosition: nil, slotID: parts[0].id, sourcePage: 4)
+        ReaderProgressStore.record(identifier: route.identifier, page: 1, scrollPosition: nil, slotID: parts[1].id, sourcePage: 5)
         #expect(ReaderProgressStore.position(for: route.identifier, slotID: parts[0].id)?.page == 3)
         #expect(ReaderProgressStore.position(for: route.identifier, slotID: parts[1].id)?.page == 1)
+        #expect(ReaderProgressStore.position(for: route.identifier)?.page == 5)
         #expect(await reopened.resumeSlot(entryID: id) == parts[1].id)
     }
 

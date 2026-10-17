@@ -51,6 +51,27 @@ nonisolated struct MCChapterPageSelection: Codable, Sendable {
     var part: Int
     var originalEdits: MCChapterEdits
 
+    var signature: String { ranges.map(\.text).joined(separator: ",") + "|" + excluded.map(\.text).joined(separator: ",") + "|\(part)" }
+
+    func sourcePage(for relativePage: Int) -> Int? {
+        guard relativePage > 0, ranges.isEmpty || ranges.indices.contains(part) else { return nil }
+        let range = ranges.isEmpty ? MCPageRange(start: 1, end: nil) : ranges[part]
+        var remaining = relativePage
+        var cursor = range.start
+        // Merge overlapping exclusions by advancing the cursor only once.
+        for exclusion in excluded.sorted(by: { $0.start < $1.start }) {
+            let end = min(exclusion.end ?? Int.max, range.end ?? Int.max)
+            guard end >= cursor else { continue }
+            let start = max(cursor, exclusion.start)
+            if remaining <= start - cursor { break }
+            remaining -= start - cursor
+            guard end < Int.max else { return nil }
+            cursor = end + 1
+        }
+        let page = cursor + remaining - 1
+        return range.contains(page) ? page : nil
+    }
+
     func indices(pageCount: Int) -> [Int] {
         guard pageCount > 0 else { return [] }
         guard ranges.isEmpty || ranges.indices.contains(part) else { return [] }

@@ -18,7 +18,7 @@ struct MCCustomCoverImage: View {
         } else if let url = cover.url {
             SourceImageView(source: cover.sourceKey.flatMap { SourceStore.shared.source(for: $0) },
                 imageUrl: url.absoluteString, width: size.width, height: size.height, contentMode: contentMode,
-                placeholder: "MidokuCoverPlaceholder", pageImage: cover.pageImage == true).clipped()
+                placeholder: "MidokuCoverPlaceholder", pageImage: cover.pageImage == true, cacheSourceKey: cover.sourceKey).clipped()
         } else {
             MCArtworkPlaceholder()
                 .frame(width: size.width, height: size.height).clipped()

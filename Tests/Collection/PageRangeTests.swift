@@ -19,9 +19,16 @@ struct PageRangeTests {
         let excluded = try MCPageRange.parse("3,8-10,24")
         var plan = MCChapterPageSelection(originID: UUID(), ranges: ranges, excluded: excluded, part: 0, originalEdits: .init())
         #expect(plan.indices(pageCount: 25) == Array(0..<20).filter { ![2,7,8,9].contains($0) })
+        #expect(plan.sourcePage(for: 3) == 4)
+        #expect(plan.sourcePage(for: 16) == 20)
+        #expect(plan.sourcePage(for: 17) == nil)
         plan.part = 1
         #expect(plan.indices(pageCount: 25) == [20,21,22,24])
         #expect(plan.indices(pageCount: 28) == [20,21,22,24,25,26,27])
+        #expect(plan.sourcePage(for: 4) == 25)
+        #expect(plan.sourcePage(for: 7) == 28)
+        plan.excluded = try MCPageRange.parse("21-23,22-25")
+        #expect(plan.sourcePage(for: 1) == 26)
         #expect(plan.indices(pageCount: 0).isEmpty)
     }
     @Test func splitsPersistRefreshAndRejoinWithoutChangingPhysicalIdentity() throws {

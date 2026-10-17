@@ -649,7 +649,8 @@ extension ReaderViewController {
             }
             guard let self, !hasExited, !Task.isCancelled, chapter == requestedChapter else { return }
             let route = collectionSequence?.route(requestedChapter)
-            let local = ReaderProgressStore.position(for: identifier, slotID: route?.pageSelection == nil ? nil : route?.slotID)
+            let saved = ReaderProgressStore.position(for: identifier, slotID: route?.pageSelection == nil ? nil : route?.slotID)
+            let local = route?.pageSelection == nil || saved?.selectionSignature == route?.pageSelection?.signature ? saved : nil
             currentPage = max(1, explicitPage ?? local?.page ?? (route?.pageSelection == nil ? historyPage : nil) ?? 1)
             currentPosition = explicitPage == nil ? local?.scrollPosition : nil
             reader?.setChapter(requestedChapter, startPage: currentPage)
@@ -1183,8 +1184,10 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
 
         currentPage = page
         currentPosition = position
+        let route = collectionSequence?.route(chapter)
         ReaderProgressStore.record(identifier: physicalIdentifier(chapter), page: page,
-                                   scrollPosition: position, slotID: collectionSequence?.route(chapter)?.slotID)
+            scrollPosition: position, slotID: route?.slotID, sourcePage: route?.pageSelection?.sourcePage(for: page),
+            selectionSignature: route?.pageSelection?.signature)
         if changedPage {
             renderCurrentPageControls()
         }

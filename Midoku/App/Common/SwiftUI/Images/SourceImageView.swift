@@ -21,12 +21,13 @@ struct SourceImageView: View {
     var placeholder = "MangaPlaceholder"
     var placeholderSymbol: String?
     var pageImage = false
+    var cacheSourceKey: String?
 
     @State private var artwork: MCArtworkCache.Artwork?
     @State private var loadedKey: String?
 
     private var cacheKey: String {
-        MCArtworkCache.key(url: imageUrl, sourceKey: source?.key, pageImage: pageImage, width: downsampleWidth)
+        MCArtworkCache.key(url: imageUrl, sourceKey: source?.key ?? cacheSourceKey, pageImage: pageImage, width: downsampleWidth)
     }
 
     private var processors: [ImageProcessing] {
