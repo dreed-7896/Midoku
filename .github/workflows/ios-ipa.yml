@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   collection_checks:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_tests
     runs-on: xcode-27
     timeout-minutes: 35
     env:

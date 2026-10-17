@@ -55,6 +55,7 @@ struct MangaDetailsHeaderView: View {
     @State private var hasAvailableTrackers = false
     @State private var showLibraryRemoveConfirm = false
     @State private var changingBookmark = false
+    @State private var categoryEntry: MCID?
 
     static let coverWidth: CGFloat = 114
 
@@ -278,6 +279,7 @@ struct MangaDetailsHeaderView: View {
         .foregroundStyle(.primary)
         .textCase(.none)
         .padding(.top, 10)
+        .background { MCEntryCategoryPresenter(entry: $categoryEntry, includeStatus: true).frame(width: 0, height: 0) }
         .onChange(of: manga) { _ in
             animationTrigger.toggle()
         }
@@ -482,7 +484,7 @@ struct MangaDetailsHeaderView: View {
 
     private func showLibraryEditor() {
         if let id = MCCollectionStore.shared.entryID(for: manga) {
-            path.present(UIHostingController(rootView: MCEntryEditor(entryID: id)))
+            categoryEntry = MCID(id: id)
         } else {
             path.present(UIHostingController(rootView: MCAddSourceView(manga: manga, chapters: manga.chapters ?? chapters)))
         }

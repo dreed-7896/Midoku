@@ -576,7 +576,7 @@ extension ReaderViewController {
         let splitCompletions = pendingSplitCompletions
         pendingSplitCompletions.removeAll()
         let splitRoute = collectionSequence?.route(chapter)
-        let readingSplit = splitRoute?.pageSelection != nil && (toolbarView.totalPages ?? 0) > 0
+        let readingSplit = !AppSettings.general.incognitoMode.get() && splitRoute?.pageSelection != nil && (toolbarView.totalPages ?? 0) > 0
         if !splitCompletions.isEmpty || readingSplit {
             MCCollectionStore.shared.perform { state in
                 var owners = Set(splitCompletions.values)

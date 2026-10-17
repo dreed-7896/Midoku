@@ -30,6 +30,7 @@ struct MangaView: View {
 
     @State private var openChapter: AidokuRunner.Chapter?
     @State private var addChapterToEntry: AidokuRunner.Chapter?
+    @State private var categoryEntry: MCID?
 
     @StateObject private var refreshController = RefreshController()
 
@@ -268,6 +269,7 @@ struct MangaView: View {
             .sheet(item: $addChapterToEntry) { chapter in
                 MCAddChapterToEntryView(manga: viewModel.manga, chapter: chapter)
             }
+            .background { MCEntryCategoryPresenter(entry: $categoryEntry).frame(width: 0, height: 0) }
             .environment(\.editMode, $editMode)
             .clearsStaleListSelection(selectedChapters)
         }
@@ -599,6 +601,10 @@ extension MangaView {
                 }
             },
             editCategories: {
+                if let id = MCCollectionStore.shared.entryID(for: viewModel.manga) {
+                    categoryEntry = MCID(id: id)
+                    return
+                }
                 path.present(
                     UINavigationController(
                         rootViewController: CategorySelectViewController(

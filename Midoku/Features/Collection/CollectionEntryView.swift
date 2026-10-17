@@ -31,21 +31,24 @@ private struct MCEntryMigrationTarget: Identifiable {
     let manga: AidokuRunner.Manga
 }
 
-private struct MCEntryStatusEditor: View {
+struct MCEntryStatusEditor: View {
     let entryID: UUID
+    var includeStatus = true
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var status = MCPersonalStatus.planned
     @State private var categories = Set<UUID>()
+    @State private var showCategories = false
+    @State private var loaded = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Reading status") {
+                if includeStatus { Section("Reading status") {
                     Picker("Status", selection: $status) {
                         ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) }
                     }
-                }
+                } }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { category in
                         Toggle(category.name, isOn: Binding(
@@ -53,9 +56,10 @@ private struct MCEntryStatusEditor: View {
                             set: { if $0 { categories.insert(category.id) } else { categories.remove(category.id) } }
                         ))
                     }
+                    Button("Manage Categories") { showCategories = true }
                 }
             }
-            .navigationTitle("Status and categories")
+            .navigationTitle(includeStatus ? "Status and categories" : "Edit category")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -64,7 +68,7 @@ private struct MCEntryStatusEditor: View {
                         if store.perform({ state in
                             let valid = categories.intersection(Set(state.categories.map(\.id)))
                             try state.library.editEntry(entryID) { entry in
-                                entry.status = status
+                                if includeStatus { entry.status = status }
                                 entry.categoryIDs = valid
                             }
                         }) { dismiss() }
@@ -72,14 +76,76 @@ private struct MCEntryStatusEditor: View {
                 }
             }
             .onAppear {
+                guard !loaded else { return }
+                loaded = true
                 if let entry = store.library.entry(entryID) {
                     status = entry.status
                     categories = entry.categoryIDs
                 }
             }
+            .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .mcErrors(store)
         }
         .midokuAccent()
+    }
+}
+
+/// A stable UIKit anchor avoids competing SwiftUI sheet presenters and waits for
+/// a library context menu to finish dismissing before opening the category editor.
+struct MCEntryCategoryPresenter: UIViewControllerRepresentable {
+    @Binding var entry: MCID?
+    var includeStatus = false
+
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.request = entry
+        controller.includeStatus = includeStatus
+        controller.onDismiss = { entry = nil }
+        controller.schedulePresentation()
+    }
+
+    final class Controller: UIViewController {
+        var request: MCID?
+        var includeStatus = false
+        var onDismiss: () -> Void = {}
+        private var scheduled = false
+        private weak var editor: EditorController?
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            schedulePresentation()
+        }
+
+        func schedulePresentation(attempt: Int = 0) {
+            guard request != nil, editor == nil, !scheduled, attempt < 20 else { return }
+            scheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                scheduled = false
+                guard let request, viewIfLoaded?.window != nil, editor == nil else { return }
+                let presenter = parent ?? self
+                guard presenter.presentedViewController == nil, presenter.transitionCoordinator == nil else {
+                    schedulePresentation(attempt: attempt + 1)
+                    return
+                }
+                let editor = EditorController(rootView: MCEntryStatusEditor(entryID: request.id, includeStatus: includeStatus))
+                editor.onDismiss = { [weak self] in
+                    self?.editor = nil
+                    self?.request = nil
+                    self?.onDismiss()
+                }
+                self.editor = editor
+                presenter.present(editor, animated: true)
+            }
+        }
+    }
+
+    final class EditorController: UIHostingController<MCEntryStatusEditor> {
+        var onDismiss: () -> Void = {}
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if isBeingDismissed || presentingViewController == nil { onDismiss() }
+        }
     }
 }
 
@@ -103,8 +169,7 @@ struct MCEntryView: View {
     @State private var selectedBookmark: MCPanelBookmark?
     @State private var bookmarkedSlotIDs = MCPanelBookmarks.bookmarkedSlotIDs
     @State private var showReorder = false
-    @State private var showStatusEditor = false
-    @State private var didLongPressSave = false
+    @State private var categoryEntry: MCID?
     @State private var webPage: MCWebPage?
     @State private var confirmRemove = false
     @State private var confirmResetThumbnails = false
@@ -234,8 +299,7 @@ struct MCEntryView: View {
         .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
         .fullScreenCover(isPresented: $showCover) { if let entry { MCFullscreenCoverView(entry: entry) } }
-        .sheet(isPresented: $showStatusEditor) { MCEntryStatusEditor(entryID: entryID) }
-        .onChange(of: showStatusEditor) { _, value in if !value { didLongPressSave = false } }
+        .background { MCEntryCategoryPresenter(entry: $categoryEntry, includeStatus: true).frame(width: 0, height: 0) }
         .sheet(item: $webPage) { MCInAppWebView(url: $0.url).ignoresSafeArea() }
         .sheet(isPresented: $showSources) { MCEntrySourcesView(entryID: entryID) }
         .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
@@ -449,11 +513,12 @@ struct MCEntryView: View {
     private func coverActions(_ entry: MCPersonalEntry) -> some View {
         HStack(spacing: 4) {
             Button {
-                if didLongPressSave { didLongPressSave = false } else { confirmRemove = true }
+                confirmRemove = true
             } label: { coverActionIcon("bookmark.fill") }
-            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                didLongPressSave = true; showStatusEditor = true
+            .highPriorityGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                categoryEntry = MCID(id: entryID)
             })
+            .accessibilityAction(named: "Edit status and categories") { categoryEntry = MCID(id: entryID) }
             .accessibilityLabel("Remove from library; hold to edit status and categories")
             Button { Task { await store.refresh(entryID: entryID) } } label: { coverActionIcon("arrow.clockwise") }
                 .disabled(store.isRefreshing).accessibilityLabel("Refresh entry")

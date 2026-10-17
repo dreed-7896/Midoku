@@ -51,8 +51,12 @@ final class MCDiscoverModel: ObservableObject {
 }
 
 final class DiscoverViewController: UIHostingController<MCDiscoverView> {
+    private let model: MCDiscoverModel
+
     init() {
-        super.init(rootView: MCDiscoverView())
+        let model = MCDiscoverModel()
+        self.model = model
+        super.init(rootView: MCDiscoverView(model: model))
         rootView.openManga = { [weak self] manga in
             guard let self else { return }
             navigationController?.pushViewController(MangaViewController(source: SourceStore.shared.source(for: manga.sourceKey), manga: manga, parent: self), animated: true)
@@ -64,20 +68,37 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
                 self.navigationController?.pushViewController(SourceListingViewController(source: source, listing: listing), animated: true)
             }
         }
-        rootView.openExtensions = { [weak self] in self?.navigationController?.pushViewController(BrowseViewController(), animated: true) }
+        rootView.openCustomize = { [weak self] in self?.showCustomize() }
         title = "Discover"
         navigationItem.largeTitleDisplayMode = .always
+        let extensions = UIBarButtonItem(image: UIImage(systemName: "puzzlepiece.extension"), primaryAction: UIAction { [weak self] _ in
+            self?.navigationController?.pushViewController(BrowseViewController(), animated: true)
+        })
+        extensions.accessibilityLabel = "Extensions"
+        let customize = UIBarButtonItem(image: UIImage(systemName: "slider.horizontal.3"), primaryAction: UIAction { [weak self] _ in
+            self?.showCustomize()
+        })
+        customize.accessibilityLabel = "Customize Discover"
+        navigationItem.rightBarButtonItems = [extensions, customize]
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func showCustomize() {
+        guard presentedViewController == nil else { return }
+        present(UIHostingController(rootView: MCDiscoverConfiguration(model: model).midokuAccent()), animated: true)
+    }
 }
 
 struct MCDiscoverView: View {
-    @StateObject private var model = MCDiscoverModel()
+    @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
-    @State private var customize = false
     var openManga: (AidokuRunner.Manga) -> Void = { _ in }
     var openListing: (MCDiscoverFeed) -> Void = { _ in }
-    var openExtensions: () -> Void = {}
+    var openCustomize: () -> Void = {}
+
+    init(model: MCDiscoverModel) {
+        self.model = model
+    }
 
     var body: some View {
         ScrollView {
@@ -91,19 +112,12 @@ struct MCDiscoverView: View {
                     Spacer(minLength: 0)
                 }.padding(.horizontal).padding(.top, 12)
 
-                HStack(spacing: 12) {
-                    Button { customize = true } label: { Label("Customize", systemImage: "slider.horizontal.3").frame(maxWidth: .infinity) }
-                        .buttonStyle(.borderedProminent)
-                    Button(action: openExtensions) { Label("Extensions", systemImage: "puzzlepiece.extension").frame(maxWidth: .infinity) }
-                        .buttonStyle(.bordered)
-                }.controlSize(.large).padding(.horizontal)
-
                 if model.feeds.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         Image(systemName: "rectangle.stack.badge.plus").font(.system(size: 38)).foregroundStyle(Color.accentColor)
                         Text("Build your discovery shelves").font(.title2.bold())
                         Text("Pick an extension and a tab, like Latest or Popular. Add more to explore them all here.").foregroundStyle(.secondary)
-                        Button("Choose extensions and tabs") { customize = true }.buttonStyle(.borderedProminent)
+                        Button("Choose extensions and tabs", action: openCustomize).buttonStyle(.borderedProminent)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
                         .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal)
                 }
@@ -115,7 +129,6 @@ struct MCDiscoverView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .refreshable { await model.reload() }
-        .sheet(isPresented: $customize) { MCDiscoverConfiguration(model: model) }
         .midokuAccent()
     }
 

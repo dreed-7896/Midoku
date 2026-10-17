@@ -28,7 +28,7 @@ enum ReaderProgressStore {
         return Dictionary(values.compactMap { value in value.slotID.map { ($0, value) } }, uniquingKeysWith: { _, last in last })
     }()
     static func position(for identifier: ChapterIdentifier, slotID: UUID? = nil) -> Position? {
-        if let slotID { return slotPositions[slotID] }
+        if let slotID { return slotPositions[slotID].flatMap { $0.identifier == identifier ? $0 : nil } }
         return positions[identifier]
     }
 

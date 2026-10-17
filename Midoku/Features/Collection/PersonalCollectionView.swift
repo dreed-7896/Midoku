@@ -372,7 +372,6 @@ struct MCCollectionRootView: View {
             } message: { Text("Your library entries and reading progress will stay unchanged.") }
             .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
             .sheet(item: $editingEntry) { MCEntryEditor(entryID: $0.id) }
-            .sheet(item: $categoryEntry) { MCBatchCategoryEditor(entryIDs: [$0.id], singleEntry: true) }
             .sheet(isPresented: $showReadingAdd) { MCReadingAddSheet() }
             .sheet(isPresented: $showBookmarks, onDismiss: {
                 guard let bookmark = selectedBookmark else { return }
@@ -439,6 +438,7 @@ struct MCCollectionRootView: View {
                 await store.adoptExistingLibrary()
             }
         }
+        .background { MCEntryCategoryPresenter(entry: $categoryEntry).frame(width: 0, height: 0) }
         .introspect(.navigationStack, on: .iOS(.v26, .v27)) { navigation in
             navigation.interactivePopGestureRecognizer?.isEnabled = true
             navigation.interactiveContentPopGestureRecognizer?.isEnabled = true
