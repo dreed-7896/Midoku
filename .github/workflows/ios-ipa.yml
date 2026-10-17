@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: midoku-ipa-${{ github.ref }}
+  group: midoku-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -58,7 +58,7 @@ jobs:
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 test \
             2>&1 | tee collection-tests.log
       - name: Upload collection test logs
-        if: always() && steps.collection_changes.outputs.run == 'true'
+        if: always() && !cancelled() && steps.collection_changes.outputs.run == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: Midoku-collection-tests-${{ github.sha }}

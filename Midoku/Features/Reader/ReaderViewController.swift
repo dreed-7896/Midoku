@@ -574,8 +574,17 @@ extension ReaderViewController {
         ReaderProgressStore.flush()
         let splitCompletions = pendingSplitCompletions
         pendingSplitCompletions.removeAll()
-        if !splitCompletions.isEmpty {
+        let splitRoute = collectionSequence?.route(chapter)
+        let readingSplit = splitRoute?.pageSelection != nil && (toolbarView.totalPages ?? 0) > 0
+        if !splitCompletions.isEmpty || readingSplit {
             MCCollectionStore.shared.perform { state in
+                var owners = Set(splitCompletions.values)
+                if readingSplit, let splitRoute { owners.insert(splitRoute.entryID) }
+                var affected = owners
+                for owner in owners { affected.formUnion(state.library.ancestorIDs(of: owner)) }
+                for index in state.library.entries.indices where affected.contains(state.library.entries[index].id) {
+                    state.library.entries[index].lastReadAt = Date()
+                }
                 for (slotID, entryID) in splitCompletions {
                     guard state.library.entry(entryID)?.slots.contains(where: { $0.id == slotID }) == true else { continue }
                     try state.library.setRead(entryID: entryID, slotIDs: [slotID], read: true)
