@@ -101,6 +101,7 @@ class ReaderViewController: BaseObservingViewController {
 
     private var chapterList: [AidokuRunner.Chapter]
     private var chaptersToMark: [AidokuRunner.Chapter] = []
+    private var pendingSplitCompletions: [UUID: UUID] = [:]
     private var chaptersToRemoveDownload: [AidokuRunner.Chapter] = []
     private var forceStartPage: Int?
     private var currentPage = 1
@@ -1308,8 +1309,6 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
     func setSliderOffset(_ offset: CGFloat) {
         toolbarView.sliderView.currentValue = offset
     }
-
-    private var pendingSplitCompletions: [UUID: UUID] = [:]
 
     func setCompleted() {
         guard !AppSettings.general.incognitoMode.get(), !chaptersToMark.isEmpty else { return }

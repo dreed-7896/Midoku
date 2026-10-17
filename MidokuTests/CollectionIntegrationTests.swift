@@ -30,6 +30,11 @@ struct CollectionIntegrationTests {
         }
         let reopened = MCCollectionStore(fileURL: root.appendingPathComponent("library.json"))
         let parts = try #require(reopened.library.entry(id)).slots
+        let legacyPanel = MCPanelBookmark(id: UUID(), titleKey: id.uuidString, slotID: parts[0].id,
+            sourceKey: key, mangaKey: manga.key, chapterKey: "physical", chapterTitle: "Combined", chapterNumber: 1, page: 8, preview: nil)
+        let restoredPanel = try MCPanelBookmarks.reader(for: legacyPanel, store: reopened)
+        #expect(restoredPanel.sequence.route(key: restoredPanel.sequence.initialKey)?.slotID == parts[1].id)
+        #expect(restoredPanel.startPage == 2)
         let sequence = try MCReaderSequence(entryID: id, slotID: parts[0].id, store: reopened)
         #expect(sequence.chapters.count == 2)
         let model = ReaderPagedViewModel(source: installed[key], manga: manga)
@@ -49,6 +54,14 @@ struct CollectionIntegrationTests {
         #expect(ReaderProgressStore.position(for: route.identifier, slotID: parts[1].id)?.page == 1)
         #expect(ReaderProgressStore.position(for: route.identifier)?.page == 5)
         #expect(await reopened.resumeSlot(entryID: id) == parts[1].id)
+        let splitPanel = MCPanelBookmark(id: UUID(), titleKey: id.uuidString, slotID: parts[1].id,
+            sourceKey: key, mangaKey: manga.key, chapterKey: "physical", chapterTitle: "Part 2", chapterNumber: 1, page: 3, preview: nil, sourcePage: 9)
+        try reopened.change { state in
+            try state.library.setChapterPages(entryID: id, slotID: parts[1].id,
+                ranges: MCPageRange.parse("1-8,9-", disjoint: true), excluded: [])
+        }
+        #expect(try MCPanelBookmarks.reader(for: splitPanel, store: reopened).startPage == 1)
+
     }
 
     @Test func mergedChaptersPersistWithExactRoutingAndReassignedBookmarks() throws {

@@ -72,6 +72,20 @@ nonisolated struct MCChapterPageSelection: Codable, Sendable {
         return range.contains(page) ? page : nil
     }
 
+    func relativePage(for sourcePage: Int) -> Int? {
+        guard ranges.isEmpty || ranges.indices.contains(part) else { return nil }
+        let range = ranges.isEmpty ? MCPageRange(start: 1, end: nil) : ranges[part]
+        guard range.contains(sourcePage), !excluded.contains(where: { $0.contains(sourcePage) }) else { return nil }
+        var count = sourcePage - range.start + 1
+        var cursor = range.start
+        for exclusion in excluded.sorted(by: { $0.start < $1.start }) {
+            let start = max(cursor, exclusion.start)
+            let end = min(sourcePage, exclusion.end ?? sourcePage)
+            if start <= end { count -= end - start + 1; cursor = end + 1 }
+        }
+        return count > 0 ? count : nil
+    }
+
     func indices(pageCount: Int) -> [Int] {
         guard pageCount > 0 else { return [] }
         guard ranges.isEmpty || ranges.indices.contains(part) else { return [] }

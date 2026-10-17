@@ -61,7 +61,7 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
             guard let self, let source = SourceStore.shared.source(for: feed.sourceKey) else { return }
             Task { @MainActor in
                 guard let listing = try? await source.getListings().first(where: { $0.id == feed.listingID }) else { return }
-                navigationController?.pushViewController(SourceListingViewController(source: source, listing: listing), animated: true)
+                self.navigationController?.pushViewController(SourceListingViewController(source: source, listing: listing), animated: true)
             }
         }
         rootView.openExtensions = { [weak self] in self?.navigationController?.pushViewController(BrowseViewController(), animated: true) }

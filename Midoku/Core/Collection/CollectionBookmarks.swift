@@ -18,6 +18,7 @@ nonisolated struct MCPanelBookmark: Codable, Identifiable, Sendable {
     let page: Int
     let preview: Data?
     var kind: MCBookmarkKind? = nil
+    var sourcePage: Int? = nil
 
     var isChapter: Bool { kind == .chapter }
 

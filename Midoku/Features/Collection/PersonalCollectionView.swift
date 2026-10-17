@@ -92,9 +92,9 @@ struct MCCollectionRootView: View {
         return values[page ?? "all"].flatMap(MCLibrarySort.init(rawValue:)) ?? .recentlyAdded
     }
     private var sortBinding: Binding<MCLibrarySort> {
-        Binding(get: { sort(in: groupPage) }, set: { value in
+        Binding(get: { sort(in: activeGroupPage) }, set: { value in
             var values = (try? JSONDecoder().decode([String: String].self, from: savedSorts)) ?? [:]
-            values[groupPage ?? "all"] = value.rawValue
+            values[activeGroupPage ?? "all"] = value.rawValue
             savedSorts = (try? JSONEncoder().encode(values)) ?? Data()
         })
     }
@@ -125,7 +125,7 @@ struct MCCollectionRootView: View {
         let groupEntryIDs = groupPage.flatMap { selected in
             groupPages.first(where: { $0.id == selected })?.entryIDs
         }
-        return store.library.entries.filter { entry in
+        let filtered = store.library.entries.filter { entry in
             let details = store.library.listing(entry.primaryListingID)?.details
             let searchable = [
                 store.library.title(entry),
@@ -144,8 +144,13 @@ struct MCCollectionRootView: View {
                 (tags.isEmpty || !tags.isDisjoint(with: Set(entryTags(entry)))) &&
                 (sources.isEmpty || !sources.isDisjoint(with: Set(sourceIDs))) &&
                 matchesProgress(entry)
-        }.sorted { lhs, rhs in
-            switch sort(in: groupPage) {
+        }
+        return sortedEntries(filtered, in: groupPage)
+    }
+
+    private func sortedEntries(_ values: [MCPersonalEntry], in page: String?) -> [MCPersonalEntry] {
+        values.sorted { lhs, rhs in
+            switch sort(in: page) {
             case .title: store.library.title(lhs).localizedStandardCompare(store.library.title(rhs)) == .orderedAscending
             case .recentlyRead: (lhs.lastReadAt ?? .distantPast) > (rhs.lastReadAt ?? .distantPast)
             case .recentlyAdded: lhs.createdAt > rhs.createdAt
@@ -457,7 +462,7 @@ struct MCCollectionRootView: View {
                             ScrollView(.horizontal) {
                                 LazyHStack(spacing: 0) {
                                     ForEach(pages) { page in
-                                        collectionPage(values: visibleEntries.filter { page.entryIDs.contains($0.id) }, size: geometry.size)
+                                        collectionPage(values: sortedEntries(visibleEntries.filter { page.entryIDs.contains($0.id) }, in: page.id), size: geometry.size)
                                             .frame(width: geometry.size.width, height: geometry.size.height)
                                             .id(page.id)
                                     }

@@ -133,7 +133,7 @@ enum MCPanelBookmarks {
                     sourceKey: bookmark.sourceKey, mangaKey: bookmark.mangaKey, chapterKey: bookmark.chapterKey,
                     chapterTitle: store.library.chapterDisplayTitle(variant),
                     chapterNumber: store.library.number(variant).flatMap(Float.init), page: bookmark.page,
-                    preview: bookmark.preview, kind: bookmark.kind)
+                    preview: bookmark.preview, kind: bookmark.kind, sourcePage: bookmark.sourcePage)
             }
             if !items.contains(where: { moved.replaces($0) }) { items.append(moved) }
         }
@@ -175,12 +175,19 @@ enum MCPanelBookmarks {
             if !requireExactSlot && bookmark.isChapter && bookmark.slotID != nil { continue }
             for entry in entries {
                 let slots = store.library.flattenedChapters(entryID: entry.id).map(\.slot)
-                let slot = slots.first {
-                    (!requireExactSlot || $0.id == bookmark.slotID) && $0.variants.contains { $0.chapterID == chapter.id }
+                let sourcePage = bookmark.sourcePage ?? bookmark.page
+                let savedPlan = slots.first(where: { $0.id == bookmark.slotID })?.preferred?.pageSelection
+                let slot = slots.first { slot in
+                    let sameSplit = savedPlan != nil && slot.preferred?.pageSelection?.originID == savedPlan?.originID
+                    guard !requireExactSlot || slot.id == bookmark.slotID || (!bookmark.isChapter && sameSplit),
+                          let variant = slot.variants.first(where: { $0.chapterID == chapter.id }) else { return false }
+                    return bookmark.isChapter || variant.pageSelection == nil || variant.pageSelection?.relativePage(for: sourcePage) != nil
                 }
                 if let slot {
+                    let selection = slot.variants.first(where: { $0.chapterID == chapter.id })?.pageSelection
+                    let page = bookmark.isChapter ? 1 : (selection?.relativePage(for: sourcePage) ?? sourcePage)
                     return MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: slot.id,
-                                         initialChapterID: chapter.id, store: store), startPage: bookmark.isChapter ? 1 : bookmark.page)
+                                         initialChapterID: chapter.id, store: store), startPage: page)
                 }
             }
         }
@@ -205,7 +212,7 @@ extension ReaderViewController {
                 slotID: route?.slotID,
                 sourceKey: identity.sourceKey, mangaKey: identity.mangaKey, chapterKey: identity.chapterKey,
                 chapterTitle: display.title ?? "Chapter", chapterNumber: display.chapterNumber,
-                page: page, preview: preview))
+                page: page, preview: preview, sourcePage: route?.pageSelection?.sourcePage(for: page) ?? page))
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
     }
