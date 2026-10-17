@@ -39,13 +39,17 @@ class MangaViewController: UIHostingController<MangaView> {
     ) {
         self.manga = manga
         self.mangaInfo = mangaInfo
+        let path = NavigationCoordinator(rootViewController: nil)
         super.init(rootView: MangaView(
             source: source,
             manga: manga,
-            path: NavigationCoordinator(rootViewController: parent),
+            path: path,
             chapterKey: chapterKey,
             openAction: openAction
         ))
+        // Sheets must be presented by this visible screen, not the previous
+        // browse/listing controller that pushed it onto the navigation stack.
+        path.rootViewController = self
 
         navigationItem.title = manga.title
         navigationItem.titleView = UIView() // hide navigation bar title
