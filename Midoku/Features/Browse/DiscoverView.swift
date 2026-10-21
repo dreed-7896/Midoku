@@ -69,10 +69,19 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
             }
         }
         rootView.openCustomize = { [weak self] in self?.showCustomize() }
+        rootView.openExtensions = { [weak self] in self?.showExtensions() }
+        rootView.openSource = { [weak self] source in
+            let controller: UIViewController = if let legacySource = source.legacySource {
+                SourceViewController(source: legacySource)
+            } else {
+                NewSourceViewController(source: source)
+            }
+            self?.navigationController?.pushViewController(controller, animated: true)
+        }
         title = "Discover"
         navigationItem.largeTitleDisplayMode = .always
         let extensions = UIBarButtonItem(image: UIImage(systemName: "puzzlepiece.extension"), primaryAction: UIAction { [weak self] _ in
-            self?.navigationController?.pushViewController(BrowseViewController(), animated: true)
+            self?.showExtensions()
         })
         extensions.accessibilityLabel = "Extensions"
         let customize = UIBarButtonItem(image: UIImage(systemName: "slider.horizontal.3"), primaryAction: UIAction { [weak self] _ in
@@ -82,6 +91,10 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
         navigationItem.rightBarButtonItems = [extensions, customize]
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func showExtensions() {
+        navigationController?.pushViewController(BrowseViewController(), animated: true)
+    }
 
     private func showCustomize() {
         guard presentedViewController == nil else { return }
@@ -95,6 +108,19 @@ struct MCDiscoverView: View {
     var openManga: (AidokuRunner.Manga) -> Void = { _ in }
     var openListing: (MCDiscoverFeed) -> Void = { _ in }
     var openCustomize: () -> Void = {}
+    var openExtensions: () -> Void = {}
+    var openSource: (AidokuRunner.Source) -> Void = { _ in }
+
+    /// Enabled extensions with pinned ones first, so the most used are one tap away.
+    private var quickSources: [AidokuRunner.Source] {
+        let pinned = AppSettings.browse.pinnedList.get()
+        return sources.sourcesByKey.values
+            .filter { !sources.isDisabled(sourceKey: $0.key) }
+            .sorted { lhs, rhs in
+                let left = pinned.firstIndex(of: lhs.key) ?? .max, right = pinned.firstIndex(of: rhs.key) ?? .max
+                return left != right ? left < right : lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+    }
 
     init(model: MCDiscoverModel) {
         self.model = model
@@ -103,14 +129,8 @@ struct MCDiscoverView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 30) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("YOUR NEXT READ").font(.caption.weight(.bold)).tracking(2).foregroundStyle(Color.accentColor)
-                        Text("A world of stories.").font(.largeTitle.bold())
-                        Text("Your favorite extensions, together.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }.padding(.horizontal).padding(.top, 12)
+                quickActions.padding(.horizontal).padding(.top, 8)
+                if !quickSources.isEmpty { extensionStrip }
 
                 if model.feeds.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
@@ -130,6 +150,68 @@ struct MCDiscoverView: View {
         .background(Color(uiColor: .systemBackground))
         .refreshable { await model.reload() }
         .midokuAccent()
+    }
+
+    private var quickActions: some View {
+        let installed = quickSources.count
+        let updates = AppSettings.browse.updateCount.get()
+        return HStack(spacing: 12) {
+            quickAction(
+                "Extensions",
+                detail: updates > 0 ? "\(updates) update\(updates == 1 ? "" : "s")" : installed == 0 ? "Install sources" : "\(installed) installed",
+                symbol: "puzzlepiece.extension.fill",
+                badge: updates > 0,
+                action: openExtensions
+            )
+            quickAction("Shelves", detail: model.feeds.isEmpty ? "Set up Discover" : "\(model.feeds.count) on Discover", symbol: "rectangle.stack.fill", badge: false, action: openCustomize)
+        }
+    }
+
+    private func quickAction(_ title: String, detail: String, symbol: String, badge: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.title3).foregroundStyle(Color.accentColor)
+                    .frame(width: 40, height: 40).background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(alignment: .topTrailing) {
+                        if badge { Circle().fill(.red).frame(width: 10, height: 10).offset(x: 3, y: -3) }
+                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12).frame(maxWidth: .infinity)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(detail)")
+    }
+
+    private var extensionStrip: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Browse an extension").font(.headline)
+                Spacer()
+                Button("See all", action: openExtensions).font(.subheadline.weight(.medium))
+            }.padding(.horizontal)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(quickSources, id: \.key) { source in
+                        Button { openSource(source) } label: {
+                            VStack(spacing: 6) {
+                                SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 56)
+                                Text(source.name).font(.caption).lineLimit(1).foregroundStyle(.primary)
+                            }.frame(width: 68)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Browse \(source.name)")
+                    }
+                }.padding(.horizontal)
+            }
+        }
     }
 
     private func shelf(_ feed: MCDiscoverFeed, featured: Bool, ranked: Bool) -> some View {

@@ -270,6 +270,8 @@ class ReaderViewController: BaseObservingViewController {
         add(child: descriptionButtonController)
         controlsView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controlsView)
+        controlsView.topBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controlsView.topBar)
 
         // loading indicator
         activityIndicator.startAnimating()
@@ -321,7 +323,10 @@ class ReaderViewController: BaseObservingViewController {
             panelWidth,
             controlsView.widthAnchor.constraint(lessThanOrEqualToConstant: 600),
             controlsView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            controlsView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
+            controlsView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            controlsView.topBar.widthAnchor.constraint(equalTo: controlsView.widthAnchor),
+            controlsView.topBar.centerXAnchor.constraint(equalTo: controlsView.centerXAnchor),
+            controlsView.topBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
         ])
 
         NSLayoutConstraint.activate([
@@ -449,6 +454,7 @@ class ReaderViewController: BaseObservingViewController {
         navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.isToolbarHidden = true
         view.bringSubviewToFront(controlsView)
+        view.bringSubviewToFront(controlsView.topBar)
 
         if showPanelsOnOpen && !pages.isEmpty {
             showPanelsOnOpen = false
@@ -688,6 +694,7 @@ extension ReaderViewController {
             }
 
         navigationItem.setTitle(upper: volume, lower: title)
+        controlsView.topBar.setTitle(title, subtitle: [volume, manga.title].compactMap { $0 }.joined(separator: " · "))
         controlsView.webButton.isEnabled = chapter.url != nil
         // re-apply theme title colors, since setTitle recreates the title view
         updateTextThemeOverride()
@@ -937,6 +944,7 @@ extension ReaderViewController {
         controlsView.translationButton.isHidden = !(reader is ReaderTranslationReader)
         translationCoordinator.readerChanged()
         view.bringSubviewToFront(controlsView)
+        view.bringSubviewToFront(controlsView.topBar)
         updateTextThemeOverride()
     }
 
@@ -1018,7 +1026,8 @@ extension ReaderViewController {
         webtoonReader?.onContentScrollingChange = { [weak self] scrolling in
             if !scrolling { self?.renderCurrentPageControls() }
         }
-        controlsView.autoScrollButton.isEnabled = webtoonReader != nil
+        // Only the webtoon reader can auto scroll; hide the action elsewhere to keep the panel compact.
+        controlsView.autoScrollButton.isHidden = webtoonReader == nil
         updateAutoScrollButtonIcon()
     }
 
@@ -1724,10 +1733,12 @@ extension ReaderViewController {
         navigationController?.setNavigationBarHidden(true, animated: false)
         navigationController?.isToolbarHidden = true
         controlsView.isUserInteractionEnabled = visible
+        controlsView.topBar.isUserInteractionEnabled = visible
         NSLayoutConstraint.deactivate(visible ? accessoryBottomFullscreen : accessoryBottomWithControls)
         NSLayoutConstraint.activate(visible ? accessoryBottomWithControls : accessoryBottomFullscreen)
         if visible {
             controlsView.isHidden = false
+            controlsView.topBar.isHidden = false
             renderCurrentPageControls()
         }
         setNeedsStatusBarAppearanceUpdate()
@@ -1735,6 +1746,7 @@ extension ReaderViewController {
         NotificationCenter.default.post(name: visible ? .readerShowingBars : .readerHidingBars, object: nil)
         UIView.animate(withDuration: animated ? 0.2 : 0, delay: 0, options: [.beginFromCurrentState]) {
             self.controlsView.alpha = visible ? 1 : 0
+            self.controlsView.topBar.alpha = visible ? 1 : 0
             self.view.layoutIfNeeded()
             self.node.backgroundColor = visible ? .systemBackground : {
                 switch UserDefaults.standard.string(forKey: "Reader.backgroundColor") {
@@ -1745,6 +1757,7 @@ extension ReaderViewController {
             }()
         } completion: { _ in
             self.controlsView.isHidden = !self.readerControlsVisible
+            self.controlsView.topBar.isHidden = !self.readerControlsVisible
         }
     }
 }
@@ -1768,7 +1781,8 @@ extension ReaderViewController: UIGestureRecognizerDelegate {
 
         var view: UIView? = touch.view
         while let currentView = view {
-            if currentView is UIControl || currentView is TranslationCalloutView || currentView === controlsView {
+            if currentView is UIControl || currentView is TranslationCalloutView
+                || currentView === controlsView || currentView === controlsView.topBar {
                 return false
             }
             view = currentView.superview

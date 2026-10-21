@@ -55,18 +55,18 @@ class ReaderToolbarView: UIView {
         }
         addSubview(previousChapterButton)
         addSubview(nextChapterButton)
-        incognitoModeLabel.font = .systemFont(ofSize: 10)
+        incognitoModeLabel.font = .systemFont(ofSize: 11, weight: .medium)
         incognitoModeLabel.textColor = .secondaryLabel
         incognitoModeLabel.textAlignment = .left
         incognitoModeLabel.isHidden = !AppSettings.general.incognitoMode.get()
         addSubview(incognitoModeLabel)
 
-        currentPageLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        currentPageLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
         currentPageLabel.textAlignment = .center
         currentPageLabel.sizeToFit()
         addSubview(currentPageLabel)
 
-        pagesLeftLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        pagesLeftLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         pagesLeftLabel.textColor = .secondaryLabel
         pagesLeftLabel.textAlignment = .right
         addSubview(pagesLeftLabel)
@@ -83,22 +83,25 @@ class ReaderToolbarView: UIView {
         previousChapterButton.translatesAutoresizingMaskIntoConstraints = false
         nextChapterButton.translatesAutoresizingMaskIntoConstraints = false
 
+        // Page details sit on their own row above the slider instead of underneath it.
         NSLayoutConstraint.activate([
-            incognitoModeLabel.leadingAnchor.constraint(equalTo: sliderView.leadingAnchor),
-            incognitoModeLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
-
             currentPageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            currentPageLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
+            currentPageLabel.topAnchor.constraint(equalTo: topAnchor),
+
+            incognitoModeLabel.leadingAnchor.constraint(equalTo: sliderView.leadingAnchor),
+            incognitoModeLabel.centerYAnchor.constraint(equalTo: currentPageLabel.centerYAnchor),
+            incognitoModeLabel.trailingAnchor.constraint(lessThanOrEqualTo: currentPageLabel.leadingAnchor, constant: -8),
 
             pagesLeftLabel.trailingAnchor.constraint(equalTo: sliderView.trailingAnchor),
-            pagesLeftLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
+            pagesLeftLabel.centerYAnchor.constraint(equalTo: currentPageLabel.centerYAnchor),
+            pagesLeftLabel.leadingAnchor.constraint(greaterThanOrEqualTo: currentPageLabel.trailingAnchor, constant: 8),
 
             previousChapterButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-            previousChapterButton.topAnchor.constraint(equalTo: topAnchor),
+            previousChapterButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             previousChapterButton.widthAnchor.constraint(equalToConstant: 44),
             previousChapterButton.heightAnchor.constraint(equalToConstant: 44),
             nextChapterButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            nextChapterButton.topAnchor.constraint(equalTo: topAnchor),
+            nextChapterButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             nextChapterButton.widthAnchor.constraint(equalToConstant: 44),
             nextChapterButton.heightAnchor.constraint(equalToConstant: 44),
             sliderView.heightAnchor.constraint(equalToConstant: 44),

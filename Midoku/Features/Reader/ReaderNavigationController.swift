@@ -79,7 +79,7 @@ final class ReaderPopGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var candidate = touch.view
         while let current = candidate {
-            if current is UIControl || current === reader?.controlsView { return false }
+            if current is UIControl || current === reader?.controlsView || current === reader?.controlsView.topBar { return false }
             if let scroll = current as? UIScrollView, scroll.zoomScale > scroll.minimumZoomScale + 0.01 { return false }
             candidate = current.superview
         }
