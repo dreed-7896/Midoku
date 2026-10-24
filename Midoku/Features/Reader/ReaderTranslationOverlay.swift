@@ -129,15 +129,25 @@ final class ReaderTranslationImageOverlay: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         if imageView?.image !== expectedImage { isHidden = true; return }
+        let container = imageRect.intersection(bounds)
         for region in record?.regions ?? [] {
-            annotations[region.id]?.frame = rect(for: region).insetBy(dx: -3, dy: -3).intersection(bounds)
+            guard let annotation = annotations[region.id] else { continue }
+            annotation.frame = annotation.bubbleFrame(covering: rect(for: region).insetBy(dx: -3, dy: -3).intersection(bounds),
+                                                      within: container)
         }
+        // The selected bubble stays on top where bubbles overlap.
+        if let selectedID, let selected = annotations[selectedID] { bringSubviewToFront(selected) }
     }
 
     func region(at point: CGPoint) -> TranslationRegion? {
         guard imageView?.image === expectedImage, !isHidden else { return nil }
-        return record?.regions.filter { rect(for: $0).insetBy(dx: -5, dy: -5).contains(point) }
-            .min { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }
+        // Shown bubbles can be larger than the original text, so taps use the bubble's own frame.
+        func area(_ region: TranslationRegion) -> CGRect {
+            if let annotation = annotations[region.id], annotation.showsText, !annotation.frame.isEmpty { return annotation.frame }
+            return rect(for: region).insetBy(dx: -5, dy: -5)
+        }
+        return record?.regions.filter { area($0).contains(point) }
+            .min { area($0).width * area($0).height < area($1).width * area($1).height }
     }
 
     // Leave blank areas to the reader's existing tap zones. On text, the reader's tap handler
