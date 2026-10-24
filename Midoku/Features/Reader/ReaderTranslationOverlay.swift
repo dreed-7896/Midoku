@@ -96,13 +96,6 @@ final class ReaderTranslationImageOverlay: UIView {
         return region.rect(in: area.size).offsetBy(dx: area.minX, dy: area.minY)
     }
 
-    /// Where the dialogue is drawn: its translated bubble when shown, otherwise the original text.
-    func displayedRect(for region: TranslationRegion) -> CGRect {
-        layoutIfNeeded()
-        if let annotation = annotations[region.id], annotation.showsText, !annotation.frame.isEmpty { return annotation.frame }
-        return rect(for: region)
-    }
-
     func configure(record: ReaderTranslationRecord?, selectedID: Int?, showAll: Bool, original: Bool) {
         let font = UserDefaults.standard.object(forKey: "Translation.overlayFontSize") as? Double ?? 14
         let background = UserDefaults.standard.object(forKey: "Translation.overlayOpacity") as? Double ?? 0.94

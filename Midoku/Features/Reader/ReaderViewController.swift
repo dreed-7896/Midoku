@@ -1781,8 +1781,7 @@ extension ReaderViewController: UIGestureRecognizerDelegate {
 
         var view: UIView? = touch.view
         while let currentView = view {
-            if currentView is UIControl || currentView is TranslationCalloutView
-                || currentView === controlsView || currentView === controlsView.topBar {
+            if currentView is UIControl || currentView === controlsView || currentView === controlsView.topBar {
                 return false
             }
             view = currentView.superview

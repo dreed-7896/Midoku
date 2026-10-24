@@ -1185,8 +1185,16 @@ extension ReaderWebtoonViewController: ReaderTranslationReader {
         return Array(upcoming.filter { $0.type == .imagePage && !$0.isTextPage }.prefix(limit))
     }
 
+    /// Scrolls so the dialogue sits in the middle of the screen, within the scrollable range.
     func revealTranslation(_ rect: CGRect, in imageView: UIImageView) {
-        let target = imageView.convert(rect, to: scrollView).insetBy(dx: -24, dy: -24)
-        scrollView.scrollRectToVisible(target, animated: true)
+        let target = imageView.convert(rect, to: scrollView)
+        let inset = scrollView.adjustedContentInset
+        let visibleWidth = scrollView.bounds.width - inset.left - inset.right
+        let visibleHeight = scrollView.bounds.height - inset.top - inset.bottom
+        let maximumX = max(-inset.left, scrollView.contentSize.width - scrollView.bounds.width + inset.right)
+        let maximumY = max(-inset.top, scrollView.contentSize.height - scrollView.bounds.height + inset.bottom)
+        let x = min(max(target.midX - inset.left - visibleWidth / 2, -inset.left), maximumX)
+        let y = min(max(target.midY - inset.top - visibleHeight / 2, -inset.top), maximumY)
+        scrollView.setContentOffset(CGPoint(x: x, y: y), animated: true)
     }
 }

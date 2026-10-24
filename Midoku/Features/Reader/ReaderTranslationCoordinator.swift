@@ -12,8 +12,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     var appleRequest: ReaderAppleTranslationRequest?
     private weak var sessionHost: UIViewController?
     private var timer: Timer?
-    private var displayLink: CADisplayLink?
-    private let displayTarget = ReaderTranslationDisplayTarget()
     private var overlays: [ReaderTranslationImageOverlay] = []
     private var surfaces: [(ReaderTranslationSurface, String)] = []
     private var cache: [String: ReaderTranslationRecord] = [:]
@@ -31,8 +29,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private var selected: (key: String, id: Int)?
     private var showAll = false
     private var original = false
-    private let callout = TranslationCalloutView()
-    private let connector = CAShapeLayer()
     private let accessory = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
     private let statusLabel = UILabel()
     private let previousButton = UIButton(type: .system)
@@ -50,13 +46,10 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     init(owner: ReaderViewController) {
         self.owner = owner
         super.init()
-        displayTarget.coordinator = self
-        callout.onClose = { [weak self] in self?.select(key: nil, id: nil) }
     }
 
     deinit {
         timer?.invalidate()
-        displayLink?.invalidate()
         activeTask?.cancel()
     }
 
@@ -71,23 +64,16 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             }
             self.timer = timer
             RunLoop.main.add(timer, forMode: .common)
-            let link = CADisplayLink(target: displayTarget, selector: #selector(ReaderTranslationDisplayTarget.tick))
-            link.isPaused = true
-            link.add(to: .main, forMode: .common)
-            displayLink = link
             refresh()
         } else {
             stopWork()
             recentDialogue = []
             timer?.invalidate(); timer = nil
-            displayLink?.invalidate(); displayLink = nil
             overlays.forEach { $0.removeFromSuperview() }; overlays = []
             surfaces = []
             selected = nil
             original = false
             accessory.isHidden = true
-            callout.isHidden = true
-            connector.path = nil
         }
         owner?.translationModeChanged()
     }
@@ -189,7 +175,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             if !upcoming.isEmpty { prefetch(upcoming) }
         }
         updateStatus()
-        positionCallout()
     }
 
     /// Pages translated ahead in a single request; more pages per request means fewer requests
@@ -339,7 +324,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
                               selectedID: selected?.key == overlay.key ? selected?.id : nil, showAll: showAll, original: original)
         }
         updateStatus()
-        positionCallout()
     }
 
     private func updateStatus() {
@@ -349,7 +333,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         else if surfaces.isEmpty { statusLabel.text = "Translation on · swipe pages or scroll normally" }
         else if records.count < surfaces.count { statusLabel.text = "Translating page… · keep reading" }
         else if records.allSatisfy({ $0.regions.isEmpty }) { statusLabel.text = "No Japanese dialogue found" }
-        else { statusLabel.text = showAll ? "Tap a translation to expand" : "Tap marked text · swipe pages or scroll normally" }
+        else { statusLabel.text = showAll ? "Tap a translation to select it" : "Tap marked text · swipe pages or scroll normally" }
         // While a dialogue is selected, the toolbar only steps through dialogues or closes the selection.
         let stepping = selected != nil
         for button in [allButton, listButton, originalButton, appearanceButton, offButton] { button.isHidden = stepping }
@@ -414,7 +398,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
               let region = overlay.record?.regions.first(where: { $0.id == id }) else { return }
         let rect = overlay.rect(for: region)
         let visible = owner.view.bounds.inset(by: owner.view.safeAreaInsets)
-        guard !visible.contains(overlay.convert(rect, to: owner.view)) else { return }
+        // The webtoon reader centers each dialogue; paged readers keep the page still when it is already visible.
+        guard owner.reader is ReaderWebtoonViewController || !visible.contains(overlay.convert(rect, to: owner.view)) else { return }
         (owner.reader as? ReaderTranslationReader)?.revealTranslation(rect, in: imageView)
     }
 
@@ -520,15 +505,9 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             let width = accessory.widthAnchor.constraint(equalToConstant: 340)
             width.priority = .defaultHigh
             width.isActive = true
-            connector.strokeColor = UIColor.systemBlue.cgColor
-            connector.fillColor = UIColor.clear.cgColor
-            connector.lineWidth = 2
-            owner.view.layer.addSublayer(connector)
-            owner.view.addSubview(callout)
         }
         accessory.isHidden = false
         owner.view.bringSubviewToFront(accessory)
-        owner.view.bringSubviewToFront(callout)
         updateControlPosition()
     }
 
@@ -542,43 +521,4 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             : accessory.bottomAnchor.constraint(equalTo: owner.view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
         bottomConstraint?.isActive = true
     }
-
-    func positionCallout() {
-        displayLink?.isPaused = selected == nil || original
-        guard isEnabled, !original, let owner, let selected,
-              let overlay = overlays.first(where: { $0.key == selected.key }), overlay.superview != nil,
-              overlay.imageView?.image === overlay.expectedImage,
-              let region = overlay.record?.regions.first(where: { $0.id == selected.id }) else {
-            callout.isHidden = true; connector.path = nil; return
-        }
-        let available = owner.view.bounds.inset(by: owner.view.safeAreaInsets)
-        let maxY = accessory.isHidden ? available.maxY : accessory.frame.minY - 8
-        let viewport = CGRect(x: available.minX + 12, y: available.minY + 12,
-                              width: max(0, available.width - 24), height: max(0, maxY - available.minY - 24))
-        // Anchor to the drawn bubble so the tooltip never covers it.
-        let anchor = overlay.convert(overlay.displayedRect(for: region), to: owner.view).intersection(viewport)
-        guard viewport.width > 40, viewport.height > 80, !anchor.isNull, !anchor.isEmpty else {
-            callout.isHidden = true; connector.path = nil; return
-        }
-        let font = UserDefaults.standard.object(forKey: "Translation.overlayFontSize") as? Double ?? 14
-        callout.configure(number: region.id + 1, text: overlay.record?.translations[region.id] ?? "Translating…",
-                          fontSize: font, pageLabel: pageLabel(for: selected.key))
-        let width = min(300, viewport.width)
-        let height = callout.fittingHeight(width: width, maximum: min(240, viewport.height * 0.5))
-        let x = min(max(viewport.minX, anchor.midX - width / 2), viewport.maxX - width)
-        let below = anchor.maxY + 14
-        let y = below + height <= viewport.maxY ? below : max(viewport.minY, anchor.minY - height - 14)
-        callout.frame = CGRect(x: x, y: y, width: width, height: height)
-        callout.isHidden = false
-        let cardBelow = callout.frame.midY > anchor.midY
-        let start = CGPoint(x: anchor.midX, y: cardBelow ? anchor.maxY : anchor.minY)
-        let end = CGPoint(x: min(max(start.x, x + 16), x + width - 16), y: cardBelow ? y : y + height)
-        let path = UIBezierPath(); path.move(to: start); path.addLine(to: end)
-        connector.path = path.cgPath
-    }
-}
-
-private final class ReaderTranslationDisplayTarget: NSObject {
-    weak var coordinator: ReaderTranslationCoordinator?
-    @MainActor @objc func tick() { coordinator?.positionCallout() }
 }
