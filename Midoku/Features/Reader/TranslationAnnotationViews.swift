@@ -116,6 +116,8 @@ final class TranslationCalloutView: UIView {
         textView.textContainer.lineFragmentPadding = 0
         textView.textColor = .label
         closeButton.accessibilityLabel = "Close translation"
+        // The reader's translation toolbar closes the selected dialogue.
+        closeButton.isHidden = true
         closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
         addSubview(titleLabel)
         addSubview(closeButton)
@@ -141,7 +143,7 @@ final class TranslationCalloutView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        titleLabel.frame = CGRect(x: 12, y: 10, width: bounds.width - 56, height: 20)
+        titleLabel.frame = CGRect(x: 12, y: 10, width: bounds.width - (closeButton.isHidden ? 24 : 56), height: 20)
         closeButton.frame = CGRect(x: bounds.width - 38, y: 2, width: 36, height: 36)
         textView.frame = CGRect(x: 12, y: 38, width: bounds.width - 24, height: max(0, bounds.height - 50))
     }

@@ -43,6 +43,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private let retryButton = UIButton(type: .system)
     private let appearanceButton = UIButton(type: .system)
     private let offButton = UIButton(type: .system)
+    private let closeDialogueButton = UIButton(type: .system)
     private var bottomConstraint: NSLayoutConstraint?
     private var controlsVisible: Bool?
 
@@ -349,12 +350,17 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         else if records.count < surfaces.count { statusLabel.text = "Translating page… · keep reading" }
         else if records.allSatisfy({ $0.regions.isEmpty }) { statusLabel.text = "No Japanese dialogue found" }
         else { statusLabel.text = showAll ? "Tap a translation to expand" : "Tap marked text · swipe pages or scroll normally" }
-        retryButton.isHidden = error == nil
+        // While a dialogue is selected, the toolbar only steps through dialogues or closes the selection.
+        let stepping = selected != nil
+        for button in [allButton, listButton, originalButton, appearanceButton, offButton] { button.isHidden = stepping }
+        retryButton.isHidden = stepping || error == nil
+        closeDialogueButton.isHidden = !stepping
         listButton.isEnabled = !overlays.allSatisfy { $0.record?.regions.isEmpty != false }
         let sequence = bubbleSequence()
         let position = selected.flatMap { selected in sequence.firstIndex { $0.key == selected.key && $0.id == selected.id } }
         previousButton.isEnabled = !sequence.isEmpty && position != 0
         nextButton.isEnabled = !sequence.isEmpty && position != sequence.count - 1
+        if error == nil, let position { statusLabel.text = "Dialogue \(position + 1) of \(sequence.count)" }
         allButton.setImage(UIImage(systemName: showAll ? "hand.tap" : "text.bubble"), for: .normal)
         allButton.accessibilityLabel = showAll ? "Use tap translation" : "Show all translations"
         updateControlPosition()
@@ -384,6 +390,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     @objc private func selectPrevious() { step(by: -1) }
+    @objc private func closeDialogue() { select(key: nil, id: nil) }
     @objc private func selectNext() { step(by: 1) }
 
     /// Moves the selection to the neighboring bubble. With nothing selected, next starts at the
@@ -466,10 +473,12 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         if accessory.superview == nil {
             accessory.layer.cornerRadius = 18
             accessory.clipsToBounds = true
-            let buttons = [previousButton, nextButton, allButton, listButton, originalButton, appearanceButton, retryButton, offButton]
-            let symbols = ["chevron.left", "chevron.right", "text.bubble", "list.number", "eye", "textformat.size", "arrow.clockwise", "xmark"]
+            let buttons = [previousButton, nextButton, allButton, listButton, originalButton, appearanceButton, retryButton, offButton,
+                           closeDialogueButton]
+            let symbols = ["chevron.left", "chevron.right", "text.bubble", "list.number", "eye", "textformat.size", "arrow.clockwise", "xmark",
+                           "xmark.circle"]
             let labels = ["Previous dialogue", "Next dialogue", "Show all translations", "Dialogue list", "Hold to show original",
-                          "Translation appearance", "Retry translation", "Disable translation"]
+                          "Translation appearance", "Retry translation", "Disable translation", "Close dialogue"]
             for (index, button) in buttons.enumerated() {
                 button.setImage(UIImage(systemName: symbols[index]), for: .normal)
                 button.accessibilityLabel = labels[index]
@@ -484,6 +493,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             appearanceButton.addTarget(self, action: #selector(openAppearance), for: .touchUpInside)
             retryButton.addTarget(self, action: #selector(retry), for: .touchUpInside)
             offButton.addTarget(self, action: #selector(disable), for: .touchUpInside)
+            closeDialogueButton.addTarget(self, action: #selector(closeDialogue), for: .touchUpInside)
+            closeDialogueButton.isHidden = true
             let row = UIStackView(arrangedSubviews: buttons)
             row.distribution = .fillEqually
             statusLabel.font = .preferredFont(forTextStyle: .caption2)
