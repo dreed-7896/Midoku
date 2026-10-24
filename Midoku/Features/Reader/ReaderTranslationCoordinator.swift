@@ -172,11 +172,17 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
                 start(needed.compactMap { surface, key in surface.imageView.image.map { (key, $0) } })
             }
         } else if activeToken == nil, !surfaces.isEmpty {
-            let upcoming = reader.nextTranslationPages(limit: TranslationSettings.pagesPerRequest)
+            // Wait until the reader is halfway through the pages already translated ahead, then send the
+            // next full batch, so pages are not sent one at a time as each enters the look-ahead.
+            let limit = TranslationSettings.pagesPerRequest
+            let upcoming = reader.nextTranslationPages(limit: limit * 2)
                 .filter { !$0.isTextPage }
                 .map { (page: $0, locator: locator(for: $0)) }
-                .filter { prefetched[$0.locator].flatMap { record(for: $0) } == nil && failures[$0.locator] == nil }
-            if !upcoming.isEmpty { prefetch(upcoming) }
+            let translated = { [self] (locator: String) in prefetched[locator].flatMap { record(for: $0) } != nil }
+            if let first = upcoming.firstIndex(where: { !translated($0.locator) }), first < max(1, (limit + 1) / 2) {
+                let batch = upcoming[first...].filter { !translated($0.locator) && failures[$0.locator] == nil }.prefix(limit)
+                if !batch.isEmpty { prefetch(Array(batch)) }
+            }
         }
         updateStatus()
     }
