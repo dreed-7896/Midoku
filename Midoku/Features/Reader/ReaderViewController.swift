@@ -260,17 +260,6 @@ class ReaderViewController: BaseObservingViewController {
         controlsView.webButton.addTarget(self, action: #selector(openWebView), for: .touchUpInside)
         controlsView.autoScrollButton.addTarget(self, action: #selector(toggleAutoScroll), for: .touchUpInside)
         controlsView.translationButton.addTarget(self, action: #selector(toggleTranslation), for: .touchUpInside)
-        // Holding Translate offers translating only chosen pages, and the translation options.
-        controlsView.translationButton.menu = UIMenu(children: [
-            UIAction(title: "Translate This Page", image: UIImage(systemName: "doc.text")) { [weak self] _ in
-                self?.translationCoordinator.translateCurrentPage()
-            },
-            UIAction(title: "Choose Pages & Options…", image: UIImage(systemName: "gearshape")) { [weak self] _ in
-                self?.translationCoordinator.openOptions()
-            }
-        ])
-        controlsView.translationButton.showsMenuAsPrimaryAction = false
-        controlsView.translationButton.accessibilityHint = "Hold to translate only this page or choose pages"
         loadNavbarTitle()
 
         toolbarView.sliderView.addTarget(self, action: #selector(sliderMoved(_:)), for: .valueChanged)
@@ -1894,7 +1883,7 @@ extension ReaderViewController {
         configureBarToggleTapGestures()
     }
 
-    /// The page being read, for translating it on its own.
+    /// The page being read, where translating the default number of pages starts.
     var currentTranslationPage: Page? {
         pages.indices.contains(currentPage - 1) ? pages[currentPage - 1] : nil
     }

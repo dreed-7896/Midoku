@@ -90,76 +90,44 @@ struct ReaderTranslationListView: View {
     }
 }
 
-/// Translation options shown from the reader: which pages to translate, how, and how translations look.
+/// Translation options shown from the reader: pages to translate, and how translations look.
 struct ReaderTranslationOptionsView: View {
     let pageCount: Int
-    let translateCurrentPage: () -> Void
-    let translatePages: (ClosedRange<Int>) -> Void
-    let automaticChanged: () -> Void
-    @AppStorage(TranslationSettings.automaticKey) private var automatic = true
+    let currentPage: Int
+    let translatePages: ([Int]) -> Void
+    let translateNextPages: () -> Void
     @AppStorage(TranslationSettings.pagesPerRequestKey) private var pagesPerRequest = TranslationSettings.defaultPagesPerRequest
     @AppStorage("Translation.overlayFontSize") private var fontSize = 14.0
     @AppStorage("Translation.overlayOpacity") private var opacity = 0.94
-    @State private var from: Int
-    @State private var to: Int
+    @State private var input = ""
     @Environment(\.dismiss) private var dismiss
 
-    init(pageCount: Int, currentPage: Int, translateCurrentPage: @escaping () -> Void,
-         translatePages: @escaping (ClosedRange<Int>) -> Void, automaticChanged: @escaping () -> Void) {
-        self.pageCount = max(1, pageCount)
-        self.translateCurrentPage = translateCurrentPage
-        self.translatePages = translatePages
-        self.automaticChanged = automaticChanged
-        let start = min(max(1, currentPage), self.pageCount)
-        _from = State(initialValue: start)
-        _to = State(initialValue: min(self.pageCount, start + 9))
-    }
+    private var trimmed: String { input.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var pages: [Int]? { Self.pages(from: trimmed, pageCount: pageCount) }
+    private var nextCount: Int { max(0, min(pagesPerRequest, pageCount - currentPage + 1)) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Button {
-                        translateCurrentPage()
-                        dismiss()
-                    } label: {
-                        Label("Translate This Page", systemImage: "doc.text")
+                    TextField("Next \(nextCount) pages", text: $input)
+                        .keyboardType(.numbersAndPunctuation)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.go)
+                        .onSubmit(translate)
+                    Button(action: translate) {
+                        Label(buttonTitle, systemImage: "translate")
                     }
-                }
-
-                Section {
-                    Picker("From", selection: $from) {
-                        ForEach(1...pageCount, id: \.self) { Text("Page \($0)").tag($0) }
-                    }
-                    Picker("To", selection: $to) {
-                        ForEach(1...pageCount, id: \.self) { Text("Page \($0)").tag($0) }
-                    }
-                    Button {
-                        translatePages(from...to)
-                        dismiss()
-                    } label: {
-                        Label(from == to ? "Translate Page \(from)" : "Translate Pages \(from)–\(to)", systemImage: "doc.on.doc")
-                    }
+                    .disabled(trimmed.isEmpty ? nextCount == 0 : pages?.isEmpty != false)
                 } header: {
-                    Text("Page range")
+                    Text("Pages")
                 } footer: {
-                    Text("Pages are sent \(pagesPerRequest == 1 ? "one page" : "\(pagesPerRequest) pages") at a time. Pages already translated are skipped.")
-                }
-                .onChange(of: from) { if to < $0 { to = $0 } }
-                .onChange(of: to) { if from > $0 { from = $0 } }
-
-                Section {
-                    Toggle("Translate as I read", isOn: $automatic)
-                        .onChange(of: automatic) { _ in automaticChanged() }
-                    Picker("Pages at a time", selection: $pagesPerRequest) {
-                        ForEach(TranslationSettings.pagesPerRequestOptions, id: \.self) { count in
-                            Text(count == 1 ? "1 page" : "\(count) pages").tag(count)
-                        }
+                    if !trimmed.isEmpty, pages == nil {
+                        Text("Enter page numbers between 1 and \(pageCount), like 1-10, 12, 15-30, 31-").foregroundStyle(.red)
+                    } else {
+                        Text("For example 1-10, 12, 15-30, 31- (31 to the last page). Leave empty to translate \(nextCount) pages from page \(currentPage); change the default in Settings › Translation. This chapter has \(pageCount) pages. Pages already translated are skipped.")
                     }
-                } footer: {
-                    Text(automatic
-                         ? "The page on screen and the pages ahead are translated while you read."
-                         : "Only pages you choose are translated. Saved translations still show.")
                 }
 
                 Section("Appearance") {
@@ -173,5 +141,46 @@ struct ReaderTranslationOptionsView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var buttonTitle: String {
+        guard !trimmed.isEmpty else { return nextCount == 1 ? "Translate Page \(currentPage)" : "Translate Next \(nextCount) Pages" }
+        guard let pages, !pages.isEmpty else { return "Translate Pages" }
+        return pages.count == 1 ? "Translate Page \(pages[0])" : "Translate \(pages.count) Pages"
+    }
+
+    private func translate() {
+        if trimmed.isEmpty {
+            guard nextCount > 0 else { return }
+            translateNextPages()
+        } else {
+            guard let pages, !pages.isEmpty else { return }
+            translatePages(pages)
+        }
+        dismiss()
+    }
+
+    /// Page numbers from a list like "1-10, 12, 15-30, 31-", where "31-" runs to the last page and
+    /// "-5" starts at the first. Returns nil when a part is not a page or range within the chapter.
+    static func pages(from text: String, pageCount: Int) -> [Int]? {
+        var pages: [Int] = []
+        var seen = Set<Int>()
+        for part in text.replacingOccurrences(of: "–", with: "-").split(separator: ",") {
+            let part = part.trimmingCharacters(in: .whitespaces)
+            guard !part.isEmpty else { continue }
+            let bounds = part.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            let lower: Int?
+            let upper: Int?
+            if bounds.count == 1 {
+                lower = Int(bounds[0]); upper = lower
+            } else {
+                lower = bounds[0].isEmpty ? 1 : Int(bounds[0])
+                upper = bounds[1].isEmpty ? pageCount : Int(bounds[1])
+            }
+            guard let lower, let upper, lower >= 1, upper <= pageCount, lower <= upper else { return nil }
+            for page in lower...upper where seen.insert(page).inserted { pages.append(page) }
+        }
+        return pages.sorted()
     }
 }

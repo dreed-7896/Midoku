@@ -18,12 +18,9 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private var cacheOrder: [String] = []
     private var failures: [String: String] = [:]
     private var prefetched: [String: String] = [:]
-    /// Pages asked for with Translate This Page or a page range, in reading order, until translated.
+    /// Pages the reader asked to translate (the pages in view, or pages chosen in the options), in
+    /// reading order, until translated. Nothing else is sent, so no request is made without asking.
     private var requested: [(page: Page, locator: String)] = []
-    /// Set when translation was started for chosen pages only, so nothing else is sent this session.
-    private var choosesPages = false
-    /// Only requested pages are translated; the pages on screen and ahead are not sent automatically.
-    private var manual: Bool { choosesPages || !TranslationSettings.translatesAutomatically }
     private let fingerprints = NSMapTable<UIImage, NSString>(keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private var activeTask: Task<Void, Never>?
     private var activeToken: UUID?
@@ -35,17 +32,15 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private var recentDialogue: [(source: String, translation: String)] = []
     private var selected: (key: String, id: Int)?
     private var showAll = false
-    private var original = false
     private let accessory = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
     private let statusLabel = UILabel()
     private let previousButton = UIButton(type: .system)
     private let nextButton = UIButton(type: .system)
     private let allButton = UIButton(type: .system)
     private let listButton = UIButton(type: .system)
-    private let originalButton = UIButton(type: .system)
+    private let translateButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
-    private let appearanceButton = UIButton(type: .system)
-    private let offButton = UIButton(type: .system)
+    private let optionsButton = UIButton(type: .system)
     private let closeDialogueButton = UIButton(type: .system)
     private var bottomConstraint: NSLayoutConstraint?
     private var controlsVisible: Bool?
@@ -60,11 +55,10 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         activeTask?.cancel()
     }
 
-    func setEnabled(_ enabled: Bool, choosingPages: Bool = false) {
+    func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
         guard !enabled || owner?.reader is ReaderTranslationReader else { return }
         isEnabled = enabled
-        choosesPages = enabled && choosingPages
         requested = []
         if enabled {
             installUI()
@@ -81,7 +75,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             overlays.forEach { $0.removeFromSuperview() }; overlays = []
             surfaces = []
             selected = nil
-            original = false
             accessory.isHidden = true
         }
         owner?.translationModeChanged()
@@ -89,22 +82,24 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     func stop() { setEnabled(false) }
 
-    /// Translates only the page being read. Turns translation on for chosen pages if it is off.
-    func translateCurrentPage() {
-        guard let page = owner?.currentTranslationPage else { return }
-        request([page])
+    /// Translates the pages in view, and nothing else.
+    @objc private func translateVisible() {
+        request(surfaces.map { $0.0.page })
     }
 
     /// Translates pages of the current chapter, numbered from 1, in batches of the pages-at-a-time setting.
-    func translatePages(_ range: ClosedRange<Int>) {
-        guard let pages = owner?.pages, !pages.isEmpty else { return }
-        let lower = min(max(1, range.lowerBound), pages.count)
-        let upper = min(max(lower, range.upperBound), pages.count)
-        request(Array(pages[(lower - 1)...(upper - 1)]))
+    func translatePages(_ numbers: [Int]) {
+        guard let pages = owner?.pages else { return }
+        request(numbers.filter { pages.indices.contains($0 - 1) }.map { pages[$0 - 1] })
+    }
+
+    /// Translates the default number of pages (the pages-at-a-time setting), starting with the page being read.
+    func translateNextPages() {
+        guard let owner, let current = owner.currentTranslationPage.flatMap({ owner.pages.firstIndex(of: $0) }) else { return }
+        translatePages(Array((current + 1)...(current + TranslationSettings.pagesPerRequest)))
     }
 
     private func request(_ pages: [Page]) {
-        if !isEnabled { setEnabled(true, choosingPages: true) }
         guard isEnabled else { return }
         let known = Set(requested.map(\.locator))
         let new = pages.filter { $0.type == .imagePage && !$0.isTextPage }.map { (page: $0, locator: locator(for: $0)) }
@@ -120,10 +115,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         let view = ReaderTranslationOptionsView(
             pageCount: owner.pages.count,
             currentPage: owner.currentTranslationPage.flatMap { owner.pages.firstIndex(of: $0) }.map { $0 + 1 } ?? 1,
-            translateCurrentPage: { [weak self] in self?.translateCurrentPage() },
             translatePages: { [weak self] in self?.translatePages($0) },
-            // Turning automatic translation on or off applies to this session too.
-            automaticChanged: { [weak self] in self?.choosesPages = false; self?.refresh() }
+            translateNextPages: { [weak self] in self?.translateNextPages() }
         ).onDisappear { [weak self] in
             (self?.owner?.reader as? ReaderWebtoonViewController)?.resumeAutoScroll()
         }
@@ -208,46 +201,37 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             overlay.key = key
             overlay.onSelect = { [weak self] id in self?.select(key: key, id: id) }
             surface.imageView.bringSubviewToFront(overlay)
-            // Remember which page this translation belongs to, so requested and upcoming pages skip it.
+            // Remember which page this translation belongs to, so requested pages skip it.
             if record(for: key) != nil { prefetched[locator(for: surface.page)] = key }
             overlay.configure(record: record(for: key) ?? pendingRecords[key],
-                              selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll, original: original)
+                              selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll)
         }
         requested.removeAll { isTranslated($0.locator) }
         let requestedLocators = Set(requested.map(\.locator))
         var seen = Set<String>()
         let needed = surfaces.filter { surface, key in
             record(for: key) == nil && failures[key] == nil && seen.insert(key).inserted
-                && (!manual || requestedLocators.contains(locator(for: surface.page)))
+                && requestedLocators.contains(locator(for: surface.page))
         }
         if !needed.isEmpty {
-            // New visible pages take priority over an off-screen request or speculative prefetch.
+            // Requested pages in view take priority over requested pages off screen.
             if activeToken != nil, !needed.contains(where: { activeKeys.contains($0.1) }),
                !surfaces.contains(where: { activeKeys.contains($0.1) }) { stopWork() }
-            // A large prefetch batch can take a while to prepare. If the reader reaches one of its pages
-            // before the batch is sent, translate the visible page now and prefetch again afterwards.
+            // A large batch can take a while to prepare. If the reader reaches one of its pages before
+            // the batch is sent, translate the visible page now and continue the batch afterwards.
             if activeToken != nil, activeIsPrefetch, activeJob.isEmpty { stopWork() }
             if activeToken == nil {
                 // Every visible page (a spread, or several webtoon strips) goes out in one request.
                 start(needed.compactMap { surface, key in surface.imageView.image.map { (key, $0) } })
             }
         } else if activeToken == nil, !surfaces.isEmpty,
-                  case let batch = requested.filter({ failures[$0.locator] == nil }).prefix(TranslationSettings.pagesPerRequest),
+                  // A page in view that just failed waits for Retry instead of being sent again.
+                  case let failedInView = Set(surfaces.filter { failures[$0.1] != nil }.map { locator(for: $0.0.page) }),
+                  case let batch = requested.filter({ failures[$0.locator] == nil && !failedInView.contains($0.locator) })
+                      .prefix(TranslationSettings.pagesPerRequest),
                   !batch.isEmpty {
-            // Chosen pages go first, in batches.
+            // Requested pages off screen, in batches.
             prefetch(Array(batch))
-        } else if activeToken == nil, !surfaces.isEmpty, !manual {
-            // Wait until the reader is halfway through the pages already translated ahead, then send the
-            // next full batch, so pages are not sent one at a time as each enters the look-ahead.
-            let limit = TranslationSettings.pagesPerRequest
-            let upcoming = reader.nextTranslationPages(limit: limit * 2)
-                .filter { !$0.isTextPage }
-                .map { (page: $0, locator: locator(for: $0)) }
-            let translated = { [self] (locator: String) in prefetched[locator].flatMap { record(for: $0) } != nil }
-            if let first = upcoming.firstIndex(where: { !translated($0.locator) }), first < max(1, (limit + 1) / 2) {
-                let batch = upcoming[first...].filter { !translated($0.locator) && failures[$0.locator] == nil }.prefix(limit)
-                if !batch.isEmpty { prefetch(Array(batch)) }
-            }
         }
         updateStatus()
     }
@@ -395,7 +379,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private func render() {
         for overlay in overlays {
             overlay.configure(record: record(for: overlay.key) ?? pendingRecords[overlay.key],
-                              selectedID: selected?.key == overlay.key ? selected?.id : nil, showAll: showAll, original: original)
+                              selectedID: selected?.key == overlay.key ? selected?.id : nil, showAll: showAll)
         }
         updateStatus()
     }
@@ -411,13 +395,14 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             statusLabel.text = requested.count == 1 ? "Translating 1 page… · keep reading" : "Translating \(requested.count) pages… · keep reading"
         }
         else if records.count < surfaces.count {
-            statusLabel.text = manual ? "Not translated · hold Translate for this page or a range" : "Translating page… · keep reading"
+            statusLabel.text = "Tap the translate button to translate the pages in view"
         }
         else if records.allSatisfy({ $0.regions.isEmpty }) { statusLabel.text = "No Japanese dialogue found" }
         else { statusLabel.text = showAll ? "Tap a translation to select it" : "Tap marked text · swipe pages or scroll normally" }
         // While a dialogue is selected, the toolbar only steps through dialogues or closes the selection.
         let stepping = selected != nil
-        for button in [allButton, listButton, originalButton, appearanceButton, offButton] { button.isHidden = stepping }
+        for button in [allButton, listButton, translateButton, optionsButton] { button.isHidden = stepping }
+        translateButton.isEnabled = surfaces.contains { record(for: $0.1) == nil }
         retryButton.isHidden = stepping || error == nil
         closeDialogueButton.isHidden = !stepping
         listButton.isEnabled = !overlays.allSatisfy { $0.record?.regions.isEmpty != false }
@@ -437,7 +422,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     func handleTap(at point: CGPoint) -> Bool {
-        guard isEnabled, !original, let owner else { return false }
+        guard isEnabled, let owner else { return false }
         for overlay in overlays {
             let local = owner.view.convert(point, to: overlay)
             if let region = overlay.region(at: local) { select(key: overlay.key, id: region.id); return true }
@@ -485,9 +470,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     @objc private func toggleAll() { showAll.toggle(); render() }
-    @objc private func showOriginal() { original = true; render() }
-    @objc private func hideOriginal() { original = false; render() }
-    @objc private func disable() { stop() }
     @objc private func retry() { failures.removeAll(); refresh() }
 
     private func pageLabel(for key: String) -> String {
@@ -517,7 +499,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         owner?.present(UIHostingController(rootView: view), animated: true)
     }
 
-    @objc private func openAppearance() { openOptions() }
+    @objc private func showOptions() { openOptions() }
 
     private func installUI() {
         guard let owner else { return }
@@ -533,12 +515,13 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         if accessory.superview == nil {
             accessory.layer.cornerRadius = 18
             accessory.clipsToBounds = true
-            let buttons = [previousButton, nextButton, allButton, listButton, originalButton, appearanceButton, retryButton, offButton,
-                           closeDialogueButton]
-            let symbols = ["chevron.left", "chevron.right", "text.bubble", "list.number", "eye", "gearshape", "arrow.clockwise", "xmark",
-                           "xmark.circle"]
-            let labels = ["Previous dialogue", "Next dialogue", "Show all translations", "Dialogue list", "Hold to show original",
-                          "Translation options", "Retry translation", "Disable translation", "Close dialogue"]
+            // Stepping through dialogue sits on the right.
+            let buttons = [allButton, listButton, translateButton, optionsButton, retryButton, closeDialogueButton,
+                           previousButton, nextButton]
+            let symbols = ["text.bubble", "list.number", "translate", "gearshape", "arrow.clockwise", "xmark.circle",
+                           "chevron.left", "chevron.right"]
+            let labels = ["Show all translations", "Dialogue list", "Translate pages in view", "Translation options",
+                          "Retry translation", "Close dialogue", "Previous dialogue", "Next dialogue"]
             for (index, button) in buttons.enumerated() {
                 button.setImage(UIImage(systemName: symbols[index]), for: .normal)
                 button.accessibilityLabel = labels[index]
@@ -548,11 +531,9 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             nextButton.addTarget(self, action: #selector(selectNext), for: .touchUpInside)
             allButton.addTarget(self, action: #selector(toggleAll), for: .touchUpInside)
             listButton.addTarget(self, action: #selector(openList), for: .touchUpInside)
-            originalButton.addTarget(self, action: #selector(showOriginal), for: .touchDown)
-            originalButton.addTarget(self, action: #selector(hideOriginal), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
-            appearanceButton.addTarget(self, action: #selector(openAppearance), for: .touchUpInside)
+            translateButton.addTarget(self, action: #selector(translateVisible), for: .touchUpInside)
+            optionsButton.addTarget(self, action: #selector(showOptions), for: .touchUpInside)
             retryButton.addTarget(self, action: #selector(retry), for: .touchUpInside)
-            offButton.addTarget(self, action: #selector(disable), for: .touchUpInside)
             closeDialogueButton.addTarget(self, action: #selector(closeDialogue), for: .touchUpInside)
             closeDialogueButton.isHidden = true
             let row = UIStackView(arrangedSubviews: buttons)

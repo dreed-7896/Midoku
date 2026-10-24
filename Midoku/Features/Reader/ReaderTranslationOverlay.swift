@@ -8,8 +8,6 @@ struct ReaderTranslationSurface {
 @MainActor
 protocol ReaderTranslationReader: ReaderReaderDelegate {
     func translationSurfaces() -> [ReaderTranslationSurface]
-    /// Upcoming pages after the visible ones, in reading order.
-    func nextTranslationPages(limit: Int) -> [Page]
     func revealTranslation(_ rect: CGRect, in imageView: UIImageView)
 }
 
@@ -96,10 +94,10 @@ final class ReaderTranslationImageOverlay: UIView {
         return region.rect(in: area.size).offsetBy(dx: area.minX, dy: area.minY)
     }
 
-    func configure(record: ReaderTranslationRecord?, selectedID: Int?, showAll: Bool, original: Bool) {
+    func configure(record: ReaderTranslationRecord?, selectedID: Int?, showAll: Bool) {
         let font = UserDefaults.standard.object(forKey: "Translation.overlayFontSize") as? Double ?? 14
         let background = UserDefaults.standard.object(forKey: "Translation.overlayOpacity") as? Double ?? 0.94
-        isHidden = original || imageView?.image !== expectedImage
+        isHidden = imageView?.image !== expectedImage
         let changed = self.record !== record || self.selectedID != selectedID || self.showAll != showAll
             || fontSize != font || opacity != background
         guard changed else { return }

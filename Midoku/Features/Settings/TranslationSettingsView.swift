@@ -6,7 +6,6 @@ struct TranslationSettingsView: View {
     @AppStorage(TranslationSettings.modelKey) private var model = TranslationSettings.defaultModel
     @AppStorage(TranslationSettings.mistralModelKey) private var mistralModel = TranslationSettings.defaultMistralModel
     @AppStorage(TranslationSettings.pagesPerRequestKey) private var pagesPerRequest = TranslationSettings.defaultPagesPerRequest
-    @AppStorage(TranslationSettings.automaticKey) private var automatic = true
     @State private var apiKey = TranslationSettings.apiKey
 
     private var selected: TranslationSettings.Provider { .init(rawValue: provider) ?? .builtIn }
@@ -24,16 +23,13 @@ struct TranslationSettingsView: View {
             }
 
             Section {
-                Toggle("Translate as I read", isOn: $automatic)
                 Picker("Pages at a time", selection: $pagesPerRequest) {
                     ForEach(TranslationSettings.pagesPerRequestOptions, id: \.self) { count in
                         Text(count == 1 ? "1 page" : "\(count) pages").tag(count)
                     }
                 }
             } footer: {
-                Text(automatic
-                     ? "The page on screen and upcoming pages are translated while you read, several pages in one request. More pages means fewer requests and better context across pages, but each batch takes longer to finish."
-                     : "Only pages you choose are translated: hold Translate in the reader to translate the current page or a range of pages. Saved translations still show.")
+                Text("Pages are only translated when you ask: the translate button in the reader translates the pages in view, and its options translate pages you enter. Without entered pages, this many pages are translated from the page you are reading. Pages are sent together in one request for better context.")
             }
 
             switch selected {

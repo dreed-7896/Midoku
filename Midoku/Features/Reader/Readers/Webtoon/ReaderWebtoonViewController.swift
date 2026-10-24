@@ -1177,14 +1177,6 @@ extension ReaderWebtoonViewController: ReaderTranslationReader {
         }
     }
 
-    func nextTranslationPages(limit: Int) -> [Page] {
-        guard let path = collectionNode.view.indexPathsForVisibleItems.max(), pages.indices.contains(path.section) else { return [] }
-        // The rest of this chapter, then the start of the next one.
-        let upcoming = pages[path.section].dropFirst(path.item + 1)
-            + (pages.indices.contains(path.section + 1) ? pages[path.section + 1] : [])
-        return Array(upcoming.filter { $0.type == .imagePage && !$0.isTextPage }.prefix(limit))
-    }
-
     /// Scrolls so the dialogue sits in the middle of the screen, within the scrollable range.
     func revealTranslation(_ rect: CGRect, in imageView: UIImageView) {
         let target = imageView.convert(rect, to: scrollView)
