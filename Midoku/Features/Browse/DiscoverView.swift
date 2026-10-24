@@ -28,6 +28,8 @@ final class MCDiscoverModel: ObservableObject {
     }
     func load(_ feed: MCDiscoverFeed, force: Bool = false) async {
         guard !loading.contains(feed.id), force || entries[feed.id] == nil else { return }
+        // Sources load after launch; the shelf retries when its source appears.
+        guard SourceStore.shared.hasLoaded else { return }
         guard let source = SourceStore.shared.source(for: feed.sourceKey), !SourceStore.shared.isDisabled(sourceKey: feed.sourceKey) else {
             errors[feed.id] = "This extension is unavailable. Open Extensions to enable or install it."
             return
@@ -36,7 +38,7 @@ final class MCDiscoverModel: ObservableObject {
         defer { loading.remove(feed.id) }
         do {
             let listing = try await source.getListings().first { $0.id == feed.listingID }
-            guard let listing else { errors[feed.id] = "This tab is no longer available. Choose another tab in Customize."; return }
+            guard let listing else { errors[feed.id] = "This tab is no longer available. Remove this shelf and add another tab."; return }
             let result = try await source.getMangaList(listing: listing, page: 1)
             try Task.checkCancellation()
             var seen = Set<String>()
@@ -44,7 +46,17 @@ final class MCDiscoverModel: ObservableObject {
         } catch is CancellationError { }
         catch { errors[feed.id] = error.midokuDescription() }
     }
-    func reload() async {
+    func remove(_ feed: MCDiscoverFeed) {
+        feeds.removeAll { $0.id == feed.id }
+        entries[feed.id] = nil; errors[feed.id] = nil
+        save()
+    }
+    func move(_ feed: MCDiscoverFeed, by offset: Int) {
+        guard let index = feeds.firstIndex(where: { $0.id == feed.id }), feeds.indices.contains(index + offset) else { return }
+        feeds.swapAt(index, index + offset)
+        save()
+    }
+        func reload() async {
         // Each shelf keeps its covers and previous results while refreshing.
         for feed in feeds { await load(feed, force: true) }
     }
@@ -68,8 +80,10 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
                 self.navigationController?.pushViewController(SourceListingViewController(source: source, listing: listing), animated: true)
             }
         }
-        rootView.openCustomize = { [weak self] in self?.showCustomize() }
-        rootView.openExtensions = { [weak self] in self?.showExtensions() }
+        rootView.openShelves = { [weak self] in self?.showShelves() }
+        rootView.openExtensions = { [weak self] in
+            self?.navigationController?.pushViewController(BrowseViewController(), animated: true)
+        }
         rootView.openSource = { [weak self] source in
             let controller: UIViewController = if let legacySource = source.legacySource {
                 SourceViewController(source: legacySource)
@@ -80,39 +94,29 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
         }
         title = "Discover"
         navigationItem.largeTitleDisplayMode = .always
-        let extensions = UIBarButtonItem(image: UIImage(systemName: "puzzlepiece.extension"), primaryAction: UIAction { [weak self] _ in
-            self?.showExtensions()
-        })
-        extensions.accessibilityLabel = "Extensions"
-        let customize = UIBarButtonItem(image: UIImage(systemName: "slider.horizontal.3"), primaryAction: UIAction { [weak self] _ in
-            self?.showCustomize()
-        })
-        customize.accessibilityLabel = "Customize Discover"
-        navigationItem.rightBarButtonItems = [extensions, customize]
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private func showExtensions() {
-        navigationController?.pushViewController(BrowseViewController(), animated: true)
-    }
-
-    private func showCustomize() {
+    private func showShelves() {
         guard presentedViewController == nil else { return }
         present(UIHostingController(rootView: MCDiscoverConfiguration(model: model).midokuAccent()), animated: true)
     }
 }
 
+/// Discover has one entry point per action: the extension strip opens sources and
+/// Manage, each shelf carries its own menu, and the final tile adds a shelf.
 struct MCDiscoverView: View {
     @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
+    @State private var extensionUpdates = 0
     var openManga: (AidokuRunner.Manga) -> Void = { _ in }
     var openListing: (MCDiscoverFeed) -> Void = { _ in }
-    var openCustomize: () -> Void = {}
+    var openShelves: () -> Void = {}
     var openExtensions: () -> Void = {}
     var openSource: (AidokuRunner.Source) -> Void = { _ in }
 
     /// Enabled extensions with pinned ones first, so the most used are one tap away.
-    private var quickSources: [AidokuRunner.Source] {
+    private var installedSources: [AidokuRunner.Source] {
         let pinned = AppSettings.browse.pinnedList.get()
         return sources.sourcesByKey.values
             .filter { !sources.isDisabled(sourceKey: $0.key) }
@@ -127,159 +131,244 @@ struct MCDiscoverView: View {
     }
 
     var body: some View {
+        let installed = installedSources
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 30) {
-                quickActions.padding(.horizontal).padding(.top, 8)
-                if !quickSources.isEmpty { extensionStrip }
-
-                if model.feeds.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Image(systemName: "rectangle.stack.badge.plus").font(.system(size: 38)).foregroundStyle(Color.accentColor)
-                        Text("Build your discovery shelves").font(.title2.bold())
-                        Text("Pick an extension and a tab, like Latest or Popular. Add more to explore them all here.").foregroundStyle(.secondary)
-                        Button("Choose extensions and tabs", action: openCustomize).buttonStyle(.borderedProminent)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
-                        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal)
+            LazyVStack(alignment: .leading, spacing: 32) {
+                if !installed.isEmpty {
+                    extensionStrip(installed)
+                } else if sources.hasLoaded {
+                    welcomeCard
                 }
-                ForEach(Array(model.feeds.enumerated()), id: \.element.id) { index, feed in
-                    shelf(feed, featured: index == 0, ranked: index % 2 == 1)
-                        .task(id: "\(feed.id)-\(sources.source(for: feed.sourceKey) != nil)") { await model.load(feed) }
+                // Shelves stay visible while sources load at launch; they fill in once sources arrive.
+                if !installed.isEmpty || !sources.hasLoaded {
+                    if !model.feeds.isEmpty {
+                        ForEach(Array(model.feeds.enumerated()), id: \.element.id) { index, feed in
+                            shelf(feed, featured: index == 0, index: index)
+                                .task(id: "\(feed.id)-\(sources.hasLoaded)-\(sources.source(for: feed.sourceKey) != nil)") { await model.load(feed) }
+                        }
+                        addShelfTile
+                    } else if !installed.isEmpty {
+                        firstShelfCard
+                    }
                 }
-            }.padding(.bottom, 32)
+            }
+            .padding(.top, 4)
+            .padding(.bottom, 32)
         }
         .background(Color(uiColor: .systemBackground))
         .refreshable { await model.reload() }
+        .onAppear { extensionUpdates = AppSettings.browse.updateCount.get() }
         .midokuAccent()
     }
 
-    private var quickActions: some View {
-        let installed = quickSources.count
-        let updates = AppSettings.browse.updateCount.get()
-        return HStack(spacing: 12) {
-            quickAction(
-                "Extensions",
-                detail: updates > 0 ? "\(updates) update\(updates == 1 ? "" : "s")" : installed == 0 ? "Install sources" : "\(installed) installed",
-                symbol: "puzzlepiece.extension.fill",
-                badge: updates > 0,
-                action: openExtensions
-            )
-            quickAction("Shelves", detail: model.feeds.isEmpty ? "Set up Discover" : "\(model.feeds.count) on Discover", symbol: "rectangle.stack.fill", badge: false, action: openCustomize)
-        }
-    }
+    // MARK: Extensions
 
-    private func quickAction(_ title: String, detail: String, symbol: String, badge: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol).font(.title3).foregroundStyle(Color.accentColor)
-                    .frame(width: 40, height: 40).background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(alignment: .topTrailing) {
-                        if badge { Circle().fill(.red).frame(width: 10, height: 10).offset(x: 3, y: -3) }
-                    }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(12).frame(maxWidth: .infinity)
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
-            .contentShape(RoundedRectangle(cornerRadius: 18))
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(detail)")
-    }
-
-    private var extensionStrip: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Browse an extension").font(.headline)
+    private func extensionStrip(_ installed: [AidokuRunner.Source]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Extensions").font(.title3.bold())
                 Spacer()
-                Button("See all", action: openExtensions).font(.subheadline.weight(.medium))
-            }.padding(.horizontal)
+                Button(action: openExtensions) {
+                    HStack(spacing: 6) {
+                        if extensionUpdates > 0 {
+                            Text("\(extensionUpdates)")
+                                .font(.caption2.bold()).monospacedDigit().foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 2).background(.red, in: Capsule())
+                        }
+                        Text("Manage")
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }
+                    .font(.subheadline.weight(.medium))
+                }
+                .accessibilityLabel(extensionUpdates > 0 ? "Manage extensions, \(extensionUpdates) updates available" : "Manage extensions")
+            }
+            .padding(.horizontal)
+
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(quickSources, id: \.key) { source in
+                LazyHStack(alignment: .top, spacing: 16) {
+                    ForEach(installed, id: \.key) { source in
                         Button { openSource(source) } label: {
                             VStack(spacing: 6) {
-                                SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 56)
+                                SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 58)
+                                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
                                 Text(source.name).font(.caption).lineLimit(1).foregroundStyle(.primary)
-                            }.frame(width: 68)
+                            }
+                            .frame(width: 70)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Browse \(source.name)")
                     }
-                }.padding(.horizontal)
+                }
+                .padding(.horizontal)
             }
         }
     }
 
-    private func shelf(_ feed: MCDiscoverFeed, featured: Bool, ranked: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(feed.sourceName.uppercased()).font(.caption2.weight(.semibold)).tracking(1.4).foregroundStyle(.secondary)
-                    Text(feed.listingName).font(.title2.bold())
+    private var welcomeCard: some View {
+        promptCard(
+            symbol: "puzzlepiece.extension.fill",
+            title: "Add your first extension",
+            message: "Extensions are where stories come from. Install one to browse its catalogue and build your Discover feed.",
+            button: "Browse extensions",
+            action: openExtensions
+        )
+    }
+
+    // MARK: Shelves
+
+    private var firstShelfCard: some View {
+        promptCard(
+            symbol: "rectangle.stack.badge.plus",
+            title: "Build your feed",
+            message: "Shelves show a tab from an extension, like Popular or Latest. Add a few to see everything new in one place.",
+            button: "Add a shelf",
+            action: openShelves
+        )
+    }
+
+    private var addShelfTile: some View {
+        Button(action: openShelves) {
+            Label("Add or reorder shelves", systemImage: "plus")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(Color.accentColor.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal)
+    }
+
+    private func shelf(_ feed: MCDiscoverFeed, featured: Bool, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                Button { openListing(feed) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(feed.listingName).font(.title3.bold()).foregroundStyle(.primary)
+                            Text(feed.sourceName).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Image(systemName: "chevron.right").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(feed.listingName) from \(feed.sourceName), see all")
                 Spacer()
-                Button { openListing(feed) } label: { Image(systemName: "arrow.up.right").font(.headline).padding(12).background(.quaternary, in: Circle()) }
-                    .accessibilityLabel("See all \(feed.sourceName) \(feed.listingName)")
-            }.padding(.horizontal)
+                Menu {
+                    Button("See all", systemImage: "square.grid.2x2") { openListing(feed) }
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.load(feed, force: true) } }
+                    Divider()
+                    Button("Move up", systemImage: "arrow.up") { model.move(feed, by: -1) }.disabled(index == 0)
+                    Button("Move down", systemImage: "arrow.down") { model.move(feed, by: 1) }.disabled(index == model.feeds.count - 1)
+                    Button("Remove shelf", systemImage: "trash", role: .destructive) { model.remove(feed) }
+                } label: {
+                    Image(systemName: "ellipsis").font(.body.weight(.semibold)).foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36).background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                }
+                .accessibilityLabel("Shelf options")
+            }
+            .padding(.horizontal)
+
             if let items = model.entries[feed.id], !items.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: featured ? 16 : 14) {
-                        ForEach(Array(items.prefix(30).enumerated()), id: \.element.key) { index, manga in
+                    LazyHStack(alignment: .top, spacing: featured ? 14 : 12) {
+                        ForEach(items.prefix(30), id: \.key) { manga in
                             Button { openManga(manga) } label: {
-                                if featured { featureCard(manga, feed: feed) }
-                                else { coverCard(manga, rank: ranked ? index + 1 : nil) }
+                                if featured { featureCard(manga) } else { coverCard(manga) }
                             }.buttonStyle(.plain)
                         }
                     }.scrollTargetLayout().padding(.horizontal)
                 }.scrollTargetBehavior(.viewAligned)
-            } else if model.loading.contains(feed.id) {
-                HStack { ProgressView(); Text("Loading stories…").foregroundStyle(.secondary) }.padding(24)
-            } else if model.errors[feed.id] == nil {
-                Text("No stories in this tab yet.").foregroundStyle(.secondary).padding(.horizontal)
-            }
-            if let error = model.errors[feed.id] {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(error).font(.subheadline).foregroundStyle(.secondary)
-                    Button("Try again") { Task { await model.load(feed, force: true) } }
-                }.padding().frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+            } else if let error = model.errors[feed.id] {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(error).font(.subheadline).foregroundStyle(.secondary)
+                        Button("Try again") { Task { await model.load(feed, force: true) } }.font(.subheadline.weight(.semibold))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding()
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal)
+            } else if model.loading.contains(feed.id) || model.entries[feed.id] == nil {
+                loadingRow(featured: featured)
+            } else {
+                Text("Nothing in this tab yet.").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
             }
         }
     }
 
-    private func featureCard(_ manga: AidokuRunner.Manga, feed: MCDiscoverFeed) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            cover(manga, width: 310, height: 240).blur(radius: 22).overlay(.black.opacity(0.45))
-            HStack(alignment: .bottom, spacing: 16) {
-                cover(manga, width: 110, height: 165).clipShape(RoundedRectangle(cornerRadius: 10)).shadow(radius: 10)
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("EXPLORE").font(.caption2.bold()).tracking(2).foregroundStyle(.white.opacity(0.7))
-                    Text(manga.title).font(.headline).lineLimit(4).foregroundStyle(.white)
-                    Label("Read more", systemImage: "arrow.right").font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }.padding(20)
-        }.frame(width: 310, height: 240).clipShape(RoundedRectangle(cornerRadius: 22))
-            .accessibilityElement(children: .ignore).accessibilityLabel(manga.title)
-    }
-    private func coverCard(_ manga: AidokuRunner.Manga, rank: Int?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cover(manga, width: 132, height: 198).clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(alignment: .bottomLeading) {
-                    if let rank {
-                        Text(String(format: "%02d", rank)).font(.title2.weight(.black).monospacedDigit()).foregroundStyle(.white)
-                            .padding(.horizontal, 9).padding(.vertical, 4).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 8)).padding(7)
+    private func loadingRow(featured: Bool) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: featured ? 14 : 12) {
+                ForEach(0..<4, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 8) {
+                        RoundedRectangle(cornerRadius: featured ? 18 : 12)
+                            .fill(Color(uiColor: .secondarySystemBackground))
+                            .frame(width: featured ? 300 : 118, height: featured ? 200 : 177)
+                        if !featured {
+                            RoundedRectangle(cornerRadius: 4).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 90, height: 12)
+                        }
                     }
                 }
-            Text(manga.title).font(.subheadline.weight(.semibold)).lineLimit(2).frame(width: 132, alignment: .leading)
-        }.frame(width: 132).accessibilityElement(children: .ignore).accessibilityLabel(manga.title)
+            }.padding(.horizontal)
+        }
+        .disabled(true)
+        .accessibilityLabel("Loading")
     }
+
+    private func featureCard(_ manga: AidokuRunner.Manga) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            cover(manga, width: 300, height: 200).blur(radius: 24).overlay(.black.opacity(0.4))
+            HStack(alignment: .bottom, spacing: 14) {
+                cover(manga, width: 104, height: 156).clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(manga.title).font(.headline).lineLimit(3).foregroundStyle(.white)
+                    if let author = manga.artists?.first ?? manga.authors?.first {
+                        Text(author).font(.caption).lineLimit(1).foregroundStyle(.white.opacity(0.75))
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(16)
+        }.frame(width: 300, height: 200).clipShape(RoundedRectangle(cornerRadius: 18))
+            .accessibilityElement(children: .ignore).accessibilityLabel(manga.title)
+    }
+
+    private func coverCard(_ manga: AidokuRunner.Manga) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            cover(manga, width: 118, height: 177).clipShape(RoundedRectangle(cornerRadius: 12))
+            Text(manga.title).font(.footnote.weight(.semibold)).lineLimit(2).frame(width: 118, alignment: .leading)
+        }.frame(width: 118).accessibilityElement(children: .ignore).accessibilityLabel(manga.title)
+    }
+
     private func cover(_ manga: AidokuRunner.Manga, width: CGFloat, height: CGFloat) -> some View {
         SourceImageView(source: sources.source(for: manga.sourceKey), imageUrl: manga.cover ?? "", width: width, height: height,
                         placeholder: "MidokuCoverPlaceholder").frame(width: width, height: height).clipped()
+    }
+
+    private func promptCard(symbol: String, title: String, message: String, button: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(Color.accentColor)
+            Text(title).font(.title2.bold())
+            Text(message).font(.subheadline).foregroundStyle(.secondary)
+            Button(action: action) {
+                Text(button).font(.headline).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.top, 4)
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 24))
+        .padding(.horizontal)
     }
 }
 
@@ -307,7 +396,7 @@ private struct MCDiscoverConfiguration: View {
                     }
                     .onDelete { model.feeds.remove(atOffsets: $0); model.save() }
                     .onMove { model.feeds.move(fromOffsets: $0, toOffset: $1); model.save() }
-                } header: { Text("Your shelves") } footer: { Text("Reorder shelves with Edit. Swipe a shelf to remove it.") }
+                } header: { Text("Your shelves") } footer: { Text(model.feeds.isEmpty ? "Shelves you add appear on Discover." : "Reorder shelves with Edit. Swipe a shelf to remove it.") }
                 Section("Add a shelf") {
                     if installed.isEmpty { Text("Install an extension from Extensions first.").foregroundStyle(.secondary) }
                     else {
@@ -325,7 +414,7 @@ private struct MCDiscoverConfiguration: View {
                         if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
                     }
                 }
-            }.navigationTitle("Customize Discover").navigationBarTitleDisplayMode(.inline)
+            }.navigationTitle("Shelves").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { EditButton() }
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

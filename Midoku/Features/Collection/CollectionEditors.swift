@@ -418,7 +418,7 @@ struct MCAddSourceView: View {
     @State private var store = MCCollectionStore.shared
     @State private var categories = Set<UUID>()
     @State private var status = MCPersonalStatus.planned
-    @State private var follow = true
+    @State private var follow = false
     @State private var title = ""
     @State private var author = ""
     @State private var artist = ""

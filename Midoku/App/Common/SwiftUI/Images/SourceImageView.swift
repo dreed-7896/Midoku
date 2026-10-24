@@ -22,6 +22,8 @@ struct SourceImageView: View {
     var placeholderSymbol: String?
     var pageImage = false
     var cacheSourceKey: String?
+    /// Library covers go to the persistent store and are kept until the entry gets new artwork.
+    var persistent = false
 
     @State private var artwork: MCArtworkCache.Artwork?
     @State private var loadedKey: String?
@@ -45,6 +47,7 @@ struct SourceImageView: View {
 
     var body: some View {
         Group {
+            // Artwork loaded for another key is never shown, so reused cells cannot flash a different cover.
             if let cached = (loadedKey == cacheKey ? artwork : nil) ?? MCArtworkCache.shared.memoryImage(for: cacheKey) {
                 if let data = cached.animatedData {
                     GIFImage(data: data, contentMode: contentMode).frame(width: width, height: height)
@@ -58,7 +61,8 @@ struct SourceImageView: View {
         }
         .clipped()
         .contentShape(Rectangle())
-        .task(id: cacheKey) { await loadImageRequest(url: imageUrl) }
+        // Retry once the source finishes loading, since its request headers may be needed.
+        .task(id: "\(cacheKey)|\(source != nil)") { await loadImageRequest(url: imageUrl) }
     }
 
     private var remoteImage: some View {
@@ -81,7 +85,7 @@ struct SourceImageView: View {
         let source = source
         let processors = processors
         let pageImage = pageImage
-        let loaded = await MCArtworkCache.shared.load(key: key) {
+        let loaded = await MCArtworkCache.shared.load(key: key, persistent: persistent) {
             guard let url = URL(string: url) else { return nil }
             let options: ImageRequest.Options = MCArtworkCache.shared.needsReload(for: key) ? .reloadIgnoringCachedData : []
             if let fileURL = url.toMidokuFileUrl() { return ImageRequest(url: fileURL, processors: processors, options: options) }

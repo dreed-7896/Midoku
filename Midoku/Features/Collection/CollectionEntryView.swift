@@ -398,6 +398,16 @@ struct MCEntryView: View {
         }.padding(.horizontal).padding(.vertical, 8).background(Color(uiColor: .systemBackground))
     }
 
+    /// The header names a single creator: the main artist, or the main author when no artist is known.
+    private func mainCreator(_ entry: MCPersonalEntry) -> String {
+        let details = store.library.listing(entry.primaryListingID)?.details
+        func firstName(_ override: String?, _ names: [String]?) -> String? {
+            let candidates = override.map { $0.split(separator: ",").map(String.init) } ?? names ?? []
+            return candidates.lazy.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+        }
+        return firstName(entry.artistOverride, details?.artists) ?? firstName(entry.authorOverride, details?.authors) ?? ""
+    }
+
     private func header(_ entry: MCPersonalEntry) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 16) {
@@ -413,8 +423,7 @@ struct MCEntryView: View {
                         .lineLimit(4)
                         .contentShape(Rectangle())
                         .gesture(copyOrSearchGesture(for: title))
-                    let details = store.library.listing(entry.primaryListingID)?.details
-                    let artist = entry.artistOverride ?? details?.artists?.joined(separator: ", ") ?? ""
+                    let artist = mainCreator(entry)
                     if !artist.isEmpty {
                         Text(artist)
                             .font(.subheadline)

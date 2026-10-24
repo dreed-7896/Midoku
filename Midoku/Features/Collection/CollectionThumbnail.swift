@@ -36,10 +36,6 @@ final class MCThumbnailCache {
 
     init() {
         cache.totalCostLimit = 16 * 1024 * 1024
-        let directory = directory
-        DispatchQueue.global(qos: .utility).async {
-            ArtworkDiskBudget.trim(directory: directory, limit: 100 * 1024 * 1024)
-        }
     }
 
     /// Returns an existing generated thumbnail without starting any source or image requests.
@@ -114,10 +110,6 @@ final class MCThumbnailCache {
                     cache.setObject(thumbnail, forKey: key, cost: Int(size.width * size.height * 4))
                     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                     try? data.write(to: file, options: .atomic)
-                    let directory = directory
-                    DispatchQueue.global(qos: .utility).async {
-                        ArtworkDiskBudget.trim(directory: directory, limit: 100 * 1024 * 1024)
-                    }
                 }
                 return thumbnail
             } catch { return nil }

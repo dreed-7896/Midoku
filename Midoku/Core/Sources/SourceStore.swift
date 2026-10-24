@@ -14,6 +14,8 @@ final class SourceStore: ObservableObject {
 
     @Published private(set) var sourcesByKey: [String: AidokuRunner.Source] = [:]
     @Published private(set) var disabledSourceKeys: Set<String> = []
+    /// False until the installed sources have been loaded once at launch.
+    @Published private(set) var hasLoaded = false
 
     func update(
         sourcesByKey: [String: AidokuRunner.Source],
@@ -21,6 +23,7 @@ final class SourceStore: ObservableObject {
     ) {
         self.sourcesByKey = sourcesByKey
         self.disabledSourceKeys = disabledSourceKeys
+        hasLoaded = true
     }
 
     func source(for key: String) -> AidokuRunner.Source? {

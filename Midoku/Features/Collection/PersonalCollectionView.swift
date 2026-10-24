@@ -1102,7 +1102,8 @@ struct MCEntryCover: View {
             } else if !entry.hidesCover, let listing = store.library.listing(entry.primaryListingID), let cover = listing.details.coverURL {
                 SourceImageView(source: store.source(listing.identity.connectionID), imageUrl: cover.absoluteString,
                     width: geometry.size.width, height: geometry.size.height, contentMode: contentMode, placeholder: "MidokuCoverPlaceholder",
-                    cacheSourceKey: store.snapshot.connections.first { $0.id == listing.identity.connectionID }?.sourceKey).clipped()
+                    cacheSourceKey: store.snapshot.connections.first { $0.id == listing.identity.connectionID }?.sourceKey,
+                    persistent: true).clipped()
             } else {
                 MCArtworkPlaceholder()
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()

@@ -173,10 +173,21 @@ final class MCCollectionStore {
             try loaded.validate()
             updateChapterMetadata(loaded)
             snapshot = loaded
+            MCArtworkCache.shared.retainLibraryArtwork(libraryArtworkKeys())
         } catch {
             writable = false
             self.error = "Your library could not be opened. Its saved file has been kept. \(error.localizedDescription)"
         }
+    }
+
+    /// Cache keys of the source covers the library shows, matching `MCEntryCover`.
+    private func libraryArtworkKeys() -> Set<String> {
+        Set(library.entries.compactMap { entry in
+            guard entry.coverID == nil, !entry.hidesCover, let listing = library.listing(entry.primaryListingID),
+                  let cover = listing.details.coverURL else { return nil }
+            let sourceKey = snapshot.connections.first { $0.id == listing.identity.connectionID }?.sourceKey
+            return MCArtworkCache.key(url: cover.absoluteString, sourceKey: sourceKey)
+        })
     }
 
     func change(_ edit: (inout MCCollectionSnapshot) throws -> Void) throws {
@@ -363,7 +374,7 @@ final class MCCollectionStore {
     }
 
     @discardableResult
-    func add(_ manga: AidokuRunner.Manga, chapters: [AidokuRunner.Chapter], categories: Set<UUID> = [], status: MCPersonalStatus = .planned, follow: Bool = true,
+    func add(_ manga: AidokuRunner.Manga, chapters: [AidokuRunner.Chapter], categories: Set<UUID> = [], status: MCPersonalStatus = .planned, follow: Bool = false,
              title: String? = nil, description: String? = nil, author: String? = nil, artist: String? = nil,
              cover: MCLibraryCover? = nil) throws -> UUID {
         if let existing = entryID(for: manga) { return existing }
@@ -517,6 +528,10 @@ final class MCCollectionStore {
                 guard let current = state.library.listing(listingID) else { throw MCLibraryFailure.missing }
                 let records = state.library.chapters.filter { $0.identity.listing == current.identity && $0.available }.map(\.record)
                 try state.library.refresh(details: current.details, connectionID: current.identity.connectionID, records: records, language: nil)
+            }
+            if let previousCover = listing.details.coverURL, library.listing(listingID)?.details.coverURL != previousCover {
+                // The source published a new cover; drop the stored one so the library loads the new artwork once.
+                MCArtworkCache.shared.reset(MCArtworkCache.key(url: previousCover.absoluteString, sourceKey: source.key))
             }
             return nil
         } catch is CancellationError { return nil }
