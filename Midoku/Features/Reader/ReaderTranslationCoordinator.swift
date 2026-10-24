@@ -101,7 +101,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     private var providerKey: String {
-        TranslationSettings.usesOpenAI
+        TranslationSettings.usesAPI
             ? "api|\(TranslationSettings.endpoint)|\(TranslationSettings.model)"
             : "apple-ja-en"
     }
@@ -258,7 +258,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         activeJob = pages
         let regions = ReaderTranslationJobPage.combinedRegions(pages)
         if regions.isEmpty { finish(token: token, translations: [:], error: nil); return }
-        if TranslationSettings.usesOpenAI {
+        if TranslationSettings.usesAPI {
             do {
                 let translations = try await PageTranslator.translateWithAPI(regions, context: recentDialogue)
                 guard !Task.isCancelled, activeToken == token else { return }
