@@ -5,7 +5,6 @@ struct TranslationSettingsView: View {
     @AppStorage(TranslationSettings.endpointKey) private var endpoint = TranslationSettings.defaultEndpoint
     @AppStorage(TranslationSettings.modelKey) private var model = TranslationSettings.defaultModel
     @AppStorage(TranslationSettings.mistralModelKey) private var mistralModel = TranslationSettings.defaultMistralModel
-    @AppStorage(TranslationSettings.pagesPerRequestKey) private var pagesPerRequest = TranslationSettings.defaultPagesPerRequest
     @State private var apiKey = TranslationSettings.apiKey
 
     private var selected: TranslationSettings.Provider { .init(rawValue: provider) ?? .builtIn }
@@ -19,17 +18,7 @@ struct TranslationSettingsView: View {
                     Text("OpenAI compatible").tag(TranslationSettings.Provider.openAI.rawValue)
                 }
             } footer: {
-                Text("Translate Japanese dialogue into English. Built-in translation may download language models the first time you use it.")
-            }
-
-            Section {
-                Picker("Pages at a time", selection: $pagesPerRequest) {
-                    ForEach(TranslationSettings.pagesPerRequestOptions, id: \.self) { count in
-                        Text(count == 1 ? "1 page" : "\(count) pages").tag(count)
-                    }
-                }
-            } footer: {
-                Text("Pages are only translated when you ask: the translate button in the reader translates the pages in view, and its options translate pages you enter. Without entered pages, this many pages are translated from the page you are reading. Pages are sent together in one request for better context.")
+                Text("Translate Japanese dialogue into English. Pages are only translated when you ask, from the reader's translation bar: one page, or the whole chapter in its options. Built-in translation may download language models the first time you use it.")
             }
 
             switch selected {

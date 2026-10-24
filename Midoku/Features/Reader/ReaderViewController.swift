@@ -1883,11 +1883,6 @@ extension ReaderViewController {
         configureBarToggleTapGestures()
     }
 
-    /// The page being read, where translating the default number of pages starts.
-    var currentTranslationPage: Page? {
-        pages.indices.contains(currentPage - 1) ? pages[currentPage - 1] : nil
-    }
-
     func translationIdentity(for page: Page) -> ChapterIdentifier {
         collectionSequence?.route(key: page.chapterId)?.identifier
             ?? ChapterIdentifier(sourceKey: page.sourceId, mangaKey: manga.key, chapterKey: page.chapterId)

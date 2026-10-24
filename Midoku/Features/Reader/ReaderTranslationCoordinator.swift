@@ -4,6 +4,13 @@ import SwiftUI
 import Translation
 import UIKit
 
+/// A page waiting to be translated. Pages in view carry their displayed image.
+struct ReaderTranslationQueuedPage {
+    let page: Page
+    let locator: String
+    let image: UIImage?
+}
+
 @MainActor
 final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private weak var owner: ReaderViewController?
@@ -16,18 +23,19 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private var surfaces: [(ReaderTranslationSurface, String)] = []
     private var cache: [String: ReaderTranslationRecord] = [:]
     private var cacheOrder: [String] = []
+    /// Errors by page locator and by translation key.
     private var failures: [String: String] = [:]
-    private var prefetched: [String: String] = [:]
-    /// Pages the reader asked to translate (the pages in view, or pages chosen in the options), in
-    /// reading order, until translated. Nothing else is sent, so no request is made without asking.
-    private var requested: [(page: Page, locator: String)] = []
+    /// Pages waiting for the running job, in reading order. Pages are only translated when the reader
+    /// asks (the pages in view, or the whole chapter), so no request is made otherwise.
+    private var queued: [ReaderTranslationQueuedPage] = []
+    /// Pages whose translation failed, sent again by Retry.
+    private var failedPages: [ReaderTranslationQueuedPage] = []
     private let fingerprints = NSMapTable<UIImage, NSString>(keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private var activeTask: Task<Void, Never>?
     private var activeToken: UUID?
     private var activeKeys = Set<String>()
-    private var activeLocators: [String] = []
+    private var activePages: [ReaderTranslationQueuedPage] = []
     private var activeJob: [ReaderTranslationJobPage] = []
-    private var activeIsPrefetch = false
     private var pendingRecords: [String: ReaderTranslationRecord] = [:]
     private var recentDialogue: [(source: String, translation: String)] = []
     private var selected: (key: String, id: Int)?
@@ -59,7 +67,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         guard enabled != isEnabled else { return }
         guard !enabled || owner?.reader is ReaderTranslationReader else { return }
         isEnabled = enabled
-        requested = []
+        queued = []
+        failedPages = []
         if enabled {
             installUI()
             let timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in
@@ -82,49 +91,45 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     func stop() { setEnabled(false) }
 
-    /// Translates the pages in view, and nothing else.
+    /// Translates the pages in view again, replacing their saved translation.
     @objc private func translateVisible() {
-        request(surfaces.map { $0.0.page })
+        enqueue(surfaces.map { surface, _ in (surface.page, surface.imageView.image) })
     }
 
-    /// Translates pages of the current chapter, numbered from 1, in batches of the pages-at-a-time setting.
-    func translatePages(_ numbers: [Int]) {
+    /// Translates every page of the current chapter in one job, replacing saved translations.
+    func translateChapter() {
         guard let pages = owner?.pages else { return }
-        request(numbers.filter { pages.indices.contains($0 - 1) }.map { pages[$0 - 1] })
+        // Pages in view use the displayed image, so their translation key matches exactly.
+        var shown: [String: UIImage] = [:]
+        for (surface, _) in surfaces { shown[locator(for: surface.page)] = surface.imageView.image }
+        enqueue(pages.map { ($0, shown[locator(for: $0)]) })
     }
 
-    /// Translates the default number of pages (the pages-at-a-time setting), starting with the page being read.
-    func translateNextPages() {
-        guard let owner, let current = owner.currentTranslationPage.flatMap({ owner.pages.firstIndex(of: $0) }) else { return }
-        translatePages(Array((current + 1)...(current + TranslationSettings.pagesPerRequest)))
-    }
-
-    private func request(_ pages: [Page]) {
+    private func enqueue(_ pages: [(page: Page, image: UIImage?)]) {
         guard isEnabled else { return }
-        let known = Set(requested.map(\.locator))
-        let new = pages.filter { $0.type == .imagePage && !$0.isTextPage }.map { (page: $0, locator: locator(for: $0)) }
-        for item in new { failures[item.locator] = nil }
-        requested += new.filter { !known.contains($0.locator) && !isTranslated($0.locator) }
+        var known = Set((activePages + queued).map(\.locator))
+        for (page, image) in pages where page.type == .imagePage && !page.isTextPage {
+            let locator = locator(for: page)
+            guard known.insert(locator).inserted else { continue }
+            failures[locator] = nil
+            failedPages.removeAll { $0.locator == locator }
+            queued.append(ReaderTranslationQueuedPage(page: page, locator: locator, image: image))
+        }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        refresh()
+        startNextJob()
+        render()
     }
 
     func openOptions() {
         guard let owner else { return }
         (owner.reader as? ReaderWebtoonViewController)?.pauseAutoScroll()
         let view = ReaderTranslationOptionsView(
-            pageCount: owner.pages.count,
-            currentPage: owner.currentTranslationPage.flatMap { owner.pages.firstIndex(of: $0) }.map { $0 + 1 } ?? 1,
-            translatePages: { [weak self] in self?.translatePages($0) },
-            translateNextPages: { [weak self] in self?.translateNextPages() }
+            pageCount: owner.pages.filter { $0.type == .imagePage && !$0.isTextPage }.count,
+            translateChapter: { [weak self] in self?.translateChapter() }
         ).onDisappear { [weak self] in
             (self?.owner?.reader as? ReaderWebtoonViewController)?.resumeAutoScroll()
         }
         owner.present(UIHostingController(rootView: view), animated: true)
-    }
-
-    private func isTranslated(_ locator: String) -> Bool {
-        prefetched[locator].flatMap { record(for: $0) } != nil
     }
 
     func readerChanged() {
@@ -133,6 +138,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         surfaces = []
         select(key: nil, id: nil)
         stopWork()
+        queued = []
+        failedPages = []
         if owner?.reader is ReaderTranslationReader { refresh() } else { stop() }
     }
 
@@ -201,37 +208,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             overlay.key = key
             overlay.onSelect = { [weak self] id in self?.select(key: key, id: id) }
             surface.imageView.bringSubviewToFront(overlay)
-            // Remember which page this translation belongs to, so requested pages skip it.
-            if record(for: key) != nil { prefetched[locator(for: surface.page)] = key }
             overlay.configure(record: record(for: key) ?? pendingRecords[key],
                               selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll)
-        }
-        requested.removeAll { isTranslated($0.locator) }
-        let requestedLocators = Set(requested.map(\.locator))
-        var seen = Set<String>()
-        let needed = surfaces.filter { surface, key in
-            record(for: key) == nil && failures[key] == nil && seen.insert(key).inserted
-                && requestedLocators.contains(locator(for: surface.page))
-        }
-        if !needed.isEmpty {
-            // Requested pages in view take priority over requested pages off screen.
-            if activeToken != nil, !needed.contains(where: { activeKeys.contains($0.1) }),
-               !surfaces.contains(where: { activeKeys.contains($0.1) }) { stopWork() }
-            // A large batch can take a while to prepare. If the reader reaches one of its pages before
-            // the batch is sent, translate the visible page now and continue the batch afterwards.
-            if activeToken != nil, activeIsPrefetch, activeJob.isEmpty { stopWork() }
-            if activeToken == nil {
-                // Every visible page (a spread, or several webtoon strips) goes out in one request.
-                start(needed.compactMap { surface, key in surface.imageView.image.map { (key, $0) } })
-            }
-        } else if activeToken == nil, !surfaces.isEmpty,
-                  // A page in view that just failed waits for Retry instead of being sent again.
-                  case let failedInView = Set(surfaces.filter { failures[$0.1] != nil }.map { locator(for: $0.0.page) }),
-                  case let batch = requested.filter({ failures[$0.locator] == nil && !failedInView.contains($0.locator) })
-                      .prefix(TranslationSettings.pagesPerRequest),
-                  !batch.isEmpty {
-            // Requested pages off screen, in batches.
-            prefetch(Array(batch))
         }
         updateStatus()
     }
@@ -239,48 +217,39 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     /// Dialogue already translated in this session, sent as read-only context with each request.
     private static let contextLineCount = 30
 
-    private func start(_ pages: [(key: String, image: UIImage)]) {
-        let token = UUID()
-        activeToken = token
-        activeKeys = Set(pages.map(\.key))
-        activeTask = Task { [weak self] in
-            guard let self else { return }
-            var jobPages: [ReaderTranslationJobPage] = []
-            for page in pages {
-                guard let regions = await recognize(page.image, token: token) else { return }
-                jobPages.append(ReaderTranslationJobPage(key: page.key, locator: nil, regions: regions))
-                showPending(jobPages.last!)
-            }
-            await translate(jobPages, token: token)
-        }
+    private func startNextJob() {
+        guard activeToken == nil, !queued.isEmpty else { return }
+        let pages = queued
+        queued = []
+        run(pages)
     }
 
-    private func prefetch(_ pages: [(page: Page, locator: String)]) {
+    /// Reads the text of every page, then translates all of it as one job.
+    private func run(_ pages: [ReaderTranslationQueuedPage]) {
         let token = UUID()
         activeToken = token
-        activeIsPrefetch = true
-        activeLocators = pages.map(\.locator)
+        activePages = pages
         activeTask = Task { [weak self] in
             guard let self, let owner = self.owner else { return }
             var jobPages: [ReaderTranslationJobPage] = []
-            for (page, locator) in pages {
-                guard let image = await owner.loadTranslationImage(for: page), !Task.isCancelled, activeToken == token else {
-                    guard !Task.isCancelled, activeToken == token else { return }
-                    // Translate the pages that did load; Retry tries the missing one again.
-                    failures[locator] = "Next page could not be loaded."
-                    activeLocators.removeAll { $0 == locator }
-                    break
+            for item in pages {
+                var image = item.image
+                if image == nil { image = await owner.loadTranslationImage(for: item.page) }
+                guard !Task.isCancelled, activeToken == token else { return }
+                guard let image else {
+                    // Translate the pages that did load; Retry tries this one again.
+                    failures[item.locator] = "A page could not be loaded."
+                    failedPages.append(item)
+                    activePages.removeAll { $0.locator == item.locator }
+                    continue
                 }
-                let cacheKey = self.key(page: page, image: image)
-                prefetched[locator] = cacheKey
-                if record(for: cacheKey) != nil { continue }
+                let cacheKey = self.key(page: item.page, image: image)
+                failures[cacheKey] = nil
                 activeKeys.insert(cacheKey)
                 guard let regions = await recognize(image, token: token) else { return }
-                jobPages.append(ReaderTranslationJobPage(key: cacheKey, locator: locator, regions: regions))
+                jobPages.append(ReaderTranslationJobPage(key: cacheKey, locator: item.locator, regions: regions))
                 showPending(jobPages.last!)
             }
-            guard activeToken == token else { return }
-            if jobPages.isEmpty { stopWork(); render(); return }
             await translate(jobPages, token: token)
         }
     }
@@ -308,6 +277,9 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
                 let translations = try await PageTranslator.translateWithAPI(regions, context: recentDialogue)
                 guard !Task.isCancelled, activeToken == token else { return }
                 finish(token: token, translations: translations, error: nil)
+            } catch let TranslationError.partial(translations, message) {
+                guard !Task.isCancelled, activeToken == token else { return }
+                finish(token: token, translations: translations, error: message)
             } catch {
                 guard !Task.isCancelled, activeToken == token else { return }
                 finish(token: token, translations: [:], error: error.localizedDescription)
@@ -325,26 +297,31 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         finish(token: token, translations: translations, error: error)
     }
 
+    /// Saves the translated pages, replacing earlier translations. With an error, pages that are
+    /// not fully translated are kept for Retry.
     private func finish(token: UUID, translations: [Int: String], error: String?) {
         guard activeToken == token else { return }
-        if let error {
-            for key in activeKeys { failures[key] = error }
-            for locator in activeLocators { failures[locator] = error }
-        } else {
-            if failures.count > 80 { failures.removeAll() }
-            if prefetched.count > 400 { prefetched.removeAll() }
-            for page in activeJob {
-                let local = page.translations(from: translations)
-                let record = ReaderTranslationRecord(regions: page.regions, translations: local)
-                remember(record, for: page.key)
-                TranslationStore.shared.save(record, for: page.key)
-                recentDialogue += page.regions.compactMap { region in
-                    local[region.id].map { (source: region.sourceText, translation: $0) }
+        let pages = Dictionary(activePages.map { ($0.locator, $0) }, uniquingKeysWith: { first, _ in first })
+        for page in activeJob {
+            let local = page.translations(from: translations)
+            if let error, local.count < page.regions.count {
+                failures[page.key] = error
+                if let locator = page.locator, let failed = pages[locator] {
+                    failures[locator] = error
+                    failedPages.append(failed)
                 }
+                continue
             }
-            recentDialogue = Array(recentDialogue.suffix(Self.contextLineCount))
+            let record = ReaderTranslationRecord(regions: page.regions, translations: local)
+            remember(record, for: page.key)
+            TranslationStore.shared.save(record, for: page.key)
+            recentDialogue += page.regions.compactMap { region in
+                local[region.id].map { (source: region.sourceText, translation: $0) }
+            }
         }
+        recentDialogue = Array(recentDialogue.suffix(Self.contextLineCount))
         stopWork()
+        startNextJob()
         render()
     }
 
@@ -365,9 +342,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     private func stopWork() {
         activeToken = nil
-        activeIsPrefetch = false
         activeKeys = []
-        activeLocators = []
+        activePages = []
         activeJob = []
         pendingRecords = [:]
         activeTask?.cancel()
@@ -385,24 +361,25 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     private func updateStatus() {
-        // Chosen pages that are not on screen report their error once none of them can continue.
-        let requestError = requested.allSatisfy { failures[$0.locator] != nil } ? requested.lazy.compactMap { self.failures[$0.locator] }.first : nil
-        let error = surfaces.compactMap { failures[$0.1] }.first ?? requestError
+        let working = activePages.count + queued.count
+        // Errors show once nothing is left to translate, with Retry for the failed pages.
+        let error = working > 0 ? nil : surfaces.compactMap { failures[$0.1] }.first
+            ?? failedPages.lazy.compactMap { self.failures[$0.locator] }.first
         let records = surfaces.compactMap { record(for: $0.1) }
         if let error { statusLabel.text = error }
         else if surfaces.isEmpty { statusLabel.text = "Translation on · swipe pages or scroll normally" }
-        else if !requested.isEmpty {
-            statusLabel.text = requested.count == 1 ? "Translating 1 page… · keep reading" : "Translating \(requested.count) pages… · keep reading"
+        else if working > 0 {
+            statusLabel.text = working == 1 ? "Translating 1 page… · keep reading" : "Translating \(working) pages… · keep reading"
         }
         else if records.count < surfaces.count {
-            statusLabel.text = "Tap the translate button to translate the pages in view"
+            statusLabel.text = "Not translated · translate this page, or the chapter in options"
         }
         else if records.allSatisfy({ $0.regions.isEmpty }) { statusLabel.text = "No Japanese dialogue found" }
         else { statusLabel.text = showAll ? "Tap a translation to select it" : "Tap marked text · swipe pages or scroll normally" }
         // While a dialogue is selected, the toolbar only steps through dialogues or closes the selection.
         let stepping = selected != nil
         for button in [allButton, listButton, translateButton, optionsButton] { button.isHidden = stepping }
-        translateButton.isEnabled = surfaces.contains { record(for: $0.1) == nil }
+        translateButton.isEnabled = !surfaces.isEmpty
         retryButton.isHidden = stepping || error == nil
         closeDialogueButton.isHidden = !stepping
         listButton.isEnabled = !overlays.allSatisfy { $0.record?.regions.isEmpty != false }
@@ -470,7 +447,13 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     @objc private func toggleAll() { showAll.toggle(); render() }
-    @objc private func retry() { failures.removeAll(); refresh() }
+    @objc private func retry() {
+        failures.removeAll()
+        queued = failedPages + queued
+        failedPages = []
+        startNextJob()
+        refresh()
+    }
 
     private func pageLabel(for key: String) -> String {
         if let surface = surfaces.first(where: { $0.1 == key })?.0,
@@ -520,7 +503,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
                            previousButton, nextButton]
             let symbols = ["text.bubble", "list.number", "translate", "gearshape", "arrow.clockwise", "xmark.circle",
                            "chevron.left", "chevron.right"]
-            let labels = ["Show all translations", "Dialogue list", "Translate pages in view", "Translation options",
+            let labels = ["Show all translations", "Dialogue list", "Translate this page", "Translation options",
                           "Retry translation", "Close dialogue", "Previous dialogue", "Next dialogue"]
             for (index, button) in buttons.enumerated() {
                 button.setImage(UIImage(systemName: symbols[index]), for: .normal)
