@@ -165,11 +165,11 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             overlay.key = key
             overlay.onSelect = { [weak self] id in self?.select(key: key, id: id) }
             surface.imageView.bringSubviewToFront(overlay)
-            overlay.configure(record: cache[key] ?? pendingRecords[key],
+            overlay.configure(record: record(for: key) ?? pendingRecords[key],
                               selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll, original: original)
         }
         var seen = Set<String>()
-        let needed = surfaces.filter { cache[$0.1] == nil && failures[$0.1] == nil && seen.insert($0.1).inserted }
+        let needed = surfaces.filter { record(for: $0.1) == nil && failures[$0.1] == nil && seen.insert($0.1).inserted }
         if !needed.isEmpty {
             // New visible pages take priority over an off-screen request or speculative prefetch.
             if activeToken != nil, !needed.contains(where: { activeKeys.contains($0.1) }),
@@ -182,7 +182,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             let upcoming = reader.nextTranslationPages(limit: Self.prefetchPageCount)
                 .filter { !$0.isTextPage }
                 .map { (page: $0, locator: locator(for: $0)) }
-                .filter { prefetched[$0.locator].flatMap { cache[$0] } == nil && failures[$0.locator] == nil }
+                .filter { prefetched[$0.locator].flatMap { record(for: $0) } == nil && failures[$0.locator] == nil }
             if !upcoming.isEmpty { prefetch(upcoming) }
         }
         updateStatus()
@@ -228,7 +228,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
                 }
                 let cacheKey = self.key(page: page, image: image)
                 prefetched[locator] = cacheKey
-                if cache[cacheKey] != nil { continue }
+                if record(for: cacheKey) != nil { continue }
                 activeKeys.insert(cacheKey)
                 guard let regions = await recognize(image, token: token) else { return }
                 jobPages.append(ReaderTranslationJobPage(key: cacheKey, locator: locator, regions: regions))
@@ -290,18 +290,32 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             if prefetched.count > 80 { prefetched.removeAll() }
             for page in activeJob {
                 let local = page.translations(from: translations)
-                cache[page.key] = ReaderTranslationRecord(regions: page.regions, translations: local)
-                cacheOrder.removeAll { $0 == page.key }
-                cacheOrder.append(page.key)
+                let record = ReaderTranslationRecord(regions: page.regions, translations: local)
+                remember(record, for: page.key)
+                TranslationStore.shared.save(record, for: page.key)
                 recentDialogue += page.regions.compactMap { region in
                     local[region.id].map { (source: region.sourceText, translation: $0) }
                 }
             }
             recentDialogue = Array(recentDialogue.suffix(Self.contextLineCount))
-            while cacheOrder.count > 40 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
         }
         stopWork()
         render()
+    }
+
+    /// Memory first, then translations saved on device within the last 30 days.
+    private func record(for key: String) -> ReaderTranslationRecord? {
+        if let record = cache[key] { return record }
+        guard let stored = TranslationStore.shared.record(for: key) else { return nil }
+        remember(stored, for: key)
+        return stored
+    }
+
+    private func remember(_ record: ReaderTranslationRecord, for key: String) {
+        cache[key] = record
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        while cacheOrder.count > 40 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
     }
 
     private func stopWork() {
@@ -318,7 +332,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     private func render() {
         for overlay in overlays {
-            overlay.configure(record: cache[overlay.key] ?? pendingRecords[overlay.key],
+            overlay.configure(record: record(for: overlay.key) ?? pendingRecords[overlay.key],
                               selectedID: selected?.key == overlay.key ? selected?.id : nil, showAll: showAll, original: original)
         }
         updateStatus()
@@ -327,7 +341,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     private func updateStatus() {
         let error = surfaces.compactMap { failures[$0.1] }.first
-        let records = surfaces.compactMap { cache[$0.1] }
+        let records = surfaces.compactMap { record(for: $0.1) }
         if let error { statusLabel.text = error }
         else if surfaces.isEmpty { statusLabel.text = "Translation on · swipe pages or scroll normally" }
         else if records.count < surfaces.count { statusLabel.text = "Translating page… · keep reading" }
