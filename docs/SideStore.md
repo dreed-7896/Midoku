@@ -1,5 +1,15 @@
 # SideStore updates
 
+## All apps in one source
+
+To get Midoku and Pulled from a single source, add:
+
+https://github.com/dreed-7896/Midoku/releases/download/source/apps.json
+
+The **Combined SideStore source** workflow rebuilds it after every successful Midoku build and checks Pulled's source twice an hour. Each app's own source below keeps working. If you switch, remove the old per-app sources so each app is listed once, and install over the existing apps without uninstalling them first.
+
+## Midoku only
+
 After the first successful release build, add this source in SideStore's Sources screen:
 
 https://github.com/dreed-7896/Midoku/releases/latest/download/apps.json

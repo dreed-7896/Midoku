@@ -1,0 +1,33 @@
+name: Combined SideStore source
+
+on:
+  workflow_run:
+    workflows: [Midoku IPA]
+    types: [completed]
+  # Pulled builds in its own repository, so its updates are picked up on a schedule.
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: combined-source
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test source publishing
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Publish combined source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_combined_source.py "$RUNNER_TEMP/apps.json"
