@@ -6,6 +6,15 @@ enum TranslationSettings {
     static let endpointKey = "Translation.endpoint"
     static let modelKey = "Translation.model"
     static let mistralModelKey = "Translation.mistralModel"
+    static let pagesPerRequestKey = "Translation.pagesPerRequest"
+    static let defaultPagesPerRequest = 50
+    static let pagesPerRequestOptions = [1, 3, 5, 10, 20, 30, 50, 100]
+
+    /// How many upcoming pages are translated together in one request.
+    static var pagesPerRequest: Int {
+        let value = UserDefaults.standard.integer(forKey: pagesPerRequestKey)
+        return value > 0 ? value : defaultPagesPerRequest
+    }
 
     static let defaultEndpoint = "https://api.openai.com/v1/chat/completions"
     static let defaultModel = "gpt-4.1-mini"

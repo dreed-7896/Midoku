@@ -24,6 +24,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private var activeKeys = Set<String>()
     private var activeLocators: [String] = []
     private var activeJob: [ReaderTranslationJobPage] = []
+    private var activeIsPrefetch = false
     private var pendingRecords: [String: ReaderTranslationRecord] = [:]
     private var recentDialogue: [(source: String, translation: String)] = []
     private var selected: (key: String, id: Int)?
@@ -163,12 +164,15 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             // New visible pages take priority over an off-screen request or speculative prefetch.
             if activeToken != nil, !needed.contains(where: { activeKeys.contains($0.1) }),
                !surfaces.contains(where: { activeKeys.contains($0.1) }) { stopWork() }
+            // A large prefetch batch can take a while to prepare. If the reader reaches one of its pages
+            // before the batch is sent, translate the visible page now and prefetch again afterwards.
+            if activeToken != nil, activeIsPrefetch, activeJob.isEmpty { stopWork() }
             if activeToken == nil {
                 // Every visible page (a spread, or several webtoon strips) goes out in one request.
                 start(needed.compactMap { surface, key in surface.imageView.image.map { (key, $0) } })
             }
         } else if activeToken == nil, !surfaces.isEmpty {
-            let upcoming = reader.nextTranslationPages(limit: Self.prefetchPageCount)
+            let upcoming = reader.nextTranslationPages(limit: TranslationSettings.pagesPerRequest)
                 .filter { !$0.isTextPage }
                 .map { (page: $0, locator: locator(for: $0)) }
                 .filter { prefetched[$0.locator].flatMap { record(for: $0) } == nil && failures[$0.locator] == nil }
@@ -177,9 +181,6 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         updateStatus()
     }
 
-    /// Pages translated ahead in a single request; more pages per request means fewer requests
-    /// and more surrounding dialogue for the model.
-    private static let prefetchPageCount = 3
     /// Dialogue already translated in this session, sent as read-only context with each request.
     private static let contextLineCount = 30
 
@@ -202,6 +203,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private func prefetch(_ pages: [(page: Page, locator: String)]) {
         let token = UUID()
         activeToken = token
+        activeIsPrefetch = true
         activeLocators = pages.map(\.locator)
         activeTask = Task { [weak self] in
             guard let self, let owner = self.owner else { return }
@@ -275,7 +277,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             for locator in activeLocators { failures[locator] = error }
         } else {
             if failures.count > 80 { failures.removeAll() }
-            if prefetched.count > 80 { prefetched.removeAll() }
+            if prefetched.count > 400 { prefetched.removeAll() }
             for page in activeJob {
                 let local = page.translations(from: translations)
                 let record = ReaderTranslationRecord(regions: page.regions, translations: local)
@@ -308,6 +310,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     private func stopWork() {
         activeToken = nil
+        activeIsPrefetch = false
         activeKeys = []
         activeLocators = []
         activeJob = []

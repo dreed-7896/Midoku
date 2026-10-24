@@ -49,7 +49,8 @@ enum PageTranslator {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 90
+        // Large batches take longer to generate; allow about a second per dialogue, up to 10 minutes.
+        request.timeoutInterval = min(600, max(90, Double(regions.count) * 1.2))
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !TranslationSettings.apiKey.isEmpty {
             request.setValue("Bearer \(TranslationSettings.apiKey)", forHTTPHeaderField: "Authorization")
