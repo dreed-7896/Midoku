@@ -18,6 +18,12 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private var cacheOrder: [String] = []
     private var failures: [String: String] = [:]
     private var prefetched: [String: String] = [:]
+    /// Pages asked for with Translate This Page or a page range, in reading order, until translated.
+    private var requested: [(page: Page, locator: String)] = []
+    /// Set when translation was started for chosen pages only, so nothing else is sent this session.
+    private var choosesPages = false
+    /// Only requested pages are translated; the pages on screen and ahead are not sent automatically.
+    private var manual: Bool { choosesPages || !TranslationSettings.translatesAutomatically }
     private let fingerprints = NSMapTable<UIImage, NSString>(keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private var activeTask: Task<Void, Never>?
     private var activeToken: UUID?
@@ -54,10 +60,12 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         activeTask?.cancel()
     }
 
-    func setEnabled(_ enabled: Bool) {
+    func setEnabled(_ enabled: Bool, choosingPages: Bool = false) {
         guard enabled != isEnabled else { return }
         guard !enabled || owner?.reader is ReaderTranslationReader else { return }
         isEnabled = enabled
+        choosesPages = enabled && choosingPages
+        requested = []
         if enabled {
             installUI()
             let timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in
@@ -80,6 +88,51 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     func stop() { setEnabled(false) }
+
+    /// Translates only the page being read. Turns translation on for chosen pages if it is off.
+    func translateCurrentPage() {
+        guard let page = owner?.currentTranslationPage else { return }
+        request([page])
+    }
+
+    /// Translates pages of the current chapter, numbered from 1, in batches of the pages-at-a-time setting.
+    func translatePages(_ range: ClosedRange<Int>) {
+        guard let pages = owner?.pages, !pages.isEmpty else { return }
+        let lower = min(max(1, range.lowerBound), pages.count)
+        let upper = min(max(lower, range.upperBound), pages.count)
+        request(Array(pages[(lower - 1)...(upper - 1)]))
+    }
+
+    private func request(_ pages: [Page]) {
+        if !isEnabled { setEnabled(true, choosingPages: true) }
+        guard isEnabled else { return }
+        let known = Set(requested.map(\.locator))
+        let new = pages.filter { $0.type == .imagePage && !$0.isTextPage }.map { (page: $0, locator: locator(for: $0)) }
+        for item in new { failures[item.locator] = nil }
+        requested += new.filter { !known.contains($0.locator) && !isTranslated($0.locator) }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        refresh()
+    }
+
+    func openOptions() {
+        guard let owner else { return }
+        (owner.reader as? ReaderWebtoonViewController)?.pauseAutoScroll()
+        let view = ReaderTranslationOptionsView(
+            pageCount: owner.pages.count,
+            currentPage: owner.currentTranslationPage.flatMap { owner.pages.firstIndex(of: $0) }.map { $0 + 1 } ?? 1,
+            translateCurrentPage: { [weak self] in self?.translateCurrentPage() },
+            translatePages: { [weak self] in self?.translatePages($0) },
+            // Turning automatic translation on or off applies to this session too.
+            automaticChanged: { [weak self] in self?.choosesPages = false; self?.refresh() }
+        ).onDisappear { [weak self] in
+            (self?.owner?.reader as? ReaderWebtoonViewController)?.resumeAutoScroll()
+        }
+        owner.present(UIHostingController(rootView: view), animated: true)
+    }
+
+    private func isTranslated(_ locator: String) -> Bool {
+        prefetched[locator].flatMap { record(for: $0) } != nil
+    }
 
     func readerChanged() {
         guard isEnabled else { return }
@@ -155,11 +208,18 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             overlay.key = key
             overlay.onSelect = { [weak self] id in self?.select(key: key, id: id) }
             surface.imageView.bringSubviewToFront(overlay)
+            // Remember which page this translation belongs to, so requested and upcoming pages skip it.
+            if record(for: key) != nil { prefetched[locator(for: surface.page)] = key }
             overlay.configure(record: record(for: key) ?? pendingRecords[key],
                               selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll, original: original)
         }
+        requested.removeAll { isTranslated($0.locator) }
+        let requestedLocators = Set(requested.map(\.locator))
         var seen = Set<String>()
-        let needed = surfaces.filter { record(for: $0.1) == nil && failures[$0.1] == nil && seen.insert($0.1).inserted }
+        let needed = surfaces.filter { surface, key in
+            record(for: key) == nil && failures[key] == nil && seen.insert(key).inserted
+                && (!manual || requestedLocators.contains(locator(for: surface.page)))
+        }
         if !needed.isEmpty {
             // New visible pages take priority over an off-screen request or speculative prefetch.
             if activeToken != nil, !needed.contains(where: { activeKeys.contains($0.1) }),
@@ -171,7 +231,12 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
                 // Every visible page (a spread, or several webtoon strips) goes out in one request.
                 start(needed.compactMap { surface, key in surface.imageView.image.map { (key, $0) } })
             }
-        } else if activeToken == nil, !surfaces.isEmpty {
+        } else if activeToken == nil, !surfaces.isEmpty,
+                  case let batch = requested.filter({ failures[$0.locator] == nil }).prefix(TranslationSettings.pagesPerRequest),
+                  !batch.isEmpty {
+            // Chosen pages go first, in batches.
+            prefetch(Array(batch))
+        } else if activeToken == nil, !surfaces.isEmpty, !manual {
             // Wait until the reader is halfway through the pages already translated ahead, then send the
             // next full batch, so pages are not sent one at a time as each enters the look-ahead.
             let limit = TranslationSettings.pagesPerRequest
@@ -336,11 +401,18 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     }
 
     private func updateStatus() {
-        let error = surfaces.compactMap { failures[$0.1] }.first
+        // Chosen pages that are not on screen report their error once none of them can continue.
+        let requestError = requested.allSatisfy { failures[$0.locator] != nil } ? requested.lazy.compactMap { self.failures[$0.locator] }.first : nil
+        let error = surfaces.compactMap { failures[$0.1] }.first ?? requestError
         let records = surfaces.compactMap { record(for: $0.1) }
         if let error { statusLabel.text = error }
         else if surfaces.isEmpty { statusLabel.text = "Translation on · swipe pages or scroll normally" }
-        else if records.count < surfaces.count { statusLabel.text = "Translating page… · keep reading" }
+        else if !requested.isEmpty {
+            statusLabel.text = requested.count == 1 ? "Translating 1 page… · keep reading" : "Translating \(requested.count) pages… · keep reading"
+        }
+        else if records.count < surfaces.count {
+            statusLabel.text = manual ? "Not translated · hold Translate for this page or a range" : "Translating page… · keep reading"
+        }
         else if records.allSatisfy({ $0.regions.isEmpty }) { statusLabel.text = "No Japanese dialogue found" }
         else { statusLabel.text = showAll ? "Tap a translation to select it" : "Tap marked text · swipe pages or scroll normally" }
         // While a dialogue is selected, the toolbar only steps through dialogues or closes the selection.
@@ -445,13 +517,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         owner?.present(UIHostingController(rootView: view), animated: true)
     }
 
-    @objc private func openAppearance() {
-        (owner?.reader as? ReaderWebtoonViewController)?.pauseAutoScroll()
-        let view = ReaderTranslationAppearanceView().onDisappear { [weak self] in
-            (self?.owner?.reader as? ReaderWebtoonViewController)?.resumeAutoScroll()
-        }
-        owner?.present(UIHostingController(rootView: view), animated: true)
-    }
+    @objc private func openAppearance() { openOptions() }
 
     private func installUI() {
         guard let owner else { return }
@@ -469,10 +535,10 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             accessory.clipsToBounds = true
             let buttons = [previousButton, nextButton, allButton, listButton, originalButton, appearanceButton, retryButton, offButton,
                            closeDialogueButton]
-            let symbols = ["chevron.left", "chevron.right", "text.bubble", "list.number", "eye", "textformat.size", "arrow.clockwise", "xmark",
+            let symbols = ["chevron.left", "chevron.right", "text.bubble", "list.number", "eye", "gearshape", "arrow.clockwise", "xmark",
                            "xmark.circle"]
             let labels = ["Previous dialogue", "Next dialogue", "Show all translations", "Dialogue list", "Hold to show original",
-                          "Translation appearance", "Retry translation", "Disable translation", "Close dialogue"]
+                          "Translation options", "Retry translation", "Disable translation", "Close dialogue"]
             for (index, button) in buttons.enumerated() {
                 button.setImage(UIImage(systemName: symbols[index]), for: .normal)
                 button.accessibilityLabel = labels[index]

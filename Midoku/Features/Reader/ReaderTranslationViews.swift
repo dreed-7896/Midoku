@@ -90,26 +90,88 @@ struct ReaderTranslationListView: View {
     }
 }
 
-struct ReaderTranslationAppearanceView: View {
+/// Translation options shown from the reader: which pages to translate, how, and how translations look.
+struct ReaderTranslationOptionsView: View {
+    let pageCount: Int
+    let translateCurrentPage: () -> Void
+    let translatePages: (ClosedRange<Int>) -> Void
+    let automaticChanged: () -> Void
+    @AppStorage(TranslationSettings.automaticKey) private var automatic = true
+    @AppStorage(TranslationSettings.pagesPerRequestKey) private var pagesPerRequest = TranslationSettings.defaultPagesPerRequest
     @AppStorage("Translation.overlayFontSize") private var fontSize = 14.0
     @AppStorage("Translation.overlayOpacity") private var opacity = 0.94
+    @State private var from: Int
+    @State private var to: Int
     @Environment(\.dismiss) private var dismiss
+
+    init(pageCount: Int, currentPage: Int, translateCurrentPage: @escaping () -> Void,
+         translatePages: @escaping (ClosedRange<Int>) -> Void, automaticChanged: @escaping () -> Void) {
+        self.pageCount = max(1, pageCount)
+        self.translateCurrentPage = translateCurrentPage
+        self.translatePages = translatePages
+        self.automaticChanged = automaticChanged
+        let start = min(max(1, currentPage), self.pageCount)
+        _from = State(initialValue: start)
+        _to = State(initialValue: min(self.pageCount, start + 9))
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Text size") {
+                Section {
+                    Button {
+                        translateCurrentPage()
+                        dismiss()
+                    } label: {
+                        Label("Translate This Page", systemImage: "doc.text")
+                    }
+                }
+
+                Section {
+                    Picker("From", selection: $from) {
+                        ForEach(1...pageCount, id: \.self) { Text("Page \($0)").tag($0) }
+                    }
+                    Picker("To", selection: $to) {
+                        ForEach(1...pageCount, id: \.self) { Text("Page \($0)").tag($0) }
+                    }
+                    Button {
+                        translatePages(from...to)
+                        dismiss()
+                    } label: {
+                        Label(from == to ? "Translate Page \(from)" : "Translate Pages \(from)–\(to)", systemImage: "doc.on.doc")
+                    }
+                } header: {
+                    Text("Page range")
+                } footer: {
+                    Text("Pages are sent \(pagesPerRequest == 1 ? "one page" : "\(pagesPerRequest) pages") at a time. Pages already translated are skipped.")
+                }
+                .onChange(of: from) { if to < $0 { to = $0 } }
+                .onChange(of: to) { if from > $0 { from = $0 } }
+
+                Section {
+                    Toggle("Translate as I read", isOn: $automatic)
+                        .onChange(of: automatic) { _ in automaticChanged() }
+                    Picker("Pages at a time", selection: $pagesPerRequest) {
+                        ForEach(TranslationSettings.pagesPerRequestOptions, id: \.self) { count in
+                            Text(count == 1 ? "1 page" : "\(count) pages").tag(count)
+                        }
+                    }
+                } footer: {
+                    Text(automatic
+                         ? "The page on screen and the pages ahead are translated while you read."
+                         : "Only pages you choose are translated. Saved translations still show.")
+                }
+
+                Section("Appearance") {
                     Slider(value: $fontSize, in: 10...24, step: 1).accessibilityLabel("Translation text size")
                     Text("Translation preview").font(.system(size: fontSize))
-                }
-                Section("Overlay background") {
                     Slider(value: $opacity, in: 0.5...1).accessibilityLabel("Translation background opacity")
                 }
             }
-            .navigationTitle("Translation appearance")
+            .navigationTitle("Translation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }

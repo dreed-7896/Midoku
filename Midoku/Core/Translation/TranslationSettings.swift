@@ -7,6 +7,7 @@ enum TranslationSettings {
     static let modelKey = "Translation.model"
     static let mistralModelKey = "Translation.mistralModel"
     static let pagesPerRequestKey = "Translation.pagesPerRequest"
+    static let automaticKey = "Translation.automatic"
     static let defaultPagesPerRequest = 50
     static let pagesPerRequestOptions = [1, 3, 5, 10, 20, 30, 50, 100]
 
@@ -14,6 +15,12 @@ enum TranslationSettings {
     static var pagesPerRequest: Int {
         let value = UserDefaults.standard.integer(forKey: pagesPerRequestKey)
         return value > 0 ? value : defaultPagesPerRequest
+    }
+
+    /// Whether turning on translation also translates the pages on screen and the ones ahead.
+    /// When off, only pages the reader asks for are translated.
+    static var translatesAutomatically: Bool {
+        UserDefaults.standard.object(forKey: automaticKey) as? Bool ?? true
     }
 
     static let defaultEndpoint = "https://api.openai.com/v1/chat/completions"
