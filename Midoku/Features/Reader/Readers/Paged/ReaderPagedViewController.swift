@@ -1520,14 +1520,17 @@ extension ReaderPagedViewController: ReaderTranslationReader {
         }
     }
 
-    func nextTranslationPage() -> Page? {
-        let next = currentPage + (usesDoublePages ? 2 : 1)
-        guard next > 0, next <= displayPageCount else { return nil }
-        let actual = actualPageIndex(from: next)
-        if let split = splitPages[actual] {
-            return split[safe: splitIndex(for: next, actualPageIndex: actual)]
+    func nextTranslationPages(limit: Int) -> [Page] {
+        // Both pages of each following spread, in reading order.
+        let first = currentPage + (usesDoublePages ? 2 : 1)
+        guard first > 0, first <= displayPageCount else { return [] }
+        return (first...min(displayPageCount, first + limit - 1)).compactMap { next in
+            let actual = actualPageIndex(from: next)
+            if let split = splitPages[actual] {
+                return split[safe: splitIndex(for: next, actualPageIndex: actual)]
+            }
+            return viewModel.pages[safe: actual - 1]
         }
-        return viewModel.pages[safe: actual - 1]
     }
 
     func revealTranslation(_ rect: CGRect, in imageView: UIImageView) {

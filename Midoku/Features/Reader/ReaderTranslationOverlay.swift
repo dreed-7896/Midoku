@@ -8,8 +8,39 @@ struct ReaderTranslationSurface {
 @MainActor
 protocol ReaderTranslationReader: ReaderReaderDelegate {
     func translationSurfaces() -> [ReaderTranslationSurface]
-    func nextTranslationPage() -> Page?
+    /// Upcoming pages after the visible ones, in reading order.
+    func nextTranslationPages(limit: Int) -> [Page]
     func revealTranslation(_ rect: CGRect, in imageView: UIImageView)
+}
+
+/// One page of a batched translation request. Region ids are page-local; `offset` makes them
+/// unique within the request so several pages can be translated together.
+struct ReaderTranslationJobPage {
+    let key: String
+    let locator: String?
+    let regions: [TranslationRegion]
+    var offset = 0
+
+    /// Expects pages whose offsets were assigned by `offsets(_:)`.
+    static func combinedRegions(_ pages: [ReaderTranslationJobPage]) -> [TranslationRegion] {
+        pages.flatMap { page in
+            page.regions.map { TranslationRegion(id: page.offset + $0.id, imageIndex: $0.imageIndex, sourceText: $0.sourceText, bounds: $0.bounds) }
+        }
+    }
+
+    static func offsets(_ pages: [ReaderTranslationJobPage]) -> [ReaderTranslationJobPage] {
+        var next = 0
+        return pages.map { page in
+            var page = page
+            page.offset = next
+            next += (page.regions.map(\.id).max() ?? -1) + 1
+            return page
+        }
+    }
+
+    func translations(from combined: [Int: String]) -> [Int: String] {
+        Dictionary(uniqueKeysWithValues: regions.compactMap { region in combined[offset + region.id].map { (region.id, $0) } })
+    }
 }
 
 final class ReaderTranslationRecord {

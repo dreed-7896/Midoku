@@ -1177,14 +1177,12 @@ extension ReaderWebtoonViewController: ReaderTranslationReader {
         }
     }
 
-    func nextTranslationPage() -> Page? {
-        guard let path = collectionNode.view.indexPathsForVisibleItems.max(), pages.indices.contains(path.section) else { return nil }
-        let section = pages[path.section]
-        if let next = section.dropFirst(path.item + 1).first(where: { $0.type == .imagePage && !$0.isTextPage }) {
-            return next
-        }
-        guard pages.indices.contains(path.section + 1) else { return nil }
-        return pages[path.section + 1].first(where: { $0.type == .imagePage && !$0.isTextPage })
+    func nextTranslationPages(limit: Int) -> [Page] {
+        guard let path = collectionNode.view.indexPathsForVisibleItems.max(), pages.indices.contains(path.section) else { return [] }
+        // The rest of this chapter, then the start of the next one.
+        let upcoming = pages[path.section].dropFirst(path.item + 1)
+            + (pages.indices.contains(path.section + 1) ? pages[path.section + 1] : [])
+        return Array(upcoming.filter { $0.type == .imagePage && !$0.isTextPage }.prefix(limit))
     }
 
     func revealTranslation(_ rect: CGRect, in imageView: UIImageView) {

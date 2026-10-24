@@ -23,10 +23,11 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private let fingerprints = NSMapTable<UIImage, NSString>(keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private var activeTask: Task<Void, Never>?
     private var activeToken: UUID?
-    private var activeKey: String?
-    private var activeRegions: [TranslationRegion] = []
-    private var activeLocator: String?
-    private var pendingRecord: ReaderTranslationRecord?
+    private var activeKeys = Set<String>()
+    private var activeLocators: [String] = []
+    private var activeJob: [ReaderTranslationJobPage] = []
+    private var pendingRecords: [String: ReaderTranslationRecord] = [:]
+    private var recentDialogue: [(source: String, translation: String)] = []
     private var selected: (key: String, id: Int)?
     private var showAll = false
     private var original = false
@@ -74,6 +75,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             refresh()
         } else {
             stopWork()
+            recentDialogue = []
             timer?.invalidate(); timer = nil
             displayLink?.invalidate(); displayLink = nil
             overlays.forEach { $0.removeFromSuperview() }; overlays = []
@@ -163,65 +165,102 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             overlay.key = key
             overlay.onSelect = { [weak self] id in self?.select(key: key, id: id) }
             surface.imageView.bringSubviewToFront(overlay)
-            overlay.configure(record: cache[key] ?? (activeKey == key ? pendingRecord : nil),
+            overlay.configure(record: cache[key] ?? pendingRecords[key],
                               selectedID: selected?.key == key ? selected?.id : nil, showAll: showAll, original: original)
         }
-        let needed = surfaces.first { cache[$0.1] == nil && failures[$0.1] == nil }
-        if let needed {
+        var seen = Set<String>()
+        let needed = surfaces.filter { cache[$0.1] == nil && failures[$0.1] == nil && seen.insert($0.1).inserted }
+        if !needed.isEmpty {
             // New visible pages take priority over an off-screen request or speculative prefetch.
-            if activeToken != nil, activeKey != needed.1, !surfaces.contains(where: { $0.1 == activeKey }) { stopWork() }
-            if activeToken == nil, let image = needed.0.imageView.image {
-                start(page: needed.0.page, image: image, key: needed.1, locator: nil)
+            if activeToken != nil, !needed.contains(where: { activeKeys.contains($0.1) }),
+               !surfaces.contains(where: { activeKeys.contains($0.1) }) { stopWork() }
+            if activeToken == nil {
+                // Every visible page (a spread, or several webtoon strips) goes out in one request.
+                start(needed.compactMap { surface, key in surface.imageView.image.map { (key, $0) } })
             }
-        } else if activeToken == nil, !surfaces.isEmpty, let next = reader.nextTranslationPage(), !next.isTextPage {
-            let locator = locator(for: next)
-            if prefetched[locator].flatMap({ cache[$0] }) == nil, failures[locator] == nil {
-                prefetch(page: next, locator: locator)
-            }
+        } else if activeToken == nil, !surfaces.isEmpty {
+            let upcoming = reader.nextTranslationPages(limit: Self.prefetchPageCount)
+                .filter { !$0.isTextPage }
+                .map { (page: $0, locator: locator(for: $0)) }
+                .filter { prefetched[$0.locator].flatMap { cache[$0] } == nil && failures[$0.locator] == nil }
+            if !upcoming.isEmpty { prefetch(upcoming) }
         }
         updateStatus()
         positionCallout()
     }
 
-    private func start(page: Page, image: UIImage, key: String, locator: String?) {
+    /// Pages translated ahead in a single request; more pages per request means fewer requests
+    /// and more surrounding dialogue for the model.
+    private static let prefetchPageCount = 3
+    /// Dialogue already translated in this session, sent as read-only context with each request.
+    private static let contextLineCount = 30
+
+    private func start(_ pages: [(key: String, image: UIImage)]) {
         let token = UUID()
         activeToken = token
-        activeKey = key
-        activeLocator = locator
+        activeKeys = Set(pages.map(\.key))
         activeTask = Task { [weak self] in
             guard let self else { return }
-            await recognize(image: image, webtoon: owner?.readingMode == .webtoon || owner?.readingMode == .continuous, token: token)
+            var jobPages: [ReaderTranslationJobPage] = []
+            for page in pages {
+                guard let regions = await recognize(page.image, token: token) else { return }
+                jobPages.append(ReaderTranslationJobPage(key: page.key, locator: nil, regions: regions))
+                showPending(jobPages.last!)
+            }
+            await translate(jobPages, token: token)
         }
     }
 
-    private func prefetch(page: Page, locator: String) {
+    private func prefetch(_ pages: [(page: Page, locator: String)]) {
         let token = UUID()
         activeToken = token
-        activeLocator = locator
+        activeLocators = pages.map(\.locator)
         activeTask = Task { [weak self] in
             guard let self, let owner = self.owner else { return }
-            guard let image = await owner.loadTranslationImage(for: page), !Task.isCancelled, activeToken == token else {
-                if activeToken == token { finish(token: token, translations: [:], error: "Next page could not be loaded.") }
-                return
+            var jobPages: [ReaderTranslationJobPage] = []
+            for (page, locator) in pages {
+                guard let image = await owner.loadTranslationImage(for: page), !Task.isCancelled, activeToken == token else {
+                    guard !Task.isCancelled, activeToken == token else { return }
+                    // Translate the pages that did load; Retry tries the missing one again.
+                    failures[locator] = "Next page could not be loaded."
+                    activeLocators.removeAll { $0 == locator }
+                    break
+                }
+                let cacheKey = self.key(page: page, image: image)
+                prefetched[locator] = cacheKey
+                if cache[cacheKey] != nil { continue }
+                activeKeys.insert(cacheKey)
+                guard let regions = await recognize(image, token: token) else { return }
+                jobPages.append(ReaderTranslationJobPage(key: cacheKey, locator: locator, regions: regions))
+                showPending(jobPages.last!)
             }
-            let cacheKey = self.key(page: page, image: image)
-            activeKey = cacheKey
-            prefetched[locator] = cacheKey
-            if cache[cacheKey] != nil { stopWork(); return }
-            await recognize(image: image, webtoon: owner.readingMode == .webtoon || owner.readingMode == .continuous, token: token)
+            guard activeToken == token else { return }
+            if jobPages.isEmpty { stopWork(); render(); return }
+            await translate(jobPages, token: token)
         }
     }
 
-    private func recognize(image: UIImage, webtoon: Bool, token: UUID) async {
+    private func recognize(_ image: UIImage, token: UUID) async -> [TranslationRegion]? {
+        let webtoon = owner?.readingMode == .webtoon || owner?.readingMode == .continuous
         let regions = await PageTranslator.recognize([image], webtoon: webtoon)
-        guard !Task.isCancelled, activeToken == token else { return }
-        activeRegions = regions
-        pendingRecord = ReaderTranslationRecord(regions: regions, translations: [:])
+        guard !Task.isCancelled, activeToken == token else { return nil }
+        return regions
+    }
+
+    private func showPending(_ page: ReaderTranslationJobPage) {
+        pendingRecords[page.key] = ReaderTranslationRecord(regions: page.regions, translations: [:])
         render()
+    }
+
+    /// Sends the dialogue of every page in the job together, with ids made unique across pages.
+    private func translate(_ pages: [ReaderTranslationJobPage], token: UUID) async {
+        let pages = ReaderTranslationJobPage.offsets(pages)
+        activeJob = pages
+        let regions = ReaderTranslationJobPage.combinedRegions(pages)
         if regions.isEmpty { finish(token: token, translations: [:], error: nil); return }
         if TranslationSettings.usesOpenAI {
             do {
-                let translations = try await PageTranslator.translateWithAPI(regions)
+                let translations = try await PageTranslator.translateWithAPI(regions, context: recentDialogue)
                 guard !Task.isCancelled, activeToken == token else { return }
                 finish(token: token, translations: translations, error: nil)
             } catch {
@@ -244,14 +283,21 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private func finish(token: UUID, translations: [Int: String], error: String?) {
         guard activeToken == token else { return }
         if let error {
-            if let key = activeKey { failures[key] = error }
-            if let locator = activeLocator { failures[locator] = error }
-        } else if let key = activeKey {
+            for key in activeKeys { failures[key] = error }
+            for locator in activeLocators { failures[locator] = error }
+        } else {
             if failures.count > 80 { failures.removeAll() }
             if prefetched.count > 80 { prefetched.removeAll() }
-            cache[key] = ReaderTranslationRecord(regions: activeRegions, translations: translations)
-            cacheOrder.removeAll { $0 == key }
-            cacheOrder.append(key)
+            for page in activeJob {
+                let local = page.translations(from: translations)
+                cache[page.key] = ReaderTranslationRecord(regions: page.regions, translations: local)
+                cacheOrder.removeAll { $0 == page.key }
+                cacheOrder.append(page.key)
+                recentDialogue += page.regions.compactMap { region in
+                    local[region.id].map { (source: region.sourceText, translation: $0) }
+                }
+            }
+            recentDialogue = Array(recentDialogue.suffix(Self.contextLineCount))
             while cacheOrder.count > 40 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
         }
         stopWork()
@@ -260,10 +306,10 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     private func stopWork() {
         activeToken = nil
-        activeKey = nil
-        activeLocator = nil
-        activeRegions = []
-        pendingRecord = nil
+        activeKeys = []
+        activeLocators = []
+        activeJob = []
+        pendingRecords = [:]
         activeTask?.cancel()
         activeTask = nil
         appleRequest = nil
@@ -272,7 +318,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
 
     private func render() {
         for overlay in overlays {
-            overlay.configure(record: cache[overlay.key] ?? (activeKey == overlay.key ? pendingRecord : nil),
+            overlay.configure(record: cache[overlay.key] ?? pendingRecords[overlay.key],
                               selectedID: selected?.key == overlay.key ? selected?.id : nil, showAll: showAll, original: original)
         }
         updateStatus()
