@@ -174,10 +174,26 @@ final class MCCollectionStore {
             updateChapterMetadata(loaded)
             snapshot = loaded
             MCArtworkCache.shared.retainLibraryArtwork(libraryArtworkKeys())
+            syncTranslationLibrary()
         } catch {
             writable = false
             self.error = "Your library could not be opened. Its saved file has been kept. \(error.localizedDescription)"
         }
+    }
+
+    @ObservationIgnored private var translationFolders: Set<String>?
+
+    /// Titles in the library keep their page translations; removing an entry deletes them.
+    /// Every linked source counts, since the reader can open the entry from any of them.
+    private func syncTranslationLibrary() {
+        let sourceKeys = Dictionary(snapshot.connections.map { ($0.id, $0.sourceKey) }, uniquingKeysWith: { first, _ in first })
+        let folders = Set(library.entries.flatMap(\.links).compactMap { link -> String? in
+            guard let listing = library.listing(link.listingID), let sourceKey = sourceKeys[listing.identity.connectionID] else { return nil }
+            return TranslationStore.folder(sourceKey: sourceKey, mangaKey: listing.identity.externalID)
+        })
+        guard folders != translationFolders else { return }
+        translationFolders = folders
+        TranslationStore.shared.retainLibrary(folders: folders)
     }
 
     /// Cache keys of the source covers the library shows, matching `MCEntryCover`.
@@ -204,6 +220,7 @@ final class MCCollectionStore {
         snapshot = candidate
         snapshotRevision += 1
         if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
+        syncTranslationLibrary()
     }
 
     /// Encode and validate large refreshes off the UI thread. Retry against current edits
@@ -230,6 +247,7 @@ final class MCCollectionStore {
             snapshot = candidate
             snapshotRevision += 1
             if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
+            syncTranslationLibrary()
             return
         }
     }

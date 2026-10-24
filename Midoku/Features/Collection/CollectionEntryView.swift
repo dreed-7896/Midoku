@@ -418,9 +418,10 @@ struct MCEntryView: View {
                 }.buttonStyle(.plain).accessibilityLabel("View cover fullscreen")
                 VStack(alignment: .leading, spacing: 8) {
                     let title = store.library.title(entry)
+                    // The full title always shows, wrapping over as many lines as it needs.
                     Text(title)
                         .font(.title3.bold())
-                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
                         .gesture(copyOrSearchGesture(for: title))
                     let artist = mainCreator(entry)
@@ -441,8 +442,8 @@ struct MCEntryView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if !store.library.description(entry).isEmpty {
-                Text(store.library.description(entry)).font(.subheadline).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                MCExpandableText(text: store.library.description(entry))
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
             let tags = entryTags(entry)
             if !tags.isEmpty {
@@ -859,6 +860,42 @@ struct MCChapterOrderView: View {
                 .navigationTitle("Chapters and titles").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
                 .mcErrors(store)
+        }
+    }
+}
+
+/// Long text folded to a few lines, with More and Less to expand and collapse it.
+/// The button only appears when the text is actually longer than the folded lines.
+struct MCExpandableText: View {
+    let text: String
+    var lineLimit = 3
+    @State private var expanded = false
+    @State private var foldedHeight: CGFloat = 0
+    @State private var fullHeight: CGFloat = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text)
+                .lineLimit(expanded ? nil : lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(alignment: .topLeading) {
+                    // Hidden copies measure the folded and full heights at the same width.
+                    ZStack(alignment: .topLeading) {
+                        Text(text).lineLimit(lineLimit).fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { foldedHeight = $0 }
+                        Text(text).fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
+                    }
+                    .hidden()
+                }
+            if fullHeight > foldedHeight + 1 {
+                Button(expanded ? "Less" : "More") {
+                    withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel(expanded ? "Show less description" : "Show full description")
+            }
         }
     }
 }
