@@ -544,7 +544,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         let maxY = accessory.isHidden ? available.maxY : accessory.frame.minY - 8
         let viewport = CGRect(x: available.minX + 12, y: available.minY + 12,
                               width: max(0, available.width - 24), height: max(0, maxY - available.minY - 24))
-        let anchor = overlay.convert(overlay.rect(for: region), to: owner.view).intersection(viewport)
+        // Anchor to the drawn bubble so the tooltip never covers it.
+        let anchor = overlay.convert(overlay.displayedRect(for: region), to: owner.view).intersection(viewport)
         guard viewport.width > 40, viewport.height > 80, !anchor.isNull, !anchor.isEmpty else {
             callout.isHidden = true; connector.path = nil; return
         }

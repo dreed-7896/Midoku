@@ -96,6 +96,13 @@ final class ReaderTranslationImageOverlay: UIView {
         return region.rect(in: area.size).offsetBy(dx: area.minX, dy: area.minY)
     }
 
+    /// Where the dialogue is drawn: its translated bubble when shown, otherwise the original text.
+    func displayedRect(for region: TranslationRegion) -> CGRect {
+        layoutIfNeeded()
+        if let annotation = annotations[region.id], annotation.showsText, !annotation.frame.isEmpty { return annotation.frame }
+        return rect(for: region)
+    }
+
     func configure(record: ReaderTranslationRecord?, selectedID: Int?, showAll: Bool, original: Bool) {
         let font = UserDefaults.standard.object(forKey: "Translation.overlayFontSize") as? Double ?? 14
         let background = UserDefaults.standard.object(forKey: "Translation.overlayOpacity") as? Double ?? 0.94
@@ -119,8 +126,11 @@ final class ReaderTranslationImageOverlay: UIView {
         fontSize = font
         opacity = background
         for region in record?.regions ?? [] {
+            // The selected dialogue always shows its translated bubble over the original text,
+            // also in tap mode, so jumping with previous/next shows both the bubble and its tooltip.
+            let showsBubble = (showAll || selectedID == region.id) && record?.translations[region.id] != nil
             annotations[region.id]?.configure(number: region.id + 1, translation: record?.translations[region.id],
-                                               selected: selectedID == region.id, showAll: showAll && record?.translations.isEmpty == false,
+                                               selected: selectedID == region.id, showAll: showsBubble,
                                                fontSize: font, opacity: background)
         }
         setNeedsLayout()
