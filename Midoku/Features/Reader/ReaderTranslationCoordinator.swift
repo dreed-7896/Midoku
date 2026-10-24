@@ -293,7 +293,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         render()
     }
 
-    /// Memory first, then translations saved on device within the last 30 days.
+    /// Memory first, then translations saved on device (kept while the title is in the library).
     private func record(for key: String) -> ReaderTranslationRecord? {
         if let record = cache[key] { return record }
         guard let stored = TranslationStore.shared.record(for: key) else { return nil }
