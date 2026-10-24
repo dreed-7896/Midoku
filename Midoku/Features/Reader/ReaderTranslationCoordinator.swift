@@ -35,6 +35,8 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
     private let connector = CAShapeLayer()
     private let accessory = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
     private let statusLabel = UILabel()
+    private let previousButton = UIButton(type: .system)
+    private let nextButton = UIButton(type: .system)
     private let allButton = UIButton(type: .system)
     private let listButton = UIButton(type: .system)
     private let originalButton = UIButton(type: .system)
@@ -349,6 +351,10 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         else { statusLabel.text = showAll ? "Tap a translation to expand" : "Tap marked text · swipe pages or scroll normally" }
         retryButton.isHidden = error == nil
         listButton.isEnabled = !overlays.allSatisfy { $0.record?.regions.isEmpty != false }
+        let sequence = bubbleSequence()
+        let position = selected.flatMap { selected in sequence.firstIndex { $0.key == selected.key && $0.id == selected.id } }
+        previousButton.isEnabled = !sequence.isEmpty && position != 0
+        nextButton.isEnabled = !sequence.isEmpty && position != sequence.count - 1
         allButton.setImage(UIImage(systemName: showAll ? "hand.tap" : "text.bubble"), for: .normal)
         allButton.accessibilityLabel = showAll ? "Use tap translation" : "Show all translations"
         updateControlPosition()
@@ -367,6 +373,42 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         }
         if selected != nil { select(key: nil, id: nil); return true }
         return false
+    }
+
+    /// Visible bubbles in reading order: pages in the order they appear, then each page's dialogue order.
+    private func bubbleSequence() -> [(key: String, id: Int)] {
+        var seen = Set<String>()
+        return surfaces.map { $0.1 }.filter { seen.insert($0).inserted }.flatMap { key in
+            (record(for: key)?.regions ?? []).map { (key: key, id: $0.id) }
+        }
+    }
+
+    @objc private func selectPrevious() { step(by: -1) }
+    @objc private func selectNext() { step(by: 1) }
+
+    /// Moves the selection to the neighboring bubble. With nothing selected, next starts at the
+    /// first bubble and previous at the last.
+    private func step(by offset: Int) {
+        let sequence = bubbleSequence()
+        guard !sequence.isEmpty else { return }
+        let current = selected.flatMap { selected in sequence.firstIndex { $0.key == selected.key && $0.id == selected.id } }
+        let index = current.map { $0 + offset } ?? (offset > 0 ? 0 : sequence.count - 1)
+        guard sequence.indices.contains(index) else { return }
+        let target = sequence[index]
+        select(key: target.key, id: target.id)
+        UISelectionFeedbackGenerator().selectionChanged()
+        reveal(key: target.key, id: target.id)
+    }
+
+    /// Scrolls a bubble into view only when it is not already fully visible, so stepping through a
+    /// page does not move or zoom it.
+    private func reveal(key: String, id: Int) {
+        guard let owner, let overlay = overlays.first(where: { $0.key == key }), let imageView = overlay.imageView,
+              let region = overlay.record?.regions.first(where: { $0.id == id }) else { return }
+        let rect = overlay.rect(for: region)
+        let visible = owner.view.bounds.inset(by: owner.view.safeAreaInsets)
+        guard !visible.contains(overlay.convert(rect, to: owner.view)) else { return }
+        (owner.reader as? ReaderTranslationReader)?.revealTranslation(rect, in: imageView)
     }
 
     @objc private func toggleAll() { showAll.toggle(); render() }
@@ -424,14 +466,17 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         if accessory.superview == nil {
             accessory.layer.cornerRadius = 18
             accessory.clipsToBounds = true
-            let buttons = [allButton, listButton, originalButton, appearanceButton, retryButton, offButton]
-            let symbols = ["text.bubble", "list.number", "eye", "textformat.size", "arrow.clockwise", "xmark"]
-            let labels = ["Show all translations", "Dialogue list", "Hold to show original", "Translation appearance", "Retry translation", "Disable translation"]
+            let buttons = [previousButton, nextButton, allButton, listButton, originalButton, appearanceButton, retryButton, offButton]
+            let symbols = ["chevron.left", "chevron.right", "text.bubble", "list.number", "eye", "textformat.size", "arrow.clockwise", "xmark"]
+            let labels = ["Previous dialogue", "Next dialogue", "Show all translations", "Dialogue list", "Hold to show original",
+                          "Translation appearance", "Retry translation", "Disable translation"]
             for (index, button) in buttons.enumerated() {
                 button.setImage(UIImage(systemName: symbols[index]), for: .normal)
                 button.accessibilityLabel = labels[index]
                 button.heightAnchor.constraint(equalToConstant: 40).isActive = true
             }
+            previousButton.addTarget(self, action: #selector(selectPrevious), for: .touchUpInside)
+            nextButton.addTarget(self, action: #selector(selectNext), for: .touchUpInside)
             allButton.addTarget(self, action: #selector(toggleAll), for: .touchUpInside)
             listButton.addTarget(self, action: #selector(openList), for: .touchUpInside)
             originalButton.addTarget(self, action: #selector(showOriginal), for: .touchDown)
