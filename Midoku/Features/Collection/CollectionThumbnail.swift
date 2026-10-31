@@ -153,14 +153,14 @@ struct MCChapterListArtwork: View {
         .task(id: variant?.chapterID) {
             cachedSourceImage = nil
             guard customCover == nil, generatedImage == nil, let chapter,
-                  let thumbnail = store.snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter.thumbnail else { return }
+                  let thumbnail = store.storedChapter(chapter.id)?.thumbnail else { return }
             cachedSourceImage = await existingSourceImage(thumbnail, chapter: chapter)
         }
         .accessibilityHidden(true)
     }
 
     private func existingSourceImage(_ value: String, chapter: MCLibraryChapter) async -> UIImage? {
-        let sourceKey = store.snapshot.connections.first { $0.id == chapter.identity.listing.connectionID }?.sourceKey
+        let sourceKey = store.connection(chapter.identity.listing.connectionID)?.sourceKey
         let key = MCArtworkCache.key(url: value, sourceKey: sourceKey)
         if let cached = await MCArtworkCache.shared.image(for: key) { return cached.image }
         guard let url = URL(string: value) else { return nil }
@@ -200,7 +200,7 @@ struct MCChapterThumbnail: View {
                     MCCustomCoverImage(cover: customCover, size: geometry.size)
                 } else if let image = image ?? chapter.flatMap({ MCThumbnailCache.shared.cachedImage(chapterID: $0.id) }) {
                     Image(uiImage: image).resizable().scaledToFill()
-                } else if let chapter, let thumbnail = store.snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter.thumbnail {
+                } else if let chapter, let thumbnail = store.storedChapter(chapter.id)?.thumbnail {
                     SourceImageView(source: store.source(chapter.identity.listing.connectionID), imageUrl: thumbnail,
                         width: geometry.size.width, height: geometry.size.height, placeholder: "MidokuChapterPlaceholder")
                 } else {
@@ -213,7 +213,7 @@ struct MCChapterThumbnail: View {
             guard customCover == nil, let chapter else { return }
             if let cached = MCThumbnailCache.shared.cachedImage(chapterID: chapter.id) { image = cached; return }
             guard visible,
-                  store.snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter.thumbnail == nil else { return }
+                  store.storedChapter(chapter.id)?.thumbnail == nil else { return }
             do { try await Task.sleep(nanoseconds: 300_000_000); try Task.checkCancellation() } catch { return }
             image = await MCThumbnailCache.shared.image(chapter: chapter, store: store)
         }.accessibilityHidden(true)

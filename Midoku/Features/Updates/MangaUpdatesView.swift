@@ -309,10 +309,11 @@ extension MangaUpdatesView {
 
         MCCollectionStore.shared.perform { state in
             let identifiers = Set(updates)
+            let mangaByListing = Dictionary(state.manga.map { ($0.listingID, $0.manga) }, uniquingKeysWith: { first, _ in first })
             let removedIDs = Set(state.library.updates.filter { item in
                 guard let chapter = state.library.chapter(item.chapterID),
-                      let listing = state.library.listings.first(where: { $0.identity == chapter.identity.listing }),
-                      let manga = state.manga.first(where: { $0.listingID == listing.id })?.manga else { return false }
+                      let listing = state.library.listing(identity: chapter.identity.listing),
+                      let manga = mangaByListing[listing.id] else { return false }
                 let id = ChapterIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key,
                     chapterKey: chapter.record.id)
                 return identifiers.contains(id)

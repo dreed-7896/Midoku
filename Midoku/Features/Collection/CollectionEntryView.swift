@@ -180,6 +180,7 @@ struct MCEntryView: View {
     @AppStorage("Appearance.chapterPortraitColumns") private var portraitColumns = 3
     @AppStorage("Appearance.chapterLandscapeColumns") private var landscapeColumns = 5
     @State private var viewportSize = CGSize.zero
+    @State private var rowsCache = MCEntryRowsCache()
     private var entry: MCPersonalEntry? { store.library.entry(entryID) }
     private var grid: Bool { entry?.chapterGridOverride ?? defaultChapterGrid }
     private var chapterGridOverride: Binding<Bool?> {
@@ -217,7 +218,21 @@ struct MCEntryView: View {
         }
     }
 
-    private var contents: [MCEntryContent] {
+    /// Sorted rows and a slot table, rebuilt only after the library changes rather than
+    /// on each render; rows then find their slot without scanning the whole entry.
+    private var contents: [MCEntryContent] { cachedRows.contents }
+
+    private var cachedRows: MCEntryRowsCache.Rows {
+        let key = MCEntryRowsCache.Key(revision: store.revision, entryID: entryID, entry: entry?.updatedAt)
+        if rowsCache.key == key, let rows = rowsCache.rows { return rows }
+        let rows = MCEntryRowsCache.Rows(contents: computeContents(),
+            slots: Dictionary((entry?.slots ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
+        rowsCache.key = key
+        rowsCache.rows = rows
+        return rows
+    }
+
+    private func computeContents() -> [MCEntryContent] {
         guard let entry else { return [] }
         let original = store.library.contents(of: entry)
         if entry.chapterSort == nil || entry.chapterSort == .custom {
@@ -370,7 +385,7 @@ struct MCEntryView: View {
     }
 
     private func migrateEntry(_ entry: MCPersonalEntry) {
-        guard let manga = store.snapshot.manga.first(where: { $0.listingID == entry.primaryListingID })?.manga else { return }
+        guard let manga = store.storedManga(listingID: entry.primaryListingID) else { return }
         migrationTarget = MCEntryMigrationTarget(manga: manga)
     }
 
@@ -584,7 +599,7 @@ struct MCEntryView: View {
     @ViewBuilder private func contentRow(_ item: MCEntryContent, grid: Bool) -> some View {
         switch item {
         case .chapter(let id):
-            if let slot = entry?.slots.first(where: { $0.id == id }) { chapterRow(slot, grid: grid) }
+            if let slot = cachedRows.slots[id] { chapterRow(slot, grid: grid) }
         case .title(let id):
             if let child = store.library.entry(id) {
                 NavigationLink(destination: MCEntryView(entryID: id)) {
@@ -798,7 +813,7 @@ struct MCEntryView: View {
         if store.perform({ try $0.library.resetChapterThumbnails(entryID: entryID, slotIDs: slotIDs) }) {
             for chapterID in chapterIDs {
                 if let chapter = store.library.chapter(chapterID),
-                   let url = store.snapshot.chapters.first(where: { $0.chapterID == chapterID })?.chapter.thumbnail {
+                   let url = store.storedChapter(chapterID)?.thumbnail {
                     let sourceKey = store.snapshot.connections.first { $0.id == chapter.identity.listing.connectionID }?.sourceKey
                     MCArtworkCache.shared.reset(MCArtworkCache.key(url: url, sourceKey: sourceKey))
                 }
@@ -898,4 +913,19 @@ struct MCExpandableText: View {
             }
         }
     }
+}
+
+/// Not observed: filling the cache during a render must not schedule another one.
+final class MCEntryRowsCache {
+    struct Key: Equatable {
+        let revision: Int
+        let entryID: UUID
+        let entry: Date?
+    }
+    struct Rows {
+        let contents: [MCEntryContent]
+        let slots: [UUID: MCChapterSlot]
+    }
+    var key: Key?
+    var rows: Rows?
 }

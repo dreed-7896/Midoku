@@ -136,21 +136,87 @@ nonisolated struct MCLibraryUpdate: Codable, Identifiable, Sendable {
     var discoveredAt = Date()
 }
 
+/// Lookup tables derived from a library's arrays, built on first use. Copies of a library
+/// share one cache until a copy changes its arrays; that copy then starts a new, empty cache.
+nonisolated final class MCLibraryLookup: @unchecked Sendable {
+    private let lock = NSLock()
+    fileprivate var entries: MCEntryPositions?
+    fileprivate var listings: MCListingPositions?
+    fileprivate var chapters: MCChapterPositions?
+    fileprivate var tree: MCEntryTree?
+
+    fileprivate func table<Value>(_ path: ReferenceWritableKeyPath<MCLibraryLookup, Value?>, build: () -> Value) -> Value {
+        lock.lock(); defer { lock.unlock() }
+        if let cached = self[keyPath: path] { return cached }
+        let value = build()
+        self[keyPath: path] = value
+        return value
+    }
+}
+
+/// Positions are valid only for the arrays the owning cache was built from.
+nonisolated struct MCEntryPositions { let value: [UUID: Int] }
+nonisolated struct MCListingPositions { let byID: [UUID: Int]; let byIdentity: [MCSourceListingIdentity: Int] }
+nonisolated struct MCChapterPositions { let byID: [UUID: Int]; let byIdentity: [MCSourceChapterIdentity: Int] }
+nonisolated struct MCEntryTree { let parents: [UUID: UUID]; let children: [UUID: [Int]] }
+
 nonisolated struct MCLibraryState: Codable, Sendable {
-    var entries: [MCPersonalEntry] = []
-    var listings: [MCLibraryListing] = []
-    var chapters: [MCLibraryChapter] = []
+    var entries: [MCPersonalEntry] = [] { didSet { lookup = MCLibraryLookup() } }
+    var listings: [MCLibraryListing] = [] { didSet { lookup = MCLibraryLookup() } }
+    var chapters: [MCLibraryChapter] = [] { didSet { lookup = MCLibraryLookup() } }
     var covers: [MCLibraryCover] = []
     var completed: Set<MCSourceChapterIdentity> = []
     var updates: [MCLibraryUpdate] = []
     // Optional for collections written before Reading mode existed.
     var readingEntryIDs: [UUID]? = nil
+    private var lookup = MCLibraryLookup()
+
+    private enum CodingKeys: String, CodingKey {
+        case entries, listings, chapters, covers, completed, updates, readingEntryIDs
+    }
 
     var readingIDs: [UUID] { readingEntryIDs ?? [] }
 
-    func entry(_ id: UUID) -> MCPersonalEntry? { entries.first { $0.id == id } }
-    func listing(_ id: UUID?) -> MCLibraryListing? { listings.first { $0.id == id } }
-    func chapter(_ id: UUID) -> MCLibraryChapter? { chapters.first { $0.id == id } }
+    // First match wins, matching the linear scans these tables replace.
+    private var entryPositions: [UUID: Int] {
+        lookup.table(\MCLibraryLookup.entries) {
+            MCEntryPositions(value: Dictionary(entries.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first }))
+        }.value
+    }
+    private var listingPositions: MCListingPositions {
+        lookup.table(\MCLibraryLookup.listings) {
+            MCListingPositions(
+                byID: Dictionary(listings.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first }),
+                byIdentity: Dictionary(listings.enumerated().map { ($0.element.identity, $0.offset) }, uniquingKeysWith: { first, _ in first }))
+        }
+    }
+    private var chapterPositions: MCChapterPositions {
+        lookup.table(\MCLibraryLookup.chapters) {
+            MCChapterPositions(
+                byID: Dictionary(chapters.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first }),
+                byIdentity: Dictionary(chapters.enumerated().map { ($0.element.identity, $0.offset) }, uniquingKeysWith: { first, _ in first }))
+        }
+    }
+    /// Parent links and children in library order.
+    var entryTree: MCEntryTree {
+        lookup.table(\MCLibraryLookup.tree) {
+            var parents: [UUID: UUID] = [:]
+            var children: [UUID: [Int]] = [:]
+            for (offset, entry) in entries.enumerated() {
+                guard let parent = entry.parentEntryID else { continue }
+                if parents[entry.id] == nil { parents[entry.id] = parent }
+                children[parent, default: []].append(offset)
+            }
+            return MCEntryTree(parents: parents, children: children)
+        }
+    }
+
+    func entry(_ id: UUID) -> MCPersonalEntry? { entryPositions[id].map { entries[$0] } }
+    func listing(_ id: UUID?) -> MCLibraryListing? { id.flatMap { listingPositions.byID[$0] }.map { listings[$0] } }
+    func listing(identity: MCSourceListingIdentity) -> MCLibraryListing? { listingPositions.byIdentity[identity].map { listings[$0] } }
+    func chapter(_ id: UUID) -> MCLibraryChapter? { chapterPositions.byID[id].map { chapters[$0] } }
+    func chapter(identity: MCSourceChapterIdentity) -> MCLibraryChapter? { chapterPositions.byIdentity[identity].map { chapters[$0] } }
+    func children(of id: UUID) -> [MCPersonalEntry] { (entryTree.children[id] ?? []).map { entries[$0] } }
     func title(_ entry: MCPersonalEntry) -> String { entry.titleOverride ?? listing(entry.primaryListingID)?.details.title ?? "Untitled entry" }
     func description(_ entry: MCPersonalEntry) -> String { entry.descriptionOverride ?? listing(entry.primaryListingID)?.details.description ?? "" }
     func number(_ variant: MCChapterVariant) -> String? { variant.edits.number ?? chapter(variant.chapterID)?.record.number }
@@ -175,16 +241,15 @@ nonisolated struct MCLibraryState: Codable, Sendable {
         return nil
     }
     func resumeSlot(_ entry: MCPersonalEntry, positions: [MCReadingPosition]) -> UUID? {
-        let identities = Dictionary(uniqueKeysWithValues: chapters.map { ($0.id, $0.identity) })
-        let slots = Dictionary(flattenedChapters(entryID: entry.id).map(\.slot).compactMap { slot -> (MCSourceChapterIdentity, UUID)? in
-            guard let variant = slot.preferred, let identity = identities[variant.chapterID] else { return nil }
+        let sequence = flattenedChapters(entryID: entry.id).map(\.slot)
+        let slots = Dictionary(sequence.compactMap { slot -> (MCSourceChapterIdentity, UUID)? in
+            guard let variant = slot.preferred, let identity = chapter(variant.chapterID)?.identity else { return nil }
             return (identity, slot.id)
         }, uniquingKeysWith: { first, _ in first })
         // Choose the most recently opened chapter; the reader restores its saved page even when completed.
         if let recent = positions.filter({ slots[$0.id] != nil }).max(by: { $0.updatedAt < $1.updatedAt }) {
             return slots[recent.id]
         }
-        let sequence = flattenedChapters(entryID: entry.id).map(\.slot)
         return sequence.first(where: { slot in
             !isRead(slot)
         })?.id ?? sequence.first?.id

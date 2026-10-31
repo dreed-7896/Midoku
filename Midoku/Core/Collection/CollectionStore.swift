@@ -132,6 +132,57 @@ final class MCCollectionStore {
     @ObservationIgnored private var recentReads: [ChapterIdentifier: Date] = [:]
     @ObservationIgnored private var snapshotRevision = 0
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var lookupCache: MCSnapshotLookup?
+    @ObservationIgnored private var searchProfiles: [UUID: MCEntrySearchProfile] = [:]
+
+    /// Increases with every saved change; views key derived data on it.
+    var revision: Int { snapshotRevision }
+
+    private func invalidateLookups() {
+        lookupCache = nil
+        searchProfiles = [:]
+    }
+
+    /// Search text, tags, artists and sources of an entry, derived once per saved snapshot.
+    func searchProfile(_ entry: MCPersonalEntry) -> MCEntrySearchProfile {
+        if let cached = searchProfiles[entry.id] { return cached }
+        let details = library.listing(entry.primaryListingID)?.details
+        var seen = Set<String>()
+        let listingIDs = [entry.primaryListingID].compactMap { $0 } + entry.links.map(\.listingID)
+        let tags = listingIDs.compactMap { library.listing($0)?.details.tags }.flatMap { $0 }.filter { tag in
+            seen.insert(tag.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)).inserted
+        }
+        let artists = (entry.artistOverride.map { [$0] } ?? details?.artists ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let text = [
+            library.title(entry), entry.authorOverride, entry.artistOverride,
+            details?.authors?.joined(separator: " "), details?.artists?.joined(separator: " "),
+            tags.joined(separator: " ")
+        ].compactMap { $0 }.joined(separator: " ")
+        let profile = MCEntrySearchProfile(text: text, tags: tags, artists: artists,
+            sourceIDs: Set(entry.links.compactMap { library.listing($0.listingID)?.identity.connectionID }))
+        searchProfiles[entry.id] = profile
+        return profile
+    }
+
+    /// Built on first use after each saved snapshot; replaces linear scans of stored records.
+    private var lookup: MCSnapshotLookup {
+        if let lookupCache { return lookupCache }
+        let value = MCSnapshotLookup(snapshot)
+        lookupCache = value
+        return value
+    }
+
+    func storedManga(listingID: UUID?) -> AidokuRunner.Manga? {
+        listingID.flatMap { lookup.manga[$0] }.map { snapshot.manga[$0].manga }
+    }
+
+    func storedChapter(_ chapterID: UUID) -> AidokuRunner.Chapter? {
+        lookup.chapters[chapterID].map { snapshot.chapters[$0].chapter }
+    }
+
+    func connection(_ id: UUID) -> MCConnection? { lookup.connections[id] }
+    func connection(sourceKey: String) -> MCConnection? { lookup.connectionsBySourceKey[sourceKey] }
 
     var library: MCLibraryState { snapshot.library }
 
@@ -173,6 +224,7 @@ final class MCCollectionStore {
             try loaded.validate()
             updateChapterMetadata(loaded)
             snapshot = loaded
+            invalidateLookups()
             MCArtworkCache.shared.retainLibraryArtwork(libraryArtworkKeys())
             syncTranslationLibrary()
         } catch {
@@ -218,6 +270,7 @@ final class MCCollectionStore {
         let categoriesChanged = snapshot.categories != candidate.categories
         updateChapterMetadata(candidate)
         snapshot = candidate
+        invalidateLookups()
         snapshotRevision += 1
         if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
         syncTranslationLibrary()
@@ -245,6 +298,7 @@ final class MCCollectionStore {
             let categoriesChanged = snapshot.categories != candidate.categories
             updateChapterMetadata(candidate)
             snapshot = candidate
+            invalidateLookups()
             snapshotRevision += 1
             if categoriesChanged { NotificationCenter.default.post(name: .updateCategories, object: nil) }
             syncTranslationLibrary()
@@ -288,17 +342,17 @@ final class MCCollectionStore {
     }
 
     func sourceName(_ connectionID: UUID) -> String {
-        snapshot.connections.first { $0.id == connectionID }?.name ?? "Unavailable source"
+        connection(connectionID)?.name ?? "Unavailable source"
     }
 
     func source(_ connectionID: UUID) -> AidokuRunner.Source? {
-        guard let key = snapshot.connections.first(where: { $0.id == connectionID })?.sourceKey else { return nil }
+        guard let key = connection(connectionID)?.sourceKey else { return nil }
         return SourceStore.shared.source(for: key)
     }
 
     func entryID(for manga: AidokuRunner.Manga) -> UUID? {
-        guard let connection = snapshot.connections.first(where: { $0.sourceKey == manga.sourceKey }),
-              let listing = library.listings.first(where: { $0.identity.connectionID == connection.id && $0.identity.externalID == manga.key }) else { return nil }
+        guard let connection = self.connection(sourceKey: manga.sourceKey),
+              let listing = library.listing(identity: .init(connectionID: connection.id, externalID: manga.key)) else { return nil }
         return library.entries.first { $0.primaryListingID == listing.id }?.id
     }
 
@@ -504,10 +558,10 @@ final class MCCollectionStore {
         let initialImports = Set(entries.flatMap(\.links).filter { $0.needsInitialImport == true }.map(\.listingID))
         var failures: [String] = []
         let eligible = listingIDs.filter { id in
-            guard let stored = snapshot.manga.first(where: { $0.listingID == id }) else { return false }
+            guard let stored = storedManga(listingID: id) else { return false }
             // Static, single-gallery sources such as nhentai do not publish new chapters.
-            let isStaticGallery = stored.manga.sourceKey == "multi.nhentai"
-                || stored.manga.updateStrategy == .never
+            let isStaticGallery = stored.sourceKey == "multi.nhentai"
+                || stored.updateStrategy == .never
             return entryID != nil || initialImports.contains(id) || !isStaticGallery
         }
         let ids = Array(eligible)
@@ -627,19 +681,19 @@ final class MCCollectionStore {
     }
 
     func physical(_ identity: MCSourceChapterIdentity) -> (manga: AidokuRunner.Manga, chapter: AidokuRunner.Chapter)? {
-        guard let listing = library.listings.first(where: { $0.identity == identity.listing }),
-              let chapter = library.chapters.first(where: { $0.identity == identity }),
-              let manga = snapshot.manga.first(where: { $0.listingID == listing.id })?.manga,
-              let value = snapshot.chapters.first(where: { $0.chapterID == chapter.id })?.chapter else { return nil }
+        guard let listing = library.listing(identity: identity.listing),
+              let chapter = library.chapter(identity: identity),
+              let manga = storedManga(listingID: listing.id),
+              let value = storedChapter(chapter.id) else { return nil }
         return (manga, value)
     }
 
     func recordRead(_ identity: ChapterIdentifier, completed: Bool? = nil) {
         if completed == nil, let recent = recentReads[identity], Date().timeIntervalSince(recent) < 30 { return }
         recentReads[identity] = Date()
-        guard let connection = snapshot.connections.first(where: { $0.sourceKey == identity.sourceKey }) else { return }
+        guard let connection = self.connection(sourceKey: identity.sourceKey) else { return }
         let key = MCSourceChapterIdentity(listing: .init(connectionID: connection.id, externalID: identity.mangaKey), externalID: identity.chapterKey)
-        guard let chapterID = library.chapters.first(where: { $0.identity == key })?.id else { return }
+        guard let chapterID = library.chapter(identity: key)?.id else { return }
         if let completed, completed == library.completed.contains(key) { return }
         perform { state in
             if let completed {
@@ -720,4 +774,26 @@ final class MCCollectionStore {
         // Restore only after full validation; the old file survives any failed write.
         try change { $0 = incoming }
     }
+}
+
+/// Positions of stored records in one snapshot. Rebuilt after every saved change.
+private struct MCSnapshotLookup {
+    let manga: [UUID: Int]
+    let chapters: [UUID: Int]
+    let connections: [UUID: MCConnection]
+    let connectionsBySourceKey: [String: MCConnection]
+
+    init(_ snapshot: MCCollectionSnapshot) {
+        manga = Dictionary(snapshot.manga.enumerated().map { ($0.element.listingID, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        chapters = Dictionary(snapshot.chapters.enumerated().map { ($0.element.chapterID, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        connections = Dictionary(snapshot.connections.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        connectionsBySourceKey = Dictionary(snapshot.connections.map { ($0.sourceKey, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+}
+
+struct MCEntrySearchProfile {
+    let text: String
+    let tags: [String]
+    let artists: [String]
+    let sourceIDs: Set<UUID>
 }

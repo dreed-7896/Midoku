@@ -55,6 +55,20 @@ private struct MCLibraryGroupPage: Identifiable {
     var kind = MCLibraryPageKind.group
 }
 
+private struct MCLibraryPageKey: Equatable {
+    let revision: Int
+    let entryCount: Int
+    let grouping: MCLibraryGrouping
+    let showReading: Bool
+    let pins: Data
+}
+
+/// Not observed: a cache hit must not trigger another render.
+private final class MCLibraryPageCache {
+    var key: MCLibraryPageKey?
+    var pages: [MCLibraryGroupPage] = []
+}
+
 private struct MCGroupingSelection: Identifiable {
     let id = UUID()
     let entryIDs: [UUID]
@@ -126,6 +140,7 @@ struct MCCollectionRootView: View {
     @State private var showBookmarks = false
     @State private var selectedBookmark: MCPanelBookmark?
     @State private var confirmResetReading = false
+    @State private var pageCache = MCLibraryPageCache()
     @AppStorage("Midoku.showReadingTab") private var showReadingTab = true
     @AppStorage("Midoku.libraryShuffleButton") private var showShuffle = true
     @AppStorage("Midoku.pinnedLibrarySearches.v1") private var pinnedSearchData = Data()
@@ -141,24 +156,18 @@ struct MCCollectionRootView: View {
     }
 
     private func filteredEntries(query: String, flat: Bool) -> [MCPersonalEntry] {
-        store.library.entries.filter { entry in
-            let details = store.library.listing(entry.primaryListingID)?.details
-            let searchable = [
-                store.library.title(entry),
-                entry.authorOverride,
-                entry.artistOverride,
-                details?.authors?.joined(separator: " "),
-                details?.artists?.joined(separator: " "),
-                entryTags(entry).joined(separator: " ")
-            ].compactMap { $0 }.joined(separator: " ")
-            let sourceIDs = entry.links.compactMap { store.library.listing($0.listingID)?.identity.connectionID }
-            return (entry.parentEntryID == nil || flat) &&
-                (query.isEmpty || searchable.localizedCaseInsensitiveContains(query)) &&
-                (statuses.isEmpty || statuses.contains(entry.status)) &&
-                (artists.isEmpty || !artists.isDisjoint(with: Set(artistNames(entry)))) &&
-                (tags.isEmpty || !tags.isDisjoint(with: Set(entryTags(entry)))) &&
-                (sources.isEmpty || !sources.isDisjoint(with: Set(sourceIDs))) &&
-                matchesProgress(entry)
+        let filtering = !artists.isEmpty || !tags.isEmpty || !sources.isEmpty
+        return store.library.entries.filter { entry in
+            guard entry.parentEntryID == nil || flat,
+                  statuses.isEmpty || statuses.contains(entry.status) else { return false }
+            if !query.isEmpty || filtering {
+                let profile = store.searchProfile(entry)
+                guard query.isEmpty || profile.text.localizedCaseInsensitiveContains(query),
+                      artists.isEmpty || !artists.isDisjoint(with: profile.artists),
+                      tags.isEmpty || !tags.isDisjoint(with: profile.tags),
+                      sources.isEmpty || !sources.isDisjoint(with: profile.sourceIDs) else { return false }
+            }
+            return matchesProgress(entry)
         }
     }
 
@@ -206,15 +215,31 @@ struct MCCollectionRootView: View {
         setPinnedSearches(pinnedSearches.filter { $0.localizedCaseInsensitiveCompare(term) != .orderedSame })
     }
 
+    /// Pinned-tab membership ignores the transient filters, which hide the tabs anyway.
+    private func searchMatches(_ term: String) -> [MCPersonalEntry] {
+        store.library.entries.filter { store.searchProfile($0).text.localizedCaseInsensitiveContains(term) }
+    }
+
     /// Reading and pinned searches lead the grouped tabs, so they are one swipe away.
+    /// Rebuilt only when the library, grouping or pinned tabs change, not on every render.
     private var libraryPages: [MCLibraryGroupPage] {
+        let key = MCLibraryPageKey(revision: store.revision, entryCount: store.library.entries.count,
+                                   grouping: grouping, showReading: showReadingTab, pins: pinnedSearchData)
+        if pageCache.key == key { return pageCache.pages }
+        let pages = buildLibraryPages()
+        pageCache.key = key
+        pageCache.pages = pages
+        return pages
+    }
+
+    private func buildLibraryPages() -> [MCLibraryGroupPage] {
         var pages: [MCLibraryGroupPage] = []
         if showReadingTab {
             pages.append(.init(id: Self.readingPageID, title: "Reading", entryIDs: Set(store.library.readingIDs), kind: .reading))
         }
         for term in pinnedSearches {
             pages.append(.init(id: "search:\(term.lowercased())", title: term,
-                               entryIDs: Set(filteredEntries(query: term, flat: true).map(\.id)), kind: .search(term)))
+                               entryIDs: Set(searchMatches(term).map(\.id)), kind: .search(term)))
         }
         let groups = grouping == .none ? [] : groupPages
         if groups.isEmpty {
@@ -252,11 +277,7 @@ struct MCCollectionRootView: View {
         Array(Set(store.library.entries.flatMap { entryTags($0) })).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    private func artistNames(_ entry: MCPersonalEntry) -> [String] {
-        let names = entry.artistOverride.map { [$0] }
-            ?? store.library.listing(entry.primaryListingID)?.details.artists ?? []
-        return names.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-    }
+    private func artistNames(_ entry: MCPersonalEntry) -> [String] { store.searchProfile(entry).artists }
 
     private var availableArtists: [String] {
         Array(Set(store.library.entries.flatMap(artistNames)))
@@ -264,21 +285,12 @@ struct MCCollectionRootView: View {
     }
 
     private var availableSources: [MCLibrarySourceOption] {
-        let ids = Set(store.library.entries.flatMap { entry in
-            entry.links.compactMap { store.library.listing($0.listingID)?.identity.connectionID }
-        })
+        let ids = Set(store.library.entries.flatMap { store.searchProfile($0).sourceIDs })
         return ids.map { MCLibrarySourceOption(id: $0, name: store.sourceName($0)) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    private func entryTags(_ entry: MCPersonalEntry) -> [String] {
-        var seen = Set<String>()
-        let listingIDs = [entry.primaryListingID].compactMap { $0 } + entry.links.map(\.listingID)
-        return listingIDs.compactMap { store.library.listing($0)?.details.tags }.flatMap { $0 }.filter { tag in
-            let key = tag.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            return seen.insert(key).inserted
-        }
-    }
+    private func entryTags(_ entry: MCPersonalEntry) -> [String] { store.searchProfile(entry).tags }
 
     private func matchesProgress(_ entry: MCPersonalEntry) -> Bool {
         guard progressFilter != .all else { return true }

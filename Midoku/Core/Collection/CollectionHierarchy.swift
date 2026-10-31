@@ -171,16 +171,16 @@ nonisolated extension MCLibraryState {
     /// Every title is one random candidate, including descendants of Reading titles.
     /// Overlapping Reading selections never give a nested title extra weight.
     func entriesIncludingDescendants(of ids: Set<UUID>) -> [MCPersonalEntry] {
-        let children = Dictionary(grouping: entries.filter { $0.parentEntryID != nil }, by: { $0.parentEntryID! })
+        let children = entryTree.children
         var included = ids, pending = Array(ids)
         while let next = pending.popLast() {
-            for child in children[next] ?? [] where included.insert(child.id).inserted { pending.append(child.id) }
+            for child in children[next] ?? [] where included.insert(entries[child].id).inserted { pending.append(entries[child].id) }
         }
         return entries.filter { included.contains($0.id) }
     }
 
     func contents(of entry: MCPersonalEntry) -> [MCEntryContent] {
-        orderedContents(of: entry, children: entries.filter { $0.parentEntryID == entry.id })
+        orderedContents(of: entry, children: children(of: entry.id))
     }
 
     private func orderedContents(of entry: MCPersonalEntry, children: [MCPersonalEntry]) -> [MCEntryContent] {
@@ -192,19 +192,19 @@ nonisolated extension MCLibraryState {
 
     /// Iterative traversal supports deep nesting without using the call stack.
     func flattenedChapters(entryID: UUID) -> [MCEntryChapter] {
-        let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
-        let children = Dictionary(grouping: entries.filter { $0.parentEntryID != nil }, by: { $0.parentEntryID! })
         var pending: [(UUID, MCEntryContent)] = [(entryID, .title(entryID))]
         var visited = Set<UUID>()
         var result: [MCEntryChapter] = []
-        let slots = Dictionary(uniqueKeysWithValues: entries.flatMap(\.slots).map { ($0.id, $0) })
+        // Slots are looked up only within visited titles, instead of indexing the whole library.
+        var slots: [UUID: MCChapterSlot] = [:]
         while let (owner, item) = pending.popLast() {
             switch item {
             case .chapter(let id):
                 if let slot = slots[id] { result.append(.init(entryID: owner, slot: slot)) }
             case .title(let id):
-                guard visited.insert(id).inserted, let entry = byID[id] else { continue }
-                pending.append(contentsOf: orderedContents(of: entry, children: children[id] ?? []).reversed().map { (id, $0) })
+                guard visited.insert(id).inserted, let entry = self.entry(id) else { continue }
+                for slot in entry.slots where slots[slot.id] == nil { slots[slot.id] = slot }
+                pending.append(contentsOf: orderedContents(of: entry, children: children(of: id)).reversed().map { (id, $0) })
             }
         }
         return result
@@ -212,9 +212,7 @@ nonisolated extension MCLibraryState {
 
     /// Closest parent first. Invalid imported cycles are rejected by validate().
     func ancestorIDs(of id: UUID) -> [UUID] {
-        let parents = Dictionary(uniqueKeysWithValues: entries.compactMap { entry in
-            entry.parentEntryID.map { (entry.id, $0) }
-        })
+        let parents = entryTree.parents
         var result: [UUID] = [], visited: Set<UUID> = [id]
         var current = parents[id]
         while let parent = current, visited.insert(parent).inserted {
@@ -230,10 +228,10 @@ nonisolated extension MCLibraryState {
     }
 
     func descendantIDs(of id: UUID) -> Set<UUID> {
-        let children = Dictionary(grouping: entries.filter { $0.parentEntryID != nil }, by: { $0.parentEntryID! })
+        let children = entryTree.children
         var pending = [id], visited: Set<UUID> = [id]
         while let next = pending.popLast() {
-            for child in children[next] ?? [] where visited.insert(child.id).inserted { pending.append(child.id) }
+            for child in children[next] ?? [] where visited.insert(entries[child].id).inserted { pending.append(entries[child].id) }
         }
         visited.remove(id)
         return visited

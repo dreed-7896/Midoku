@@ -577,7 +577,7 @@ extension MangaManager {
             var managed = Set<MangaIdentifier>()
             var following = Set<MangaIdentifier>()
             for entry in store.library.entries {
-                guard let manga = store.snapshot.manga.first(where: { $0.listingID == entry.primaryListingID })?.manga
+                guard let manga = store.storedManga(listingID: entry.primaryListingID)
                 else { continue }
                 managed.insert(manga.identifier)
                 if entry.links.contains(where: { $0.listingID == entry.primaryListingID && $0.followsNewChapters }) {
