@@ -37,10 +37,22 @@ private enum MCLibraryProgressFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private enum MCLibraryPageKind: Equatable {
+    /// A category, artist, tag, status or source bucket of top-level entries.
+    case group
+    /// The ordered Reading list, which may include nested titles.
+    case reading
+    /// A pinned search term, matched across nested titles like a regular search.
+    case search(String)
+    /// Every top-level entry, shown when special tabs exist without a grouping.
+    case all
+}
+
 private struct MCLibraryGroupPage: Identifiable {
     let id: String
     let title: String
     let entryIDs: Set<UUID>
+    var kind = MCLibraryPageKind.group
 }
 
 private struct MCGroupingSelection: Identifiable {
@@ -109,23 +121,27 @@ struct MCCollectionRootView: View {
     @State private var editingEntry: MCID?
     @State private var movingEntry: MCID?
     @State private var showAddPreview = false
-    @State private var readingMode = false
     @State private var showReadingAdd = false
     @State private var reader: MCReaderSheet?
     @State private var showBookmarks = false
     @State private var selectedBookmark: MCPanelBookmark?
     @State private var confirmResetReading = false
+    @AppStorage("Midoku.showReadingTab") private var showReadingTab = true
+    @AppStorage("Midoku.libraryShuffleButton") private var showShuffle = true
+    @AppStorage("Midoku.pinnedLibrarySearches.v1") private var pinnedSearchData = Data()
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
     @AppStorage("Appearance.libraryGridStyle") private var gridStyle = ChapterGridStyle.standard
     @AppStorage("Appearance.libraryPortraitColumns") private var portraitColumns = 3
     @AppStorage("Appearance.libraryLandscapeColumns") private var landscapeColumns = 5
 
-    private func entries(in groupPage: String?) -> [MCPersonalEntry] {
-        let groupEntryIDs = groupPage.flatMap { selected in
-            groupPages.first(where: { $0.id == selected })?.entryIDs
-        }
-        let filtered = store.library.entries.filter { entry in
+    /// Top-level entries, or every matching entry while a search or filter is active.
+    private var visibleEntries: [MCPersonalEntry] {
+        sortedEntries(filteredEntries(query: query, flat: showsFlatResults), in: nil)
+    }
+
+    private func filteredEntries(query: String, flat: Bool) -> [MCPersonalEntry] {
+        store.library.entries.filter { entry in
             let details = store.library.listing(entry.primaryListingID)?.details
             let searchable = [
                 store.library.title(entry),
@@ -136,16 +152,79 @@ struct MCCollectionRootView: View {
                 entryTags(entry).joined(separator: " ")
             ].compactMap { $0 }.joined(separator: " ")
             let sourceIDs = entry.links.compactMap { store.library.listing($0.listingID)?.identity.connectionID }
-            return (entry.parentEntryID == nil || showsFlatResults) &&
+            return (entry.parentEntryID == nil || flat) &&
                 (query.isEmpty || searchable.localizedCaseInsensitiveContains(query)) &&
-                (groupPage == nil || groupEntryIDs?.contains(entry.id) == true) &&
                 (statuses.isEmpty || statuses.contains(entry.status)) &&
                 (artists.isEmpty || !artists.isDisjoint(with: Set(artistNames(entry)))) &&
                 (tags.isEmpty || !tags.isDisjoint(with: Set(entryTags(entry)))) &&
                 (sources.isEmpty || !sources.isDisjoint(with: Set(sourceIDs))) &&
                 matchesProgress(entry)
         }
-        return sortedEntries(filtered, in: groupPage)
+    }
+
+    /// The entries one library tab shows. Reading keeps its own order.
+    private func entries(for page: MCLibraryGroupPage) -> [MCPersonalEntry] {
+        switch page.kind {
+        case .reading: store.readingEntries
+        case .search(let term): sortedEntries(filteredEntries(query: term, flat: true), in: page.id)
+        case .all: sortedEntries(filteredEntries(query: "", flat: false), in: page.id)
+        case .group: sortedEntries(filteredEntries(query: "", flat: false).filter { page.entryIDs.contains($0.id) }, in: page.id)
+        }
+    }
+
+    private var activeEntries: [MCPersonalEntry] {
+        guard let id = activeGroupPage, let page = libraryPages.first(where: { $0.id == id }) else { return visibleEntries }
+        return entries(for: page)
+    }
+
+    private static let readingPageID = "reading"
+
+    private var pinnedSearches: [String] {
+        (try? JSONDecoder().decode([String].self, from: pinnedSearchData)) ?? []
+    }
+
+    private func setPinnedSearches(_ values: [String]) {
+        pinnedSearchData = (try? JSONEncoder().encode(values)) ?? Data()
+    }
+
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func isPinned(_ term: String) -> Bool {
+        pinnedSearches.contains { $0.localizedCaseInsensitiveCompare(term) == .orderedSame }
+    }
+
+    private func pinSearch(_ term: String) {
+        guard !term.isEmpty else { return }
+        if !isPinned(term) { setPinnedSearches(pinnedSearches + [term]) }
+        let id = "search:\(term.lowercased())"
+        query = ""; searchVisible = false; searchFocused = false
+        groupPage = id
+        swipePosition.requestedID = id
+    }
+
+    private func unpinSearch(_ term: String) {
+        setPinnedSearches(pinnedSearches.filter { $0.localizedCaseInsensitiveCompare(term) != .orderedSame })
+    }
+
+    /// Reading and pinned searches lead the grouped tabs, so they are one swipe away.
+    private var libraryPages: [MCLibraryGroupPage] {
+        var pages: [MCLibraryGroupPage] = []
+        if showReadingTab {
+            pages.append(.init(id: Self.readingPageID, title: "Reading", entryIDs: Set(store.library.readingIDs), kind: .reading))
+        }
+        for term in pinnedSearches {
+            pages.append(.init(id: "search:\(term.lowercased())", title: term,
+                               entryIDs: Set(filteredEntries(query: term, flat: true).map(\.id)), kind: .search(term)))
+        }
+        let groups = grouping == .none ? [] : groupPages
+        if groups.isEmpty {
+            if !pages.isEmpty {
+                pages.append(.init(id: "all", title: "All", entryIDs: Set(store.library.rootEntries.map(\.id)), kind: .all))
+            }
+        } else {
+            pages += groups
+        }
+        return pages
     }
 
     private func sortedEntries(_ values: [MCPersonalEntry], in page: String?) -> [MCPersonalEntry] {
@@ -266,7 +345,10 @@ struct MCCollectionRootView: View {
     }
 
     private var activeGroupPage: String? {
-        grouping == .none || showsFlatResults ? nil : (groupPage ?? groupPages.first?.id)
+        guard !showsFlatResults else { return nil }
+        let pages = libraryPages
+        guard !pages.isEmpty else { return nil }
+        return groupPage.flatMap { id in pages.contains { $0.id == id } ? id : nil } ?? pages.first?.id
     }
 
     private func namedGroupPages(
@@ -291,27 +373,12 @@ struct MCCollectionRootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            Group {
-                if readingMode { readingPage }
-                else { regularLibraryPage }
-            }
+            regularLibraryPage
             .background(Color(uiColor: .systemBackground))
-            .navigationTitle(readingMode ? "Reading" : "Library")
+            .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if readingMode {
-                    ToolbarItemGroup(placement: .topBarLeading) {
-                        Button { readingMode = false } label: { Image(systemName: "xmark") }
-                            .accessibilityLabel("Exit Reading Mode")
-                        Button { confirmResetReading = true } label: { Image(systemName: "arrow.counterclockwise") }
-                            .accessibilityLabel("Reset Reading")
-                            .disabled(store.library.readingIDs.isEmpty)
-                    }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button { showReadingAdd = true } label: { Image(systemName: "plus") }
-                            .accessibilityLabel("Add to Reading")
-                    }
-                } else if selecting {
+                if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { selecting = false; selected.removeAll() } label: {
                             Image(systemName: "checkmark.circle.fill")
@@ -321,14 +388,6 @@ struct MCCollectionRootView: View {
                 } else {
                     ToolbarItem(placement: .topBarLeading) { groupMenu }
                     ToolbarItem(placement: .topBarLeading) { filterMenu }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            query = ""; searchVisible = false; searchFocused = false
-                            selected.removeAll(); selecting = false
-                            readingMode = true
-                        } label: { Image(systemName: "book") }
-                            .accessibilityLabel("Reading mode")
-                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button("Search library", systemImage: "magnifyingglass") {
@@ -342,17 +401,20 @@ struct MCCollectionRootView: View {
                                 selecting = true; selected.removeAll()
                             }
                             Picker("Sort", selection: sortBinding) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
+                                .disabled(activeGroupPage == Self.readingPageID)
+                            readingMenu
                             Toggle("Cover grid", isOn: $grid)
                             Toggle("Chapter grid", isOn: $chapterGrid)
                             Button("Categories", systemImage: "folder") { showCategories = true }
                             Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
+                            Toggle("Shuffle button", isOn: $showShuffle)
                             Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
                     }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if selecting && !readingMode { selectionActions }
+                if selecting { selectionActions }
             }
             .confirmationDialog("Remove \(selected.count) entries from library?", isPresented: $confirmDelete) {
                 let containsNested = selected.contains { !store.library.descendantIDs(of: $0).isEmpty }
@@ -401,15 +463,15 @@ struct MCCollectionRootView: View {
                     path.removeAll()
                     return
                 }
-                guard !readingMode, !showsFlatResults, grouping != .none else { return }
-                groupPage = groupPages.first?.id
-                swipePosition.requestedID = groupPages.first?.id
+                guard !showsFlatResults, let first = libraryPages.first?.id else { return }
+                groupPage = first
+                swipePosition.requestedID = first
             }
-            .onChange(of: grouping) { _, value in
-                groupPage = value == .none ? nil : groupPages.first?.id
+            .onChange(of: grouping) { _, _ in
+                groupPage = libraryPages.first?.id
             }
-            .onChange(of: groupPages.map(\.id)) { _, values in
-                guard grouping != .none else { groupPage = nil; return }
+            .onChange(of: libraryPages.map(\.id)) { _, values in
+                guard !values.isEmpty else { groupPage = nil; return }
                 if groupPage.map(values.contains) != true { groupPage = values.first }
             }
             .onChange(of: availableTags) { _, values in tags.formIntersection(values) }
@@ -417,7 +479,7 @@ struct MCCollectionRootView: View {
             .onChange(of: availableSources.map(\.id)) { _, values in sources.formIntersection(values) }
             .onChange(of: store.library.entries.map(\.id)) { _, ids in selected.formIntersection(ids) }
             .onAppear {
-                if grouping != .none, groupPage == nil { groupPage = groupPages.first?.id }
+                if groupPage == nil { groupPage = libraryPages.first?.id }
             }
             .task {
                 #if DEBUG
@@ -426,7 +488,9 @@ struct MCCollectionRootView: View {
                     try? await Task.sleep(for: .milliseconds(750))
                     if args.contains("--reading-preview") {
                         if let id = MCCollectionPreview.entryID { store.addToReading([id]) }
-                        readingMode = true
+                        showReadingTab = true
+                        groupPage = Self.readingPageID
+                        swipePosition.requestedID = Self.readingPageID
                     }
                     if args.contains("--add-preview") { showAddPreview = true }
                     if args.contains("--categories-preview") { showCategories = true }
@@ -448,23 +512,28 @@ struct MCCollectionRootView: View {
 
     private var regularLibraryPage: some View {
         Group {
-            let pages = groupPages
+            let pages = libraryPages
             VStack(spacing: 0) {
-                if grouping != .none && !showsFlatResults {
-                    MCLibraryGroupTabs(pages: pages, selected: groupPage, swipePosition: swipePosition)
+                if !pages.isEmpty && !showsFlatResults {
+                    MCLibraryGroupTabs(pages: pages, selected: activeGroupPage, swipePosition: swipePosition) { page in
+                        tabMenu(page)
+                    }
                 }
+                if !trimmedQuery.isEmpty { pinSearchBar }
                 GeometryReader { geometry in
-                    let visibleEntries = entries(in: nil)
-                    if grouping == .none || pages.isEmpty || showsFlatResults {
+                    if pages.isEmpty || showsFlatResults {
                         collectionPage(values: visibleEntries, size: geometry.size)
                     } else {
                         ScrollViewReader { proxy in
                             ScrollView(.horizontal) {
                                 LazyHStack(spacing: 0) {
                                     ForEach(pages) { page in
-                                        collectionPage(values: sortedEntries(visibleEntries.filter { page.entryIDs.contains($0.id) }, in: page.id), size: geometry.size)
-                                            .frame(width: geometry.size.width, height: geometry.size.height)
-                                            .id(page.id)
+                                        Group {
+                                            if page.kind == .reading { readingPage(size: geometry.size) }
+                                            else { collectionPage(values: entries(for: page), size: geometry.size, kind: page.kind) }
+                                        }
+                                        .frame(width: geometry.size.width, height: geometry.size.height)
+                                        .id(page.id)
                                     }
                                 }
                                 .scrollTargetLayout()
@@ -494,7 +563,7 @@ struct MCCollectionRootView: View {
                                 withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .leading) }
                             }
                             .onAppear {
-                                if let id = groupPage, let index = pages.firstIndex(where: { $0.id == id }) {
+                                if let id = activeGroupPage, let index = pages.firstIndex(where: { $0.id == id }) {
                                     swipePosition.page = CGFloat(index)
                                     proxy.scrollTo(id, anchor: .leading)
                                 }
@@ -502,6 +571,9 @@ struct MCCollectionRootView: View {
                         }
                     }
                 }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if showShuffle && !selecting { shuffleButton }
             }
             .customSearchable(
                 text: $query,
@@ -515,35 +587,84 @@ struct MCCollectionRootView: View {
         }
     }
 
-    private var readingPage: some View {
-        GeometryReader { geometry in
-            if store.readingEntries.isEmpty {
+    @ViewBuilder private func readingPage(size: CGSize) -> some View {
+        if store.readingEntries.isEmpty {
+            VStack(spacing: 12) {
                 UnavailableView("Nothing in Reading", systemImage: "books.vertical",
-                    description: Text("Tap + to add entries from your library."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns(for: geometry.size), alignment: .leading, spacing: grid ? 20 : 14) {
-                        ForEach(store.readingEntries) { entry in entryButton(entry) }
-                    }
-                    .padding(.horizontal).padding(.vertical)
+                    description: Text("Add titles you want to read next. Hold any title in your library to add it."))
+                Button("Add Entries", systemImage: "plus") { showReadingAdd = true }
+                    .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
+                    ForEach(store.readingEntries) { entry in entryButton(entry, kind: .reading) }
                 }
+                .padding(.horizontal).padding(.vertical)
             }
+            .mcRefreshable { await store.refresh() }
         }
-        .overlay(alignment: .bottomTrailing) {
-            Button { openRandomEntry(from: store.readingEntries) } label: {
-                Image(systemName: "shuffle").font(.title3.weight(.semibold))
-                    .frame(width: 38, height: 38)
+    }
+
+    private var readingMenu: some View {
+        Menu("Reading", systemImage: "book") {
+            Toggle("Show Reading tab", isOn: $showReadingTab)
+            Button("Add to Reading…", systemImage: "plus") { showReadingAdd = true }
+            Button("Clear Reading", systemImage: "arrow.counterclockwise", role: .destructive) { confirmResetReading = true }
+                .disabled(store.library.readingIDs.isEmpty)
+        }
+    }
+
+    @ViewBuilder private func tabMenu(_ page: MCLibraryGroupPage) -> some View {
+        switch page.kind {
+        case .reading:
+            Button("Add to Reading…", systemImage: "plus") { showReadingAdd = true }
+            Button("Clear Reading", systemImage: "arrow.counterclockwise", role: .destructive) { confirmResetReading = true }
+                .disabled(store.library.readingIDs.isEmpty)
+            Divider()
+            Button("Hide Reading tab", systemImage: "eye.slash") { showReadingTab = false }
+        case .search(let term):
+            Button("Edit search", systemImage: "magnifyingglass") {
+                query = term; searchVisible = true; searchFocused = true
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel("Open random Reading entry; hold for entire library")
-            .disabled(store.library.entries.isEmpty)
-            .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                openRandomEntry(from: store.library.entries)
-            })
-            .padding(.trailing, 18).padding(.bottom, 16)
+            Button("Unpin", systemImage: "pin.slash", role: .destructive) { unpinSearch(term) }
+        case .group, .all:
+            EmptyView()
         }
+    }
+
+    private var pinSearchBar: some View {
+        let term = trimmedQuery
+        let pinned = isPinned(term)
+        return HStack {
+            Button {
+                if pinned { unpinSearch(term) } else { pinSearch(term) }
+            } label: {
+                Label(pinned ? "Unpin “\(term)”" : "Pin “\(term)” as a tab", systemImage: pinned ? "pin.slash" : "pin")
+                    .font(.subheadline.weight(.medium)).lineLimit(1)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    private var shuffleButton: some View {
+        let isReading = activeGroupPage == Self.readingPageID
+        return Button { openRandomEntry(from: activeEntries) } label: {
+            Image(systemName: "shuffle").font(.title3.weight(.semibold))
+                .frame(width: 38, height: 38)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(isReading ? "Open random Reading entry; hold for entire library" : "Open random entry from this tab; hold for entire library")
+        .disabled(store.library.entries.isEmpty)
+        .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+            openRandomEntry(from: store.library.entries)
+        })
+        .padding(.trailing, 18).padding(.bottom, 16)
     }
 
     private func openRandomEntry(from entries: [MCPersonalEntry]) {
@@ -559,7 +680,7 @@ struct MCCollectionRootView: View {
 
     private var selectionActions: some View {
         HStack {
-            let visibleIDs = Set(entries(in: activeGroupPage).map(\.id))
+            let visibleIDs = Set(activeEntries.map(\.id))
             Button(selected.isSuperset(of: visibleIDs) && !visibleIDs.isEmpty ? "Deselect all" : "Select all") {
                 if selected.isSuperset(of: visibleIDs) { selected.subtract(visibleIDs) }
                 else { selected.formUnion(visibleIDs) }
@@ -574,7 +695,7 @@ struct MCCollectionRootView: View {
                     if store.addToReading(selected) { selected.removeAll(); selecting = false }
                 }
                 Button("Group into new title", systemImage: "rectangle.stack.badge.plus") {
-                    let visible = entries(in: nil).map(\.id).filter { selected.contains($0) }
+                    let visible = visibleEntries.map(\.id).filter { selected.contains($0) }
                     let visibleIDs = Set(visible)
                     groupingSelection = MCGroupingSelection(entryIDs: visible + store.library.entries.map(\.id).filter { selected.contains($0) && !visibleIDs.contains($0) })
                 }.disabled(selected.count < 2)
@@ -617,7 +738,7 @@ struct MCCollectionRootView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
     }
 
-    @ViewBuilder private func collectionPage(values: [MCPersonalEntry], size: CGSize) -> some View {
+    @ViewBuilder private func collectionPage(values: [MCPersonalEntry], size: CGSize, kind: MCLibraryPageKind? = nil) -> some View {
         if values.isEmpty {
             let libraryIsEmpty = store.library.entries.isEmpty
             UnavailableView(libraryIsEmpty ? "Library Empty" : "No matches", systemImage: "books.vertical.fill",
@@ -626,7 +747,7 @@ struct MCCollectionRootView: View {
             ScrollView {
                 LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
                     ForEach(values) { entry in
-                        entryButton(entry)
+                        entryButton(entry, kind: kind)
                     }
                 }
                 .padding(.horizontal)
@@ -635,14 +756,19 @@ struct MCCollectionRootView: View {
         }
     }
 
-    private func entryButton(_ entry: MCPersonalEntry) -> some View {
-        Button {
+    private func entryButton(_ entry: MCPersonalEntry, kind: MCLibraryPageKind? = nil) -> some View {
+        let inReading = kind == .reading
+        let showsPath: Bool = switch kind {
+        case .reading?, .search?: true
+        default: showsFlatResults
+        }
+        return Button {
             if selecting { if !selected.insert(entry.id).inserted { selected.remove(entry.id) } }
             else { path.append(entry.id) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 entryLabel(entry)
-                if showsFlatResults || readingMode, let parentPath = store.library.parentPath(of: entry) {
+                if showsPath, let parentPath = store.library.parentPath(of: entry) {
                     Text(parentPath).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).clipped()
@@ -659,15 +785,15 @@ struct MCCollectionRootView: View {
         .accessibilityLabel("\(store.library.title(entry)), \(store.chapterCount(entryID: entry.id)) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
         .contextMenu {
-            if readingMode {
+            if store.library.readingIDs.contains(entry.id) {
                 Button("Remove from Reading", systemImage: "minus.circle") { store.removeFromReading([entry.id]) }
-            } else if !store.library.readingIDs.contains(entry.id) {
+            } else {
                 Button("Add to Reading", systemImage: "book") { store.addToReading([entry.id]) }
             }
             Divider()
             Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: [entry.id], read: true) }
             Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [entry.id], read: false) }
-            if !readingMode {
+            if !inReading {
                 Divider()
                 Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: entry.id) }
                 if entry.parentEntryID != nil {
@@ -807,10 +933,32 @@ struct MCCollectionRootView: View {
     }
 }
 
-private struct MCLibraryGroupTabs: View {
+private struct MCLibraryGroupTabs<TabMenu: View>: View {
     let pages: [MCLibraryGroupPage]
     let selected: String?
     let swipePosition: MCLibrarySwipePosition
+    @ViewBuilder let menu: (MCLibraryGroupPage) -> TabMenu
+
+    private func tabButton(_ page: MCLibraryGroupPage, active: Bool) -> some View {
+        Button { swipePosition.requestedID = page.id } label: {
+            HStack(spacing: 6) {
+                switch page.kind {
+                case .reading: Image(systemName: "book").font(.caption.weight(.semibold))
+                case .search: Image(systemName: "pin.fill").font(.caption2.weight(.semibold))
+                case .group, .all: EmptyView()
+                }
+                Text(page.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                Text("\(page.entryIDs.count)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(active ? Color.accentColor : .secondary)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Capsule())
+            }
+            .foregroundStyle(active ? Color.accentColor : .secondary)
+            .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -818,20 +966,14 @@ private struct MCLibraryGroupTabs: View {
                 HStack(spacing: 24) {
                     ForEach(pages) { page in
                         let active = (selected ?? pages.first?.id) == page.id
-                        Button { swipePosition.requestedID = page.id } label: {
-                            HStack(spacing: 6) {
-                                Text(page.title).font(.subheadline.weight(.medium))
-                                Text("\(page.entryIDs.count)")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(active ? Color.accentColor : .secondary)
-                                    .padding(.horizontal, 7).padding(.vertical, 3)
-                                    .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Capsule())
-                            }
-                            .foregroundStyle(active ? Color.accentColor : .secondary)
-                            .padding(.vertical, 12)
+                        Group {
+                            if page.kind == .group || page.kind == .all { tabButton(page, active: active) }
+                            else { tabButton(page, active: active).contextMenu { menu(page) } }
                         }
-                        .buttonStyle(.plain)
                         .id(page.id)
+                        .accessibilityLabel(page.kind == .group || page.kind == .all ? page.title
+                            : page.kind == .reading ? "Reading" : "Pinned search, \(page.title)")
+                        .accessibilityValue("\(page.entryIDs.count) entries")
                         .accessibilityAddTraits(active ? .isSelected : [])
                         .anchorPreference(key: MCLibraryTabAnchors.self, value: .bounds) { [page.id: $0] }
                     }

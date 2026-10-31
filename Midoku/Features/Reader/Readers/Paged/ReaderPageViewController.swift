@@ -71,6 +71,12 @@ class ReaderPageViewController: BaseObservingViewController {
     }
     var doublePageRestorationConstraints: [NSLayoutConstraint] = []
 
+    /// Called once the lazily created page view exists, so owners can install
+    /// interactions (context menu, dictionary taps) on its image view.
+    var onPageViewCreated: ((ReaderPageView) -> Void)? {
+        didSet { if let pageView { onPageViewCreated?(pageView) } }
+    }
+
     /// Callback when image aspect ratio is updated
     var onAspectRatioUpdated: (() -> Void)?
 
@@ -283,7 +289,9 @@ class ReaderPageViewController: BaseObservingViewController {
 
     private func preparePageView() {
         guard case .page = type, pageView == nil, let temporaryPageStore else { return }
-        pageView = ReaderPageView(parent: self, temporaryPageStore: temporaryPageStore)
+        let pageView = ReaderPageView(parent: self, temporaryPageStore: temporaryPageStore)
+        self.pageView = pageView
+        onPageViewCreated?(pageView)
     }
 
     /// Check if this is a wide image (aspect ratio > 1)

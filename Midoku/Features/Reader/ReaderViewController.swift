@@ -170,6 +170,8 @@ class ReaderViewController: BaseObservingViewController {
 
     private lazy var activityIndicator = UIActivityIndicatorView(style: .medium)
     let controlsView = ReaderControlsView()
+    /// This title's panel bookmarks, refreshed when bookmarks change.
+    fileprivate var cachedPanelBookmarks: [MCPanelBookmark]?
     private var toolbarView: ReaderToolbarView { controlsView.toolbar }
     private(set) var readerControlsVisible = true
 
@@ -256,6 +258,7 @@ class ReaderViewController: BaseObservingViewController {
         controlsView.closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
         controlsView.chaptersButton.addTarget(self, action: #selector(openChapterList), for: .touchUpInside)
         controlsView.panelsButton.addTarget(self, action: #selector(openPanels), for: .touchUpInside)
+        controlsView.bookmarkButton.addTarget(self, action: #selector(toggleCurrentPageBookmark), for: .touchUpInside)
         controlsView.settingsButton.addTarget(self, action: #selector(openReaderSettings), for: .touchUpInside)
         controlsView.webButton.addTarget(self, action: #selector(openWebView), for: .touchUpInside)
         controlsView.autoScrollButton.addTarget(self, action: #selector(toggleAutoScroll), for: .touchUpInside)
@@ -340,6 +343,10 @@ class ReaderViewController: BaseObservingViewController {
     }
 
     override func observe() {
+        addObserver(forName: MCPanelBookmarks.changed.rawValue) { [weak self] _ in
+            self?.cachedPanelBookmarks = nil
+            self?.updateBookmarkButton()
+        }
         addObserver(forName: "Reader.readingMode.\(manga.identifier)") { [weak self] _ in
             guard let self else { return }
             self.setReadingMode(UserDefaults.standard.string(forKey: "Reader.readingMode.\(self.manga.identifier)"))
@@ -1217,6 +1224,7 @@ extension ReaderViewController: @MainActor ReaderHoldingDelegate {
             selectionSignature: route?.pageSelection?.signature)
         if changedPage {
             renderCurrentPageControls()
+            updateBookmarkButton()
         }
         // No timer, disk save, library notification or tracker request while
         // reading, including pauses between swipes. Save at lifecycle boundaries.
@@ -1865,6 +1873,46 @@ extension ReaderViewController {
             reader?.setChapter(previousChaoter, startPage: 1)
             setChapter(previousChaoter)
         }
+    }
+}
+
+// MARK: - Page bookmarks
+extension ReaderViewController {
+    private var titlePanelBookmarks: [MCPanelBookmark] {
+        if let cachedPanelBookmarks { return cachedPanelBookmarks }
+        let titleKey = collectionSequence?.entryID.uuidString ?? "\(manga.sourceKey):\(manga.key)"
+        let bookmarks = MCPanelBookmarks.forTitle(titleKey).filter { !$0.isChapter }
+        cachedPanelBookmarks = bookmarks
+        return bookmarks
+    }
+
+    private func currentPageBookmark() -> MCPanelBookmark? {
+        let route = collectionSequence?.route(chapter)
+        let identity = route?.identifier ?? ChapterIdentifier(sourceKey: manga.sourceKey,
+            mangaKey: manga.key, chapterKey: chapter.key)
+        return titlePanelBookmarks.first {
+            $0.slotID == route?.slotID && $0.sourceKey == identity.sourceKey && $0.mangaKey == identity.mangaKey
+                && $0.chapterKey == identity.chapterKey && $0.page == currentPage
+        }
+    }
+
+    func updateBookmarkButton() {
+        controlsView.setBookmarked(currentPageBookmark() != nil)
+    }
+
+    /// Bookmarks the page shown on the slider, or removes its bookmark.
+    @objc func toggleCurrentPageBookmark() {
+        guard !pages.isEmpty, currentPage > 0 else { return }
+        if let existing = currentPageBookmark() {
+            MCPanelBookmarks.remove(existing.id)
+            UISelectionFeedbackGenerator().selectionChanged()
+            return
+        }
+        let key = pages[safe: currentPage - 1]?.key
+        let surfaces = (reader as? ReaderTranslationReader)?.translationSurfaces() ?? []
+        let surface = surfaces.first { $0.page.key == key } ?? surfaces.first { $0.page.chapterId == chapter.key }
+        addPanelBookmark(image: surface?.imageView.image, chapterKey: chapter.key, page: currentPage)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 }
 

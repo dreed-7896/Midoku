@@ -10,6 +10,7 @@ final class ReaderControlsView: UIVisualEffectView {
     var webButton: UIButton { topBar.webButton }
     let chaptersButton = UIButton(type: .system)
     let panelsButton = UIButton(type: .system)
+    let bookmarkButton = UIButton(type: .system)
     let settingsButton = UIButton(type: .system)
     let autoScrollButton = UIButton(type: .system)
     let translationButton = UIButton(type: .system)
@@ -22,6 +23,7 @@ final class ReaderControlsView: UIVisualEffectView {
         for (button, symbol, title, label) in [
             (chaptersButton, "list.bullet", "Chapters", "Chapters"),
             (panelsButton, "square.grid.2x2", "Pages", "View pages"),
+            (bookmarkButton, "bookmark", "Bookmark", "Bookmark this page"),
             (autoScrollButton, "play.fill", "Auto scroll", "Start auto scroll"),
             (translationButton, "character.bubble", "Translate", "Enable translation"),
             (settingsButton, "textformat.size", "Settings", "Reader settings")
@@ -43,7 +45,7 @@ final class ReaderControlsView: UIVisualEffectView {
             button.accessibilityLabel = label
             button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
         }
-        let actions = UIStackView(arrangedSubviews: [chaptersButton, panelsButton, autoScrollButton, translationButton, settingsButton])
+        let actions = UIStackView(arrangedSubviews: [chaptersButton, panelsButton, bookmarkButton, autoScrollButton, translationButton, settingsButton])
         actions.axis = .horizontal
         actions.alignment = .center
         actions.distribution = .fillEqually
@@ -68,6 +70,13 @@ final class ReaderControlsView: UIVisualEffectView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setBookmarked(_ bookmarked: Bool) {
+        bookmarkButton.configuration?.image = UIImage(systemName: bookmarked ? "bookmark.fill" : "bookmark",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
+        bookmarkButton.configuration?.baseForegroundColor = bookmarked ? .tintColor : .label
+        bookmarkButton.accessibilityLabel = bookmarked ? "Remove page bookmark" : "Bookmark this page"
+    }
 }
 
 /// Floating top bar with the back button, the current chapter and the webview action.

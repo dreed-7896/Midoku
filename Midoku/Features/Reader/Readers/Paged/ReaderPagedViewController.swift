@@ -320,9 +320,16 @@ extension ReaderPagedViewController {
             delegate: delegate,
             temporaryPageStore: viewModel.temporaryPageStore
         )
-        page.pageView?.imageView.addInteraction(UIContextMenuInteraction(delegate: self))
-        if #available(iOS 18.0, *) {
-            bindDictionaryOverlayTap(to: page)
+        // Page views are created lazily (when the page nears the visible range), so
+        // install the long-press menu and dictionary taps when the view exists.
+        page.onPageViewCreated = { [weak self, weak page] pageView in
+            guard let self else { return }
+            if !pageView.imageView.interactions.contains(where: { $0 is UIContextMenuInteraction }) {
+                pageView.imageView.addInteraction(UIContextMenuInteraction(delegate: self))
+            }
+            if #available(iOS 18.0, *) {
+                self.bindDictionaryOverlayTap(to: page)
+            }
         }
         if hasImageCallbacks {
             page.onImageisWideImage = { [weak self, weak page] isWide in

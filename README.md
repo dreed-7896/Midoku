@@ -5,7 +5,7 @@ Midoku combines the native reader and source engine from [Aidoku-M](https://gith
 - Independent local entries, title/author/description/cover edits, reading status and categories.
 - Recursively nested titles with chapters and child titles in one editable reading order. Library search and filters include nested titles.
 - Select multiple library titles, then choose **Actions → Group into new title**. Keep them nested or merge all their chapters into one title. Drag to set title order, keep original chapter names or number them Chapter 1, Chapter 2, and so on, and inherit editable details from a selected title. Merging preserves physical chapters, progress, source links and bookmarks; duplicate source chapters are included once.
-- Reading mode’s random picks include nested titles. Tap the glass shuffle button to pick from Reading and its descendants, or hold it to pick from the entire library.
+- Reading is the first library tab (hide it from **Options → Reading**). Pin a library search to keep it as a tab. The glass shuffle button picks from the current tab, including nested titles; hold it to pick from the entire library.
 - Copy selected source chapters and paste them into any entry. Explicit duplicate review supports skip, separate, alternative and replacement.
 - Persistent mixed-source chapter order, manual ordering, exclusions and source-follow controls.
 - Portrait chapter thumbnails, list/grid layouts and custom chapter titles/covers.

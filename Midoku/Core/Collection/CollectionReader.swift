@@ -199,22 +199,30 @@ extension ReaderViewController {
     func bookmarkPanelAction(image: UIImage, chapterKey: String, page: Int) -> UIAction {
         UIAction(title: "Bookmark panel", image: UIImage(systemName: "bookmark")) { [weak self] _ in
             guard let self, page > 0 else { return }
-            let route = collectionSequence?.route(key: chapterKey)
-            let identity = route?.identifier ?? ChapterIdentifier(sourceKey: manga.sourceKey,
-                mangaKey: manga.key, chapterKey: chapterKey)
-            let display = route?.displayChapter ?? chapter
-            let size = CGSize(width: 160, height: max(1, min(240, 160 * image.size.height / max(1, image.size.width))))
-            let preview = UIGraphicsImageRenderer(size: size).image { _ in
-                image.draw(in: CGRect(origin: .zero, size: size))
-            }.jpegData(compressionQuality: 0.55)
-            MCPanelBookmarks.add(.init(id: UUID(), titleKey: collectionSequence?.entryID.uuidString ?? "\(manga.sourceKey):\(manga.key)",
-                title: collectionSequence?.title ?? manga.title,
-                slotID: route?.slotID,
-                sourceKey: identity.sourceKey, mangaKey: identity.mangaKey, chapterKey: identity.chapterKey,
-                chapterTitle: display.title ?? "Chapter", chapterNumber: display.chapterNumber,
-                page: page, preview: preview, sourcePage: route?.pageSelection?.sourcePage(for: page) ?? page))
+            addPanelBookmark(image: image, chapterKey: chapterKey, page: page)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
+    }
+
+    /// Saves a panel bookmark for a page of the frozen sequence, resolved to its physical chapter.
+    func addPanelBookmark(image: UIImage?, chapterKey: String, page: Int) {
+        let route = collectionSequence?.route(key: chapterKey)
+        let identity = route?.identifier ?? ChapterIdentifier(sourceKey: manga.sourceKey,
+            mangaKey: manga.key, chapterKey: chapterKey)
+        let display = route?.displayChapter ?? chapter
+        let preview = image.flatMap { image -> Data? in
+            guard image.size.width > 0, image.size.height > 0 else { return nil }
+            let size = CGSize(width: 160, height: max(1, min(240, 160 * image.size.height / image.size.width)))
+            return UIGraphicsImageRenderer(size: size).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }.jpegData(compressionQuality: 0.55)
+        }
+        MCPanelBookmarks.add(.init(id: UUID(), titleKey: collectionSequence?.entryID.uuidString ?? "\(manga.sourceKey):\(manga.key)",
+            title: collectionSequence?.title ?? manga.title,
+            slotID: route?.slotID,
+            sourceKey: identity.sourceKey, mangaKey: identity.mangaKey, chapterKey: identity.chapterKey,
+            chapterTitle: display.title ?? "Chapter", chapterNumber: display.chapterNumber,
+            page: page, preview: preview, sourcePage: route?.pageSelection?.sourcePage(for: page) ?? page))
     }
 
     func collectionCoverActions(image: UIImage, chapterKey: String, imageURL: String?) -> [UIAction] {

@@ -27,6 +27,8 @@ extension SearchContentView {
 
         @Published var results: [SearchResult] = []
         @Published var history: [String] = []
+        /// Pinned terms stay above recent searches and survive clearing history.
+        @Published var pinned: [String] = []
         @Published var isLoading: Bool = false
 
         static let maxHistoryEntries = 20
@@ -40,6 +42,7 @@ extension SearchContentView {
 
         init() {
             history = UserDefaults.standard.stringArray(forKey: "Search.history") ?? []
+            pinned = UserDefaults.standard.stringArray(forKey: "Search.pinned") ?? []
         }
     }
 }
@@ -75,6 +78,26 @@ extension SearchContentView.ViewModel {
         withAnimation {
             history = []
         }
+    }
+
+    func isPinned(_ item: String) -> Bool {
+        pinned.contains(item)
+    }
+
+    func pin(_ item: String) {
+        let item = item.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !item.isEmpty, !pinned.contains(item) else { return }
+        withAnimation {
+            pinned.append(item)
+        }
+        UserDefaults.standard.set(pinned, forKey: "Search.pinned")
+    }
+
+    func unpin(_ item: String) {
+        withAnimation {
+            pinned.removeAll { $0 == item }
+        }
+        UserDefaults.standard.set(pinned, forKey: "Search.pinned")
     }
 
     func removeHistory(item: String) {

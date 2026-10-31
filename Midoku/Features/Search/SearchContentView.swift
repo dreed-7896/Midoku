@@ -40,7 +40,7 @@ struct SearchContentView: View {
 
     var body: some View {
         Group {
-            if searchText.isEmpty && viewModel.history.isEmpty {
+            if searchText.isEmpty && viewModel.history.isEmpty && viewModel.pinned.isEmpty {
                 UnavailableView(
                     NSLocalizedString("NO_RECENT_SEARCHES"),
                     systemImage: "magnifyingglass",
@@ -60,10 +60,17 @@ struct SearchContentView: View {
             } else {
                 List {
                     if searchText.isEmpty {
-                        if !viewModel.history.isEmpty {
+                        if !viewModel.pinned.isEmpty {
+                            pinnedItems
+                        }
+                        if !recentItems.isEmpty {
                             historyItems
                         }
                     } else {
+                        let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !term.isEmpty {
+                            pinCurrentSearchRow(term)
+                        }
                         searchResults
                     }
                 }
@@ -90,44 +97,111 @@ struct SearchContentView: View {
         }
     }
 
+    private var recentItems: [String] {
+        viewModel.history.reversed().filter { !viewModel.isPinned($0) }
+    }
+
+    private func termRow(_ item: String, pinned: Bool) -> some View {
+        VStack(spacing: 0) {
+            Button {
+                searchText = item
+                dismissKeyboard()
+                viewModel.search(query: item, delay: false)
+            } label: {
+                HStack {
+                    let imageName = if pinned {
+                        "pin.fill"
+                    } else if #available(iOS 18.0, *) {
+                        "clock.arrow.trianglehead.counterclockwise.rotate.90"
+                    } else {
+                        "clock.arrow.circlepath"
+                    }
+                    Image(systemName: imageName)
+                        .foregroundStyle(.tint)
+                        .imageScale(.small)
+                    Text(item)
+                        .lineLimit(1)
+                    Spacer()
+                }
+            }
+            .buttonStyle(ListButtonStyle(tint: false))
+
+            Divider().padding(.horizontal)
+        }
+        .swipeActions(edge: .leading) {
+            Button {
+                if pinned { viewModel.unpin(item) } else { viewModel.pin(item) }
+            } label: {
+                Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin")
+            }
+            .tint(.orange)
+        }
+        .swipeActions {
+            if pinned {
+                Button(role: .destructive) {
+                    viewModel.unpin(item)
+                } label: {
+                    Label("Unpin", systemImage: "pin.slash")
+                }
+            } else {
+                Button(role: .destructive) {
+                    viewModel.removeHistory(item: item)
+                } label: {
+                    Label(NSLocalizedString("DELETE"), systemImage: "trash")
+                }
+            }
+        }
+        .contextMenu {
+            Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+                if pinned { viewModel.unpin(item) } else { viewModel.pin(item) }
+            }
+            if !pinned {
+                Button(NSLocalizedString("DELETE"), systemImage: "trash", role: .destructive) {
+                    viewModel.removeHistory(item: item)
+                }
+            }
+        }
+        .foregroundStyle(.primary)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(.zero)
+    }
+
+    var pinnedItems: some View {
+        Section {
+            ForEach(viewModel.pinned, id: \.self) { item in
+                termRow(item, pinned: true)
+            }
+        } header: {
+            Text("Pinned")
+                .font(.body)
+                .textCase(nil)
+        }
+    }
+
+    private func pinCurrentSearchRow(_ term: String) -> some View {
+        let pinned = viewModel.isPinned(term)
+        return Button {
+            if pinned { viewModel.unpin(term) } else { viewModel.pin(term) }
+        } label: {
+            Label(pinned ? "Unpin “\(term)”" : "Pin “\(term)”", systemImage: pinned ? "pin.slash" : "pin")
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(.zero)
+    }
+
     var historyItems: some View {
         Section {
-            ForEach(viewModel.history.reversed(), id: \.self) { item in
-                VStack(spacing: 0) {
-                    Button {
-                        searchText = item
-                        dismissKeyboard()
-                        viewModel.search(query: item, delay: false)
-                    } label: {
-                        HStack {
-                            let imageName = if #available(iOS 18.0, *) {
-                                "clock.arrow.trianglehead.counterclockwise.rotate.90"
-                            } else {
-                                "clock.arrow.circlepath"
-                            }
-                            Image(systemName: imageName)
-                                .foregroundStyle(.tint)
-                                .imageScale(.small)
-                            Text(item)
-                                .lineLimit(1)
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(ListButtonStyle(tint: false))
-
-                    Divider().padding(.horizontal)
-                }
-                .swipeActions {
-                    Button(role: .destructive) {
-                        viewModel.removeHistory(item: item)
-                    } label: {
-                        Label(NSLocalizedString("DELETE"), systemImage: "trash")
-                    }
-                }
-                .foregroundStyle(.primary)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(.zero)
+            ForEach(recentItems, id: \.self) { item in
+                termRow(item, pinned: false)
             }
         } header: {
             HStack {
