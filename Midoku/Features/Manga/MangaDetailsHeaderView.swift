@@ -56,6 +56,46 @@ struct MangaDetailsHeaderView: View {
     @State private var showLibraryRemoveConfirm = false
     @State private var changingBookmark = false
     @State private var categoryEntry: MCID?
+    @State private var showPlacementOptions = false
+
+    private var placement: MCSourcePlacement { MCCollectionStore.shared.placement(for: manga) }
+
+    private var saveTitle: String {
+        switch placement {
+        case .nested(_, let parent): "In \(parent)"
+        case .linked(_, let title): "In \(title)"
+        case .topLevel, .none: bookmarked ? "Saved" : "Save"
+        }
+    }
+
+    private var saveSymbol: String {
+        switch placement {
+        case .nested: "folder.fill"
+        case .linked: "link"
+        case .topLevel, .none: bookmarked ? "bookmark.fill" : "bookmark"
+        }
+    }
+
+    private var isSaved: Bool {
+        switch placement {
+        case .nested, .linked, .topLevel: true
+        case .none: bookmarked
+        }
+    }
+
+    /// Nested and merged titles are not top-level saves, so ask what to do instead of toggling.
+    private func savePressed() {
+        switch placement {
+        case .nested, .linked:
+            showPlacementOptions = true
+        case .topLevel, .none:
+            if bookmarked && isTracking {
+                showLibraryRemoveConfirm = true
+            } else {
+                Task { await toggleBookmarked() }
+            }
+        }
+    }
 
     static let coverWidth: CGFloat = 114
 
@@ -227,13 +267,10 @@ struct MangaDetailsHeaderView: View {
                 .allowsHitTesting(!readButtonDisabled)
 
                 Button {
-                    if bookmarked && isTracking {
-                        showLibraryRemoveConfirm = true
-                    } else {
-                        Task { await toggleBookmarked() }
-                    }
+                    savePressed()
                 } label: {
-                    Label(bookmarked ? "Saved" : "Save", systemImage: bookmarked ? "bookmark.fill" : "bookmark")
+                    Label(saveTitle, systemImage: saveSymbol)
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                 }
@@ -247,7 +284,7 @@ struct MangaDetailsHeaderView: View {
                 .background(Color(UIColor.secondarySystemFill))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.accentColor.opacity(0.28)))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .allowsHitTesting(bookmarked || source != nil)
+                .allowsHitTesting(isSaved || source != nil)
             }
             .padding(.bottom, 20)
             .padding(.horizontal, 20)
@@ -305,6 +342,27 @@ struct MangaDetailsHeaderView: View {
             updateReadButtonText()
             hasAvailableTrackers = await TrackerManager.shared.hasAvailableTrackers(mangaId: manga.identifier)
         }
+        .confirmationDialog(saveTitle, isPresented: $showPlacementOptions, titleVisibility: .visible) {
+            switch placement {
+            case .nested(let id, _):
+                Button("Move to library top level") {
+                    MCCollectionStore.shared.perform { try $0.library.moveEntry(id, into: nil) }
+                }
+                Button("Remove from library", role: .destructive) {
+                    Task { await MangaManager.shared.removeFromLibrary(mangaId: manga.identifier); bookmarked = false }
+                }
+            case .linked:
+                Button("Also save as a separate title") { Task { await addToLibrary() } }
+            case .topLevel, .none:
+                EmptyView()
+            }
+        } message: {
+            switch placement {
+            case .nested: Text("This title is nested inside another library title, so it does not appear at the top of your library.")
+            case .linked: Text("This source is part of a merged library title.")
+            case .topLevel, .none: EmptyView()
+            }
+        }
     }
 
     private var creatorNames: [String]? {
@@ -351,19 +409,12 @@ struct MangaDetailsHeaderView: View {
     var buttonsView: some View {
         HStack(spacing: 8) {
             Button {
-                // long holding also triggers a press on release, so cancel that
-                if bookmarked && isTracking {
-                    // show confirm prompt
-                    showLibraryRemoveConfirm = true
-                } else {
-                    Task {
-                        await toggleBookmarked()
-                    }
-                }
+                savePressed()
             } label: {
-                Image(systemName: bookmarked ? "bookmark.fill" : "bookmark")
+                Image(systemName: saveSymbol)
             }
-            .buttonStyle(MangaActionButtonStyle(selected: bookmarked))
+            .buttonStyle(MangaActionButtonStyle(selected: isSaved))
+            .accessibilityLabel(saveTitle)
             .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                 showLibraryEditor()
             })
@@ -465,20 +516,25 @@ struct MangaDetailsHeaderView: View {
             await MangaManager.shared.removeFromLibrary(mangaId: mangaId)
             bookmarked = false
         } else {
-            await store.importLegacyCategories()
-            let categories: Set<UUID> = if let name = AppSettings.library.defaultCategory.get(),
-                let category = store.snapshot.categories.first(where: { $0.name == name }) {
-                [category.id]
-            } else {
-                []
-            }
-            do {
-                _ = try store.add(manga, chapters: manga.chapters ?? chapters, categories: categories)
-                bookmarked = true
-                await MangaManager.shared.addToLibrary(manga: manga, chapters: manga.chapters ?? chapters)
-            } catch {
-                store.error = error.localizedDescription
-            }
+            await addToLibrary()
+        }
+    }
+
+    private func addToLibrary() async {
+        let store = MCCollectionStore.shared
+        await store.importLegacyCategories()
+        let categories: Set<UUID> = if let name = AppSettings.library.defaultCategory.get(),
+            let category = store.snapshot.categories.first(where: { $0.name == name }) {
+            [category.id]
+        } else {
+            []
+        }
+        do {
+            _ = try store.add(manga, chapters: manga.chapters ?? chapters, categories: categories)
+            bookmarked = true
+            await MangaManager.shared.addToLibrary(manga: manga, chapters: manga.chapters ?? chapters)
+        } catch {
+            store.error = error.localizedDescription
         }
     }
 

@@ -496,3 +496,94 @@ struct MCAddSourceView: View {
         } catch { store.error = error.localizedDescription }
     }
 }
+
+/// Renames and renumbers selected chapters in their shown order, with a live preview.
+struct MCBatchChapterEditor: View {
+    let entryID: UUID
+    let slotIDs: [UUID]
+    @Environment(\.dismiss) private var dismiss
+    @State private var store = MCCollectionStore.shared
+    @State private var renames = true
+    @State private var pattern = "Chapter {n}"
+    @State private var renumbers = true
+    @State private var start = "1"
+    @State private var step = "1"
+    @State private var setsVolume = false
+    @State private var volume = ""
+
+    private var edit: MCChapterBatchEdit? {
+        var edit = MCChapterBatchEdit()
+        if renames { edit.titlePattern = pattern }
+        if renumbers {
+            guard let start = Decimal(string: start.trimmingCharacters(in: .whitespaces)),
+                  let step = Decimal(string: step.trimmingCharacters(in: .whitespaces)) else { return nil }
+            edit.startNumber = start
+            edit.step = step
+        }
+        if setsVolume { edit.volume = volume.trimmingCharacters(in: .whitespaces) }
+        return edit
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Rename", isOn: $renames)
+                    if renames {
+                        TextField("Chapter {n}", text: $pattern)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                } footer: {
+                    Text("{n} is the chapter number, {i} the position from 1, and {title} the source title. Leave empty to restore source titles.")
+                }
+                Section {
+                    Toggle("Renumber", isOn: $renumbers)
+                    if renumbers {
+                        LabeledContent("Start at") { TextField("1", text: $start).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+                        LabeledContent("Step") { TextField("1", text: $step).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+                    }
+                }
+                Section {
+                    Toggle("Set volume", isOn: $setsVolume)
+                    if setsVolume { TextField("Volume (empty restores source)", text: $volume) }
+                }
+                Section("Preview") {
+                    if let edit {
+                        let results = store.library.batchResults(entryID: entryID, slotIDs: Array(slotIDs.prefix(60)), edit: edit)
+                        ForEach(results, id: \.slotID) { result in
+                            HStack {
+                                Text(result.number.map { "#\($0)" } ?? "–").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                    .frame(width: 56, alignment: .leading)
+                                Text(previewTitle(result)).lineLimit(1)
+                            }
+                        }
+                        if slotIDs.count > results.count { Text("and \(slotIDs.count - results.count) more").foregroundStyle(.secondary) }
+                    } else {
+                        Text("Enter a valid start and step.").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Edit \(slotIDs.count) chapters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        guard let edit else { return }
+                        if store.perform({ try $0.library.applyBatchEdit(entryID: entryID, slotIDs: slotIDs, edit: edit) }) { dismiss() }
+                    }
+                    .disabled(edit == nil || (!renames && !renumbers && !setsVolume))
+                }
+            }
+            .mcErrors(store)
+        }
+        .midokuAccent()
+    }
+
+    private func previewTitle(_ result: MCChapterBatchResult) -> String {
+        if let title = result.title, !title.isEmpty { return title }
+        guard let variant = store.library.entry(entryID)?.slots.first(where: { $0.id == result.slotID })?.preferred else { return "" }
+        if result.title != nil { return store.library.chapter(variant.chapterID)?.record.title ?? "Source title" }
+        return store.library.chapterDisplayTitle(variant)
+    }
+}

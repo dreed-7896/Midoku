@@ -134,6 +134,23 @@ final class MCCollectionStore {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var lookupCache: MCSnapshotLookup?
     @ObservationIgnored private var searchProfiles: [UUID: MCEntrySearchProfile] = [:]
+    @ObservationIgnored private var newChapterIDsCache: [UUID: Int]?
+
+    /// Titles with unread newly found chapters, counted per title. Parents include their
+    /// nested titles, so a grouped title shows that something inside it is new.
+    var newChapterCounts: [UUID: Int] {
+        if let newChapterIDsCache { return newChapterIDsCache }
+        var counts: [UUID: Int] = [:]
+        var seen = Set<String>()
+        for update in library.updates {
+            guard seen.insert("\(update.entryID):\(update.chapterID)").inserted,
+                  let chapter = library.chapter(update.chapterID), !library.completed.contains(chapter.identity),
+                  library.entry(update.entryID) != nil else { continue }
+            for id in [update.entryID] + library.ancestorIDs(of: update.entryID) { counts[id, default: 0] += 1 }
+        }
+        newChapterIDsCache = counts
+        return counts
+    }
 
     /// Increases with every saved change; views key derived data on it.
     var revision: Int { snapshotRevision }
@@ -141,6 +158,7 @@ final class MCCollectionStore {
     private func invalidateLookups() {
         lookupCache = nil
         searchProfiles = [:]
+        newChapterIDsCache = nil
     }
 
     /// Search text, tags, artists and sources of an entry, derived once per saved snapshot.
@@ -354,6 +372,21 @@ final class MCCollectionStore {
         guard let connection = self.connection(sourceKey: manga.sourceKey),
               let listing = library.listing(identity: .init(connectionID: connection.id, externalID: manga.key)) else { return nil }
         return library.entries.first { $0.primaryListingID == listing.id }?.id
+    }
+
+    /// Where a source title lives in the library. Nesting a title keeps it in the library,
+    /// and merged titles keep their sources as links of the merged entry.
+    func placement(for manga: AidokuRunner.Manga) -> MCSourcePlacement {
+        guard let connection = connection(sourceKey: manga.sourceKey),
+              let listing = library.listing(identity: .init(connectionID: connection.id, externalID: manga.key)) else { return .none }
+        if let entry = library.entries.first(where: { $0.primaryListingID == listing.id }) {
+            guard entry.parentEntryID != nil, let path = library.parentPath(of: entry) else { return .topLevel(entry.id) }
+            return .nested(entry.id, parent: path)
+        }
+        if let owner = library.entries.first(where: { $0.links.contains { $0.listingID == listing.id } }) {
+            return .linked(owner.id, title: library.title(owner))
+        }
+        return .none
     }
 
     /// Replace a source in place so the personal entry, categories and Reading order survive migration.
@@ -796,4 +829,11 @@ struct MCEntrySearchProfile {
     let tags: [String]
     let artists: [String]
     let sourceIDs: Set<UUID>
+}
+
+enum MCSourcePlacement: Equatable {
+    case none
+    case topLevel(UUID)
+    case nested(UUID, parent: String)
+    case linked(UUID, title: String)
 }

@@ -37,13 +37,33 @@ private enum MCLibraryProgressFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// A search and filter combination. Smart tabs save one; pinned searches are smart tabs too.
+private struct MCLibraryFilter: Codable, Equatable {
+    var query = ""
+    var statuses: Set<String> = []
+    var artists: Set<String> = []
+    var tags: Set<String> = []
+    var sources: Set<UUID> = []
+    var progress = MCLibraryProgressFilter.all.rawValue
+    var newChaptersOnly = false
+
+    var isEmpty: Bool { self == MCLibraryFilter() }
+    var queryOnly: Bool { !query.isEmpty && MCLibraryFilter(query: query) == self }
+}
+
+private struct MCSmartTab: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var name: String
+    var filter: MCLibraryFilter
+}
+
 private enum MCLibraryPageKind: Equatable {
     /// A category, artist, tag, status or source bucket of top-level entries.
     case group
     /// The ordered Reading list, which may include nested titles.
     case reading
-    /// A pinned search term, matched across nested titles like a regular search.
-    case search(String)
+    /// A saved search and filters, matched across nested titles like a regular search.
+    case smart(MCSmartTab)
     /// Every top-level entry, shown when special tabs exist without a grouping.
     case all
 }
@@ -60,7 +80,7 @@ private struct MCLibraryPageKey: Equatable {
     let entryCount: Int
     let grouping: MCLibraryGrouping
     let showReading: Bool
-    let pins: Data
+    let tabs: Data
 }
 
 /// Not observed: a cache hit must not trigger another render.
@@ -143,7 +163,14 @@ struct MCCollectionRootView: View {
     @State private var pageCache = MCLibraryPageCache()
     @AppStorage("Midoku.showReadingTab") private var showReadingTab = true
     @AppStorage("Midoku.libraryShuffleButton") private var showShuffle = true
-    @AppStorage("Midoku.pinnedLibrarySearches.v1") private var pinnedSearchData = Data()
+    @AppStorage("Midoku.librarySmartTabs.v1") private var smartTabData = Data()
+    @AppStorage("Midoku.libraryContinueButton") private var showContinue = true
+    @State private var newChaptersOnly = false
+    @State private var showDuplicates = false
+    @State private var showStats = false
+    @State private var pendingMerge: [UUID]?
+    @State private var namingTab: MCSmartTab?
+    @State private var tabName = ""
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
     @AppStorage("Appearance.libraryGridStyle") private var gridStyle = ChapterGridStyle.standard
@@ -152,22 +179,40 @@ struct MCCollectionRootView: View {
 
     /// Top-level entries, or every matching entry while a search or filter is active.
     private var visibleEntries: [MCPersonalEntry] {
-        sortedEntries(filteredEntries(query: query, flat: showsFlatResults), in: nil)
+        sortedEntries(filteredEntries(currentFilter, flat: showsFlatResults), in: nil)
     }
 
-    private func filteredEntries(query: String, flat: Bool) -> [MCPersonalEntry] {
-        let filtering = !artists.isEmpty || !tags.isEmpty || !sources.isEmpty
+    private var currentFilter: MCLibraryFilter {
+        MCLibraryFilter(query: trimmedQuery, statuses: Set(statuses.map(\.rawValue)), artists: artists, tags: tags,
+                        sources: sources, progress: progressFilter.rawValue, newChaptersOnly: newChaptersOnly)
+    }
+
+    private func apply(_ filter: MCLibraryFilter) {
+        statuses = Set(filter.statuses.compactMap(MCPersonalStatus.init(rawValue:)))
+        artists = filter.artists; tags = filter.tags; sources = filter.sources
+        progressFilter = MCLibraryProgressFilter(rawValue: filter.progress) ?? .all
+        newChaptersOnly = filter.newChaptersOnly
+        query = filter.query
+        searchVisible = !filter.query.isEmpty
+    }
+
+    private func filteredEntries(_ filter: MCLibraryFilter, flat: Bool) -> [MCPersonalEntry] {
+        let statuses = Set(filter.statuses.compactMap(MCPersonalStatus.init(rawValue:)))
+        let progress = MCLibraryProgressFilter(rawValue: filter.progress) ?? .all
+        let profiled = !filter.query.isEmpty || !filter.artists.isEmpty || !filter.tags.isEmpty || !filter.sources.isEmpty
+        let newChapters = filter.newChaptersOnly ? store.newChapterCounts : [:]
         return store.library.entries.filter { entry in
             guard entry.parentEntryID == nil || flat,
-                  statuses.isEmpty || statuses.contains(entry.status) else { return false }
-            if !query.isEmpty || filtering {
+                  statuses.isEmpty || statuses.contains(entry.status),
+                  !filter.newChaptersOnly || newChapters[entry.id] != nil else { return false }
+            if profiled {
                 let profile = store.searchProfile(entry)
-                guard query.isEmpty || profile.text.localizedCaseInsensitiveContains(query),
-                      artists.isEmpty || !artists.isDisjoint(with: profile.artists),
-                      tags.isEmpty || !tags.isDisjoint(with: profile.tags),
-                      sources.isEmpty || !sources.isDisjoint(with: profile.sourceIDs) else { return false }
+                guard filter.query.isEmpty || profile.text.localizedCaseInsensitiveContains(filter.query),
+                      filter.artists.isEmpty || !filter.artists.isDisjoint(with: profile.artists),
+                      filter.tags.isEmpty || !filter.tags.isDisjoint(with: profile.tags),
+                      filter.sources.isEmpty || !filter.sources.isDisjoint(with: profile.sourceIDs) else { return false }
             }
-            return matchesProgress(entry)
+            return matchesProgress(entry, progress)
         }
     }
 
@@ -175,9 +220,9 @@ struct MCCollectionRootView: View {
     private func entries(for page: MCLibraryGroupPage) -> [MCPersonalEntry] {
         switch page.kind {
         case .reading: store.readingEntries
-        case .search(let term): sortedEntries(filteredEntries(query: term, flat: true), in: page.id)
-        case .all: sortedEntries(filteredEntries(query: "", flat: false), in: page.id)
-        case .group: sortedEntries(filteredEntries(query: "", flat: false).filter { page.entryIDs.contains($0.id) }, in: page.id)
+        case .smart(let tab): sortedEntries(filteredEntries(tab.filter, flat: true), in: page.id)
+        case .all: sortedEntries(store.library.rootEntries, in: page.id)
+        case .group: sortedEntries(store.library.rootEntries.filter { page.entryIDs.contains($0.id) }, in: page.id)
         }
     }
 
@@ -188,43 +233,52 @@ struct MCCollectionRootView: View {
 
     private static let readingPageID = "reading"
 
-    private var pinnedSearches: [String] {
-        (try? JSONDecoder().decode([String].self, from: pinnedSearchData)) ?? []
+    private var smartTabs: [MCSmartTab] {
+        (try? JSONDecoder().decode([MCSmartTab].self, from: smartTabData)) ?? []
     }
 
-    private func setPinnedSearches(_ values: [String]) {
-        pinnedSearchData = (try? JSONEncoder().encode(values)) ?? Data()
+    private func setSmartTabs(_ values: [MCSmartTab]) {
+        smartTabData = (try? JSONEncoder().encode(values)) ?? Data()
     }
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private func isPinned(_ term: String) -> Bool {
-        pinnedSearches.contains { $0.localizedCaseInsensitiveCompare(term) == .orderedSame }
+    private var savedCurrentFilter: MCSmartTab? {
+        let filter = currentFilter
+        return smartTabs.first { $0.filter == filter }
     }
 
-    private func pinSearch(_ term: String) {
-        guard !term.isEmpty else { return }
-        if !isPinned(term) { setPinnedSearches(pinnedSearches + [term]) }
-        let id = "search:\(term.lowercased())"
-        query = ""; searchVisible = false; searchFocused = false
-        groupPage = id
-        swipePosition.requestedID = id
+    /// Saves the current search and filters as a tab, then shows that tab.
+    private func saveSmartTab(name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !currentFilter.isEmpty else { return }
+        let tab = savedCurrentFilter ?? MCSmartTab(name: name, filter: currentFilter)
+        if savedCurrentFilter == nil { setSmartTabs(smartTabs + [tab]) }
+        apply(MCLibraryFilter())
+        searchFocused = false
+        groupPage = "smart:\(tab.id)"
+        swipePosition.requestedID = "smart:\(tab.id)"
     }
 
-    private func unpinSearch(_ term: String) {
-        setPinnedSearches(pinnedSearches.filter { $0.localizedCaseInsensitiveCompare(term) != .orderedSame })
+    private func removeSmartTab(_ id: UUID) {
+        setSmartTabs(smartTabs.filter { $0.id != id })
     }
 
-    /// Pinned-tab membership ignores the transient filters, which hide the tabs anyway.
-    private func searchMatches(_ term: String) -> [MCPersonalEntry] {
-        store.library.entries.filter { store.searchProfile($0).text.localizedCaseInsensitiveContains(term) }
+    private func renameSmartTab(_ id: UUID, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        setSmartTabs(smartTabs.map { tab in
+            var tab = tab
+            if tab.id == id { tab.name = name }
+            return tab
+        })
     }
 
     /// Reading and pinned searches lead the grouped tabs, so they are one swipe away.
     /// Rebuilt only when the library, grouping or pinned tabs change, not on every render.
     private var libraryPages: [MCLibraryGroupPage] {
         let key = MCLibraryPageKey(revision: store.revision, entryCount: store.library.entries.count,
-                                   grouping: grouping, showReading: showReadingTab, pins: pinnedSearchData)
+                                   grouping: grouping, showReading: showReadingTab, tabs: smartTabData)
         if pageCache.key == key { return pageCache.pages }
         let pages = buildLibraryPages()
         pageCache.key = key
@@ -237,9 +291,9 @@ struct MCCollectionRootView: View {
         if showReadingTab {
             pages.append(.init(id: Self.readingPageID, title: "Reading", entryIDs: Set(store.library.readingIDs), kind: .reading))
         }
-        for term in pinnedSearches {
-            pages.append(.init(id: "search:\(term.lowercased())", title: term,
-                               entryIDs: Set(searchMatches(term).map(\.id)), kind: .search(term)))
+        for tab in smartTabs {
+            pages.append(.init(id: "smart:\(tab.id)", title: tab.name,
+                               entryIDs: Set(filteredEntries(tab.filter, flat: true).map(\.id)), kind: .smart(tab)))
         }
         let groups = grouping == .none ? [] : groupPages
         if groups.isEmpty {
@@ -266,11 +320,11 @@ struct MCCollectionRootView: View {
     private var showsFlatResults: Bool { hasActiveFilters || !query.isEmpty }
 
     private var hasActiveFilters: Bool {
-        !statuses.isEmpty || !artists.isEmpty || !tags.isEmpty || !sources.isEmpty || progressFilter != .all
+        !statuses.isEmpty || !artists.isEmpty || !tags.isEmpty || !sources.isEmpty || progressFilter != .all || newChaptersOnly
     }
 
     private var activeFilterCount: Int {
-        statuses.count + artists.count + tags.count + sources.count + (progressFilter == .all ? 0 : 1)
+        statuses.count + artists.count + tags.count + sources.count + (progressFilter == .all ? 0 : 1) + (newChaptersOnly ? 1 : 0)
     }
 
     private var availableTags: [String] {
@@ -292,7 +346,7 @@ struct MCCollectionRootView: View {
 
     private func entryTags(_ entry: MCPersonalEntry) -> [String] { store.searchProfile(entry).tags }
 
-    private func matchesProgress(_ entry: MCPersonalEntry) -> Bool {
+    private func matchesProgress(_ entry: MCPersonalEntry, _ progressFilter: MCLibraryProgressFilter) -> Bool {
         guard progressFilter != .all else { return true }
         let total = store.chapterCount(entryID: entry.id)
         let read = total - store.unreadCount(entryID: entry.id)
@@ -419,6 +473,9 @@ struct MCCollectionRootView: View {
                             Toggle("Chapter grid", isOn: $chapterGrid)
                             Button("Categories", systemImage: "folder") { showCategories = true }
                             Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
+                            Button("Reading stats", systemImage: "chart.bar") { showStats = true }
+                            Button("Find duplicates", systemImage: "square.on.square") { showDuplicates = true }
+                            Toggle("Continue button", isOn: $showContinue)
                             Toggle("Shuffle button", isOn: $showShuffle)
                             Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
@@ -439,6 +496,18 @@ struct MCCollectionRootView: View {
                     }
                 }
             } message: { Text("Reading history and downloaded chapters are kept.") }
+            .alert(namingTab.map { tab in smartTabs.contains { $0.id == tab.id } } == true ? "Rename tab" : "Save as tab",
+                   isPresented: Binding(get: { namingTab != nil }, set: { if !$0 { namingTab = nil } })) {
+                TextField("Name", text: $tabName)
+                Button("Save") {
+                    if let tab = namingTab, smartTabs.contains(where: { $0.id == tab.id }) { renameSmartTab(tab.id, to: tabName) }
+                    else { saveSmartTab(name: tabName) }
+                    namingTab = nil
+                }
+                Button("Cancel", role: .cancel) { namingTab = nil }
+            } message: {
+                Text("The tab keeps this search and these filters, and updates as your library changes.")
+            }
             .confirmationDialog("Clear Reading?", isPresented: $confirmResetReading) {
                 Button("Clear Reading", role: .destructive) {
                     store.removeFromReading(Set(store.library.readingIDs))
@@ -457,6 +526,13 @@ struct MCCollectionRootView: View {
             }
             .modifier(MCReaderPresentation(sheet: $reader))
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
+            .sheet(isPresented: $showStats) { MCReadingStatsView() }
+            .sheet(isPresented: $showDuplicates, onDismiss: {
+                // Present the grouping editor once the finder has closed.
+                if let ids = pendingMerge { pendingMerge = nil; groupingSelection = MCGroupingSelection(entryIDs: ids) }
+            }) {
+                MCDuplicateFinderView { pendingMerge = $0 }
+            }
             .sheet(isPresented: $showBatchCategories) { MCBatchCategoryEditor(entryIDs: selected) }
             .sheet(isPresented: $showBatchArtist) { MCBatchArtistEditor(entryIDs: selected) }
             .sheet(item: $groupingSelection) { selection in
@@ -527,7 +603,11 @@ struct MCCollectionRootView: View {
             let pages = libraryPages
             VStack(spacing: 0) {
                 if !pages.isEmpty && !showsFlatResults {
-                    MCLibraryGroupTabs(pages: pages, selected: activeGroupPage, swipePosition: swipePosition) { page in
+                    let newCounts = store.newChapterCounts
+                    MCLibraryGroupTabs(pages: pages, selected: activeGroupPage, swipePosition: swipePosition,
+                                       newCounts: Dictionary(uniqueKeysWithValues: pages.map { page in
+                                           (page.id, page.entryIDs.reduce(0) { $0 + (newCounts[$1] == nil ? 0 : 1) })
+                                       })) { page in
                         tabMenu(page)
                     }
                 }
@@ -585,7 +665,7 @@ struct MCCollectionRootView: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if showShuffle && !selecting { shuffleButton }
+                if !selecting { floatingActions }
             }
             .customSearchable(
                 text: $query,
@@ -636,24 +716,28 @@ struct MCCollectionRootView: View {
                 .disabled(store.library.readingIDs.isEmpty)
             Divider()
             Button("Hide Reading tab", systemImage: "eye.slash") { showReadingTab = false }
-        case .search(let term):
-            Button("Edit search", systemImage: "magnifyingglass") {
-                query = term; searchVisible = true; searchFocused = true
+        case .smart(let tab):
+            Button("Rename…", systemImage: "pencil") {
+                tabName = tab.name
+                namingTab = tab
             }
-            Button("Unpin", systemImage: "pin.slash", role: .destructive) { unpinSearch(term) }
+            Button("Show search and filters", systemImage: "line.3.horizontal.decrease.circle") { apply(tab.filter) }
+            Button(tab.filter.queryOnly ? "Unpin" : "Remove tab", systemImage: "pin.slash", role: .destructive) {
+                removeSmartTab(tab.id)
+            }
         case .group, .all:
             EmptyView()
         }
     }
 
     private var pinSearchBar: some View {
-        let term = trimmedQuery
-        let pinned = isPinned(term)
+        let saved = savedCurrentFilter
         return HStack {
             Button {
-                if pinned { unpinSearch(term) } else { pinSearch(term) }
+                if let saved { removeSmartTab(saved.id) } else { saveSmartTab(name: trimmedQuery) }
             } label: {
-                Label(pinned ? "Unpin “\(term)”" : "Pin “\(term)” as a tab", systemImage: pinned ? "pin.slash" : "pin")
+                Label(saved != nil ? "Unpin “\(trimmedQuery)”" : hasActiveFilters ? "Pin search and filters as a tab" : "Pin “\(trimmedQuery)” as a tab",
+                      systemImage: saved != nil ? "pin.slash" : "pin")
                     .font(.subheadline.weight(.medium)).lineLimit(1)
             }
             .buttonStyle(.bordered)
@@ -661,6 +745,47 @@ struct MCCollectionRootView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal).padding(.vertical, 8)
+    }
+
+    /// The most recently read title on the current tab, ready to resume.
+    private var continueCandidate: MCPersonalEntry? {
+        let entries = activeEntries.filter { store.chapterCount(entryID: $0.id) > 0 }
+        return entries.filter { $0.lastReadAt != nil }.max { ($0.lastReadAt ?? .distantPast) < ($1.lastReadAt ?? .distantPast) }
+            ?? entries.first { store.unreadCount(entryID: $0.id) > 0 }
+    }
+
+    @ViewBuilder private var floatingActions: some View {
+        HStack(spacing: 10) {
+            if showContinue, let entry = continueCandidate {
+                Button { continueReading(entry) } label: {
+                    HStack(spacing: 8) {
+                        MCEntryCover(entry: entry).frame(width: 24, height: 34).clipShape(RoundedRectangle(cornerRadius: 4))
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(entry.lastReadAt == nil ? "Start" : "Continue").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(store.library.title(entry)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: 220, alignment: .leading)
+                    .padding(.leading, 6).padding(.trailing, 12).padding(.vertical, 4)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .accessibilityLabel("Continue reading \(store.library.title(entry))")
+            }
+            if showShuffle { shuffleButton }
+        }
+        .padding(.horizontal, 18).padding(.bottom, 16)
+    }
+
+    private func continueReading(_ entry: MCPersonalEntry) {
+        Task {
+            guard let slotID = await store.resumeSlot(entryID: entry.id) else {
+                store.error = "No chapters are available to read."
+                return
+            }
+            do { reader = MCReaderSheet(sequence: try MCReaderSequence(entryID: entry.id, slotID: slotID)) }
+            catch { store.error = error.localizedDescription }
+        }
     }
 
     private var shuffleButton: some View {
@@ -676,7 +801,6 @@ struct MCCollectionRootView: View {
         .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
             openRandomEntry(from: store.library.entries)
         })
-        .padding(.trailing, 18).padding(.bottom, 16)
     }
 
     private func openRandomEntry(from entries: [MCPersonalEntry]) {
@@ -797,6 +921,10 @@ struct MCCollectionRootView: View {
         .accessibilityLabel("\(store.library.title(entry)), \(store.chapterCount(entryID: entry.id)) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
         .contextMenu {
+            if store.chapterCount(entryID: entry.id) > 0 {
+                Button(entry.lastReadAt == nil ? "Start reading" : "Continue reading", systemImage: "book.pages") { continueReading(entry) }
+                Divider()
+            }
             if store.library.readingIDs.contains(entry.id) {
                 Button("Remove from Reading", systemImage: "minus.circle") { store.removeFromReading([entry.id]) }
             } else {
@@ -846,6 +974,7 @@ struct MCCollectionRootView: View {
             Picker("Reading progress", selection: $progressFilter) {
                 ForEach(MCLibraryProgressFilter.allCases) { Text($0.title).tag($0) }
             }
+            Toggle("New chapters", systemImage: "sparkles", isOn: $newChaptersOnly)
             if !availableArtists.isEmpty {
                 Menu("Artist", systemImage: "person.crop.square") {
                     ForEach(availableArtists, id: \.self) { artist in
@@ -876,10 +1005,21 @@ struct MCCollectionRootView: View {
                     }
                 }
             }
-            if hasActiveFilters {
+            if hasActiveFilters || !trimmedQuery.isEmpty {
                 Divider()
+                if let saved = savedCurrentFilter {
+                    Label("Saved as “\(saved.name)”", systemImage: "checkmark")
+                } else {
+                    Button("Save as tab…", systemImage: "plus.rectangle.on.rectangle") {
+                        tabName = trimmedQuery.isEmpty ? "Filtered" : trimmedQuery
+                        namingTab = MCSmartTab(name: "", filter: currentFilter)
+                    }
+                }
+            }
+            if hasActiveFilters {
                 Button("Clear filters", systemImage: "xmark.circle", role: .destructive) {
                     statuses.removeAll(); artists.removeAll(); tags.removeAll(); sources.removeAll(); progressFilter = .all
+                    newChaptersOnly = false
                 }
             }
         } label: {
@@ -900,6 +1040,7 @@ struct MCCollectionRootView: View {
                 MCEntryCover(entry: entry)
                     .aspectRatio(2/3, contentMode: .fit)
                     .overlay(alignment: .topTrailing) { unreadBadge(entry).padding(6) }
+                    .overlay(alignment: .topLeading) { newBadge(entry).padding(6) }
                     .overlay(alignment: .bottomLeading) {
                         if gridStyle == .compact {
                             VStack(alignment: .leading, spacing: 2) {
@@ -934,6 +1075,16 @@ struct MCCollectionRootView: View {
         }
     }
 
+    @ViewBuilder private func newBadge(_ entry: MCPersonalEntry) -> some View {
+        if !selecting, let count = store.newChapterCounts[entry.id] {
+            Image(systemName: "sparkles")
+                .font(.caption2.weight(.bold)).foregroundStyle(.white)
+                .padding(4)
+                .background(Color.orange, in: Circle())
+                .accessibilityLabel("\(count) new chapters")
+        }
+    }
+
     @ViewBuilder private func unreadBadge(_ entry: MCPersonalEntry) -> some View {
         let unread = store.unreadCount(entryID: entry.id)
         if unread > 0 && !selecting {
@@ -949,6 +1100,8 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
     let pages: [MCLibraryGroupPage]
     let selected: String?
     let swipePosition: MCLibrarySwipePosition
+    /// Titles with unread new chapters on each tab.
+    let newCounts: [String: Int]
     @ViewBuilder let menu: (MCLibraryGroupPage) -> TabMenu
 
     private func tabButton(_ page: MCLibraryGroupPage, active: Bool) -> some View {
@@ -956,7 +1109,8 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
             HStack(spacing: 6) {
                 switch page.kind {
                 case .reading: Image(systemName: "book").font(.caption.weight(.semibold))
-                case .search: Image(systemName: "pin.fill").font(.caption2.weight(.semibold))
+                case .smart(let tab): Image(systemName: tab.filter.queryOnly ? "pin.fill" : "line.3.horizontal.decrease")
+                    .font(.caption2.weight(.semibold))
                 case .group, .all: EmptyView()
                 }
                 Text(page.title).font(.subheadline.weight(.medium)).lineLimit(1)
@@ -965,6 +1119,14 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
                     .foregroundStyle(active ? Color.accentColor : .secondary)
                     .padding(.horizontal, 7).padding(.vertical, 3)
                     .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Capsule())
+                if let new = newCounts[page.id], new > 0 {
+                    Text("\(new) new")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(Color.accentColor, in: Capsule())
+                        .accessibilityLabel("\(new) titles with new chapters")
+                }
             }
             .foregroundStyle(active ? Color.accentColor : .secondary)
             .padding(.vertical, 12)
@@ -984,7 +1146,7 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
                         }
                         .id(page.id)
                         .accessibilityLabel(page.kind == .group || page.kind == .all ? page.title
-                            : page.kind == .reading ? "Reading" : "Pinned search, \(page.title)")
+                            : page.kind == .reading ? "Reading" : "Saved tab, \(page.title)")
                         .accessibilityValue("\(page.entryIDs.count) entries")
                         .accessibilityAddTraits(active ? .isSelected : [])
                         .anchorPreference(key: MCLibraryTabAnchors.self, value: .bounds) { [page.id: $0] }

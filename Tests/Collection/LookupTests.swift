@@ -54,3 +54,57 @@ struct LookupTests {
         #expect(decoded.entry(a) != nil)
     }
 }
+
+@Suite("Batch chapter edits")
+struct BatchEditTests {
+    private func entry() throws -> (MCLibraryState, UUID, [UUID]) {
+        var state = MCLibraryState()
+        let id = try state.add(details: .init(id: "batch", title: "Batch", description: "", coverURL: nil), connectionID: UUID(),
+            records: [.init(id: "a", title: "Prologue", number: "0", ordinal: 0, language: nil),
+                      .init(id: "b", title: "Start", number: "1", ordinal: 1, language: nil),
+                      .init(id: "c", title: "Middle", number: "2", ordinal: 2, language: nil)], language: nil)
+        let slots = try #require(state.entry(id)).slots.map(\.id)
+        return (state, id, slots)
+    }
+
+    @Test func renumbersAndRenamesInGivenOrder() throws {
+        let (initial, id, slots) = try entry()
+        var state = initial
+        try state.applyBatchEdit(entryID: id, slotIDs: slots, edit: .init(titlePattern: "Part {n} – {title}", startNumber: 10, step: 5))
+        let edited = try #require(state.entry(id)).slots
+        let byID = Dictionary(uniqueKeysWithValues: edited.map { ($0.id, $0.preferred!) })
+        #expect(byID[slots[0]]?.edits.number == "10")
+        #expect(byID[slots[2]]?.edits.number == "20")
+        #expect(byID[slots[1]]?.edits.title == "Part 15 – Start")
+    }
+
+    @Test func emptyPatternRestoresSourceTitlesAndKeepsNumbers() throws {
+        let (initial, id, slots) = try entry()
+        var state = initial
+        try state.applyBatchEdit(entryID: id, slotIDs: slots, edit: .init(titlePattern: "Ch {i}"))
+        try state.applyBatchEdit(entryID: id, slotIDs: [slots[0]], edit: .init(titlePattern: ""))
+        let first = try #require(state.entry(id)?.slots.first { $0.id == slots[0] }?.preferred)
+        #expect(first.edits.title == nil)
+        #expect(first.edits.number == nil)
+    }
+}
+
+@Suite("Duplicate finder")
+struct DuplicateTests {
+    @Test func keysIgnoreCasePunctuationAndNotes() {
+        #expect(MCLibraryState.duplicateKey("The Héros' Journey (Official)") == MCLibraryState.duplicateKey("heros journey"))
+        #expect(MCLibraryState.duplicateKey("Tom & Jerry") == "tom and jerry")
+        #expect(MCLibraryState.duplicateKey("Solo Leveling") != MCLibraryState.duplicateKey("Solo Leveling Ragnarok"))
+    }
+
+    @Test func groupsMatchingTitlesButNotNestedOnes() throws {
+        var state = MCLibraryState()
+        let a = try state.createManual(title: "One Piece")
+        let b = try state.createManual(title: "one piece [Colored]")
+        let other = try state.createManual(title: "Bleach")
+        let nested = try state.createManual(title: "Bleach")
+        try state.moveEntry(nested, into: other)
+        let groups = state.duplicateGroups()
+        #expect(groups == [[a, b]])
+    }
+}

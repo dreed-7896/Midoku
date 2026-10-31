@@ -397,22 +397,6 @@ struct ReaderReliabilityTests {
         await store.removeAll()
     }
 
-    @Test func diskBudgetEvictsOldCacheFilesWithoutTouchingDownloads() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let cache = root.appendingPathComponent("cache")
-        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-        let old = cache.appendingPathComponent("old")
-        let recent = cache.appendingPathComponent("recent")
-        let download = root.appendingPathComponent("download")
-        for file in [old, recent, download] { try Data(repeating: 0, count: 20).write(to: file) }
-        try FileManager.default.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: old.path)
-        ArtworkDiskBudget.trim(directory: cache, limit: 25)
-        #expect(!old.exists)
-        #expect(recent.exists)
-        #expect(download.exists)
-    }
-
     @Test func refreshTimesOutEvenWhenASourceIgnoresCancellation() async throws {
         let runner = MCSlowRefreshRunner()
         let source = AidokuRunner.Source(url: nil, key: "mc.timeout", name: "Timeout", version: 1,

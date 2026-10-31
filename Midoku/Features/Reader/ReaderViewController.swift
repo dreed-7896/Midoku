@@ -172,6 +172,8 @@ class ReaderViewController: BaseObservingViewController {
     let controlsView = ReaderControlsView()
     /// This title's panel bookmarks, refreshed when bookmarks change.
     fileprivate var cachedPanelBookmarks: [MCPanelBookmark]?
+    /// Reading mode keys this reader follows; a library title can span several sources.
+    fileprivate var observedReadingModeKeys = Set<String>()
     private var toolbarView: ReaderToolbarView { controlsView.toolbar }
     private(set) var readerControlsVisible = true
 
@@ -304,6 +306,10 @@ class ReaderViewController: BaseObservingViewController {
         // set reader
         let readingModeKey = "Reader.readingMode.\(manga.identifier)"
         UserDefaults.standard.register(defaults: [readingModeKey: "default"])
+        // Library titles remember their own mode, whichever source a chapter comes from.
+        if let entryKey = entryReadingModeKey, let saved = UserDefaults.standard.string(forKey: entryKey) {
+            UserDefaults.standard.set(saved, forKey: readingModeKey)
+        }
         setReadingMode(UserDefaults.standard.string(forKey: readingModeKey))
 
         // set up apple pencil squeeze handler
@@ -347,13 +353,7 @@ class ReaderViewController: BaseObservingViewController {
             self?.cachedPanelBookmarks = nil
             self?.updateBookmarkButton()
         }
-        addObserver(forName: "Reader.readingMode.\(manga.identifier)") { [weak self] _ in
-            guard let self else { return }
-            self.setReadingMode(UserDefaults.standard.string(forKey: "Reader.readingMode.\(self.manga.identifier)"))
-            self.reader?.setChapter(self.chapter, startPage: self.currentPage)
-            // if the tap zone is auto, it will changed based on the current reader
-            self.updateTapZone()
-        }
+        observeReadingMode(for: manga.identifier)
         addObserver(forName: "Reader.disableDoubleTap") { [weak self] _ in
             self?.configureBarToggleTapGestures()
         }
@@ -731,6 +731,10 @@ extension ReaderViewController {
             default:
                 currentReader = .paged
         }
+        if let entryKey = entryReadingModeKey, let saved = UserDefaults.standard.string(forKey: entryKey) {
+            UserDefaults.standard.set(saved, forKey: "Reader.readingMode.\(manga.identifier)")
+        }
+        observeReadingMode(for: manga.identifier)
         let vc = UIHostingController(
             rootView: ReaderSettingsView(
                 mangaId: manga.identifier,
@@ -845,6 +849,28 @@ extension ReaderViewController {
 
 // MARK: - Reading Mode
 extension ReaderViewController {
+    /// The library title's own mode key, shared by all of its sources.
+    var entryReadingModeKey: String? {
+        collectionSequence.map { "Reader.readingMode.entry.\($0.entryID.uuidString)" }
+    }
+
+    /// Follows mode changes for this chapter's source and saves them for the library title.
+    func observeReadingMode(for identifier: MangaIdentifier) {
+        let key = "Reader.readingMode.\(identifier)"
+        guard observedReadingModeKeys.insert(key).inserted else { return }
+        addObserver(forName: key) { [weak self] _ in
+            guard let self else { return }
+            let value = UserDefaults.standard.string(forKey: key)
+            if let entryKey = self.entryReadingModeKey {
+                UserDefaults.standard.set(value, forKey: entryKey)
+            }
+            self.setReadingMode(value)
+            self.reader?.setChapter(self.chapter, startPage: self.currentPage)
+            // if the tap zone is auto, it will changed based on the current reader
+            self.updateTapZone()
+        }
+    }
+
     func setReadingMode(_ mode: String?) {
         switch mode {
             case "rtl": readingMode = .rtl

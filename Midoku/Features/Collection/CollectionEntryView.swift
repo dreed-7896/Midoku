@@ -181,6 +181,7 @@ struct MCEntryView: View {
     @AppStorage("Appearance.chapterLandscapeColumns") private var landscapeColumns = 5
     @State private var viewportSize = CGSize.zero
     @State private var rowsCache = MCEntryRowsCache()
+    @State private var batchEditing: MCBatchSelection?
     private var entry: MCPersonalEntry? { store.library.entry(entryID) }
     private var grid: Bool { entry?.chapterGridOverride ?? defaultChapterGrid }
     private var chapterGridOverride: Binding<Bool?> {
@@ -320,6 +321,9 @@ struct MCEntryView: View {
         .sheet(isPresented: $showRemovedChapters) { MCRemovedChaptersView(entryID: entryID) }
         .sheet(item: $migrationTarget) { MCEntryMigrationSheet(manga: $0.manga) }
         .sheet(isPresented: $showReorder) { MCChapterOrderView(entryID: entryID) }
+        .sheet(item: $batchEditing) { selection in
+            MCBatchChapterEditor(entryID: entryID, slotIDs: selection.slotIDs)
+        }
         .sheet(item: $editingChapter) { item in
             MCChapterEditor(entryID: entryID, slotID: item.id, resetThumbnail: { resetChapterThumbnails(slotIDs: [item.id]) })
         }
@@ -406,6 +410,9 @@ struct MCEntryView: View {
                     Menu {
                         Button("Mark read", systemImage: "checkmark") { store.setRead(entryID: entryID, slotIDs: selected, read: true) }
                         Button("Mark unread", systemImage: "circle") { store.setRead(entryID: entryID, slotIDs: selected, read: false) }
+                        Button("Rename & renumber…", systemImage: "textformat.123") {
+                            batchEditing = MCBatchSelection(slotIDs: slots.map(\.id).filter { selected.contains($0) })
+                        }
                         Button("Remove chapters", systemImage: "trash", role: .destructive) { confirmRemoveChapters = true }
                     } label: { Label("Actions", systemImage: "ellipsis.circle") }.disabled(selected.isEmpty)
                 }.font(.subheadline)
@@ -928,4 +935,9 @@ final class MCEntryRowsCache {
     }
     var key: Key?
     var rows: Rows?
+}
+
+struct MCBatchSelection: Identifiable {
+    let id = UUID()
+    let slotIDs: [UUID]
 }
