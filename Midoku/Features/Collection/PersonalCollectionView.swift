@@ -895,7 +895,7 @@ struct MCCollectionRootView: View {
     private func entryButton(_ entry: MCPersonalEntry, kind: MCLibraryPageKind? = nil) -> some View {
         let inReading = kind == .reading
         let showsPath: Bool = switch kind {
-        case .reading?, .search?: true
+        case .reading?, .smart?: true
         default: showsFlatResults
         }
         return Button {

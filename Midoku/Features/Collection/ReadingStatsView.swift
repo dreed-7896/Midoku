@@ -131,9 +131,13 @@ struct MCReadingStats {
         }
         chaptersThisWeek = chaptersByWeek[thisWeek]?.count ?? 0
         durationThisWeek = Duration.seconds(Int(seconds)).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
-        weeks = (0..<12).reversed().compactMap { offset in
-            calendar.date(byAdding: .weekOfYear, value: -offset, to: thisWeek).map { Week(start: $0, chapters: chaptersByWeek[$0]?.count ?? 0) }
+        var weeks: [Week] = []
+        for offset in stride(from: 11, through: 0, by: -1) {
+            guard let start = calendar.date(byAdding: .weekOfYear, value: -offset, to: thisWeek) else { continue }
+            let chapters: Int = chaptersByWeek[start]?.count ?? 0
+            weeks.append(Week(start: start, chapters: chapters))
         }
+        self.weeks = weeks
 
         // Count distinct chapters per library title; nested and merged sources count for their top title.
         var rootByListing: [UUID: UUID] = [:]
@@ -150,15 +154,27 @@ struct MCReadingStats {
                   let root = rootByListing[listing.id] else { continue }
             chaptersByTitle[root, default: []].insert("\(session.sourceKey)|\(session.mangaKey)|\(session.chapterKey)")
         }
-        let titles = chaptersByTitle.map { Count(id: $0.key.uuidString, entryID: $0.key, chapters: $0.value.count) }
-            .sorted { $0.chapters == $1.chapters ? $0.id < $1.id : $0.chapters > $1.chapters }
+        var titles: [Count] = []
+        for (id, chapters) in chaptersByTitle {
+            titles.append(Count(id: id.uuidString, entryID: id, chapters: chapters.count))
+        }
+        titles.sort(by: Self.ranked)
         topTitles = Array(titles.prefix(5))
         var artists: [String: Int] = [:]
         for title in titles {
             guard let id = title.entryID, let entry = store.library.entry(id) else { continue }
             for artist in Set(store.searchProfile(entry).artists) { artists[artist, default: 0] += title.chapters }
         }
-        topArtists = Array(artists.map { Count(id: $0.key, entryID: nil, chapters: $0.value) }
-            .sorted { $0.chapters == $1.chapters ? $0.id < $1.id : $0.chapters > $1.chapters }.prefix(5))
+        var artistCounts: [Count] = []
+        for (name, chapters) in artists {
+            artistCounts.append(Count(id: name, entryID: nil, chapters: chapters))
+        }
+        artistCounts.sort(by: Self.ranked)
+        topArtists = Array(artistCounts.prefix(5))
+    }
+
+    private static func ranked(_ lhs: Count, _ rhs: Count) -> Bool {
+        if lhs.chapters != rhs.chapters { return lhs.chapters > rhs.chapters }
+        return lhs.id < rhs.id
     }
 }

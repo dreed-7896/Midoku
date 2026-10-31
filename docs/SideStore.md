@@ -28,4 +28,3 @@ The IPA workflow uses versions `0.9.<workflow run number>` so updates are detect
 
 The source uses the stable latest-release download URL; each listed IPA uses an immutable version-specific URL. No generated commits or separate source branch are needed.
 
-Run publishing tests with `python3 -m unittest discover -s scripts/tests -v`.

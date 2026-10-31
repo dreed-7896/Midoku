@@ -5,4 +5,4 @@
 - App branding, project, scheme and bundle identity are Midoku. Target iOS 27 with the existing Midoku team. Unsigned builds are for LiveContainer.
 - All chapter page, image, download and progress operations resolve the physical source/manga/chapter tuple. Synthetic reader keys only distinguish variants within a frozen collection sequence.
 - Keep preview data under DEBUG. Do not seed it into normal app launches.
-- Run `swift test`, the relevant simulator integration tests, and the iOS archive workflow. Report device-only verification limits.
+- There are no automated tests; the user verifies on device. Run the iOS archive workflow to confirm the app builds.
