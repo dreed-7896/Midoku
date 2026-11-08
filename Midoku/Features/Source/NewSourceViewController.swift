@@ -197,7 +197,8 @@ class NewSourceViewController: UIViewController {
         source: AidokuRunner.Source,
         onlySearch: Bool? = nil,
         searchQuery: String? = nil,
-        initialListingIndex: Int? = nil
+        initialListingIndex: Int? = nil,
+        initialFilters: [FilterValue]? = nil
     ) {
         self.source = source
         self.onlySearch = onlySearch ?? source.onlySearch
@@ -215,6 +216,11 @@ class NewSourceViewController: UIViewController {
             let enabledFilters = try? JSONDecoder().decode([FilterValue].self, from: filtersData)
             self.enabledFilters = enabledFilters ?? []
             self.searchViewController.enabledFilters = self.enabledFilters
+        }
+        // A Discover search shelf opens with its own filters without replacing the source's saved ones.
+        if let initialFilters {
+            self.enabledFilters = initialFilters
+            self.searchViewController.enabledFilters = initialFilters
         }
     }
 

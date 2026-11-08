@@ -164,7 +164,6 @@ struct MCCollectionRootView: View {
     @AppStorage("Midoku.showReadingTab") private var showReadingTab = true
     @AppStorage("Midoku.libraryShuffleButton") private var showShuffle = true
     @AppStorage("Midoku.librarySmartTabs.v1") private var smartTabData = Data()
-    @AppStorage("Midoku.libraryContinueButton") private var showContinue = true
     @State private var newChaptersOnly = false
     @State private var showDuplicates = false
     @State private var showStats = false
@@ -475,7 +474,6 @@ struct MCCollectionRootView: View {
                             Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
                             Button("Reading stats", systemImage: "chart.bar") { showStats = true }
                             Button("Find duplicates", systemImage: "square.on.square") { showDuplicates = true }
-                            Toggle("Continue button", isOn: $showContinue)
                             Toggle("Shuffle button", isOn: $showShuffle)
                             Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
@@ -747,34 +745,10 @@ struct MCCollectionRootView: View {
         .padding(.horizontal).padding(.vertical, 8)
     }
 
-    /// The most recently read title on the current tab, ready to resume.
-    private var continueCandidate: MCPersonalEntry? {
-        let entries = activeEntries.filter { store.chapterCount(entryID: $0.id) > 0 }
-        return entries.filter { $0.lastReadAt != nil }.max { ($0.lastReadAt ?? .distantPast) < ($1.lastReadAt ?? .distantPast) }
-            ?? entries.first { store.unreadCount(entryID: $0.id) > 0 }
-    }
-
     @ViewBuilder private var floatingActions: some View {
-        HStack(spacing: 10) {
-            if showContinue, let entry = continueCandidate {
-                Button { continueReading(entry) } label: {
-                    HStack(spacing: 8) {
-                        MCEntryCover(entry: entry).frame(width: 24, height: 34).clipShape(RoundedRectangle(cornerRadius: 4))
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(entry.lastReadAt == nil ? "Start" : "Continue").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(store.library.title(entry)).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: 220, alignment: .leading)
-                    .padding(.leading, 6).padding(.trailing, 12).padding(.vertical, 4)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
-                .accessibilityLabel("Continue reading \(store.library.title(entry))")
-            }
-            if showShuffle { shuffleButton }
+        if showShuffle {
+            shuffleButton.padding(.horizontal, 18).padding(.bottom, 16)
         }
-        .padding(.horizontal, 18).padding(.bottom, 16)
     }
 
     private func continueReading(_ entry: MCPersonalEntry) {

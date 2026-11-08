@@ -18,7 +18,7 @@ struct MangaGridItem: View {
     static let gradient = Gradient(
         colors: (0...24).map { offset -> Color in
             let ratio = CGFloat(offset) / 24
-            return Color.black.opacity(0.7 * pow(ratio, CGFloat(3)))
+            return Color.black.opacity(0.85 * pow(ratio, CGFloat(1.6)))
         }
     )
 
@@ -53,9 +53,10 @@ struct MangaGridItem: View {
             .overlay(
                 Text(title)
                     .foregroundStyle(.white)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .multilineTextAlignment(.leading)
-                    .lineLimit(2)
+                    .lineLimit(5)
+                    .shadow(color: .black.opacity(0.6), radius: 2)
                     .padding(8),
                 alignment: .bottomLeading
             )

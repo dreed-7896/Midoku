@@ -89,10 +89,10 @@ class MangaGridCell: UICollectionViewCell {
         contentView.addSubview(imageView)
 
         gradient.frame = bounds
-        gradient.locations = [0.6, 1]
+        gradient.locations = [0.35, 1]
         gradient.colors = [
             UIColor(white: 0, alpha: 0).cgColor,
-            UIColor(white: 0, alpha: 0.7).cgColor
+            UIColor(white: 0, alpha: 0.85).cgColor
         ]
         gradient.cornerRadius = layer.cornerRadius
         gradient.needsDisplayOnBoundsChange = true
@@ -102,8 +102,15 @@ class MangaGridCell: UICollectionViewCell {
         contentView.addSubview(overlayView)
 
         titleLabel.textColor = .white
-        titleLabel.numberOfLines = 2
-        titleLabel.font = .systemFont(ofSize: 15, weight: .medium)
+        // Show the whole title, like library covers, instead of cutting it at two lines.
+        titleLabel.numberOfLines = 5
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.adjustsFontSizeToFitWidth = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.layer.shadowColor = UIColor.black.cgColor
+        titleLabel.layer.shadowOpacity = 0.6
+        titleLabel.layer.shadowRadius = 2
+        titleLabel.layer.shadowOffset = .zero
         contentView.addSubview(titleLabel)
 
         contentView.addSubview(badgeView)
@@ -147,6 +154,7 @@ class MangaGridCell: UICollectionViewCell {
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
             titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 28),
 
             badgeView.heightAnchor.constraint(equalToConstant: 20),
             badgeView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
