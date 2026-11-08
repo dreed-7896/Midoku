@@ -6,13 +6,21 @@ struct MCDiscoverFeed: Codable, Identifiable {
     let sourceKey: String
     let sourceName: String
     let listingID: String
-    let listingName: String
+    var listingName: String
     /// Search shelves run a query and/or filters instead of a listing tab.
     var query: String?
     var filters: [FilterValue]?
+    /// Artist shelves search these names in these extensions and list the newest releases.
+    var artists: [String]?
+    var sourceKeys: [String]?
 
+    var isArtists: Bool { artists != nil }
     var isSearch: Bool { query != nil || filters != nil }
     var subtitle: String {
+        if isArtists {
+            let artistCount = artists?.count ?? 0, sourceCount = sourceKeys?.count ?? 0
+            return "\(artistCount) artist\(artistCount == 1 ? "" : "s") · \(sourceCount) extension\(sourceCount == 1 ? "" : "s")"
+        }
         guard isSearch else { return sourceName }
         let count = filters?.count ?? 0
         return count > 0 ? "\(sourceName) · Search · \(count) filter\(count == 1 ? "" : "s")" : "\(sourceName) · Search"
@@ -30,6 +38,10 @@ final class MCDiscoverModel: ObservableObject {
     private var seen: [String: [String]] = [:]
     @Published var errors: [UUID: String] = [:]
     @Published var loading = Set<UUID>()
+    /// Artist shelves: releases newest first, and refresh progress.
+    @Published var releases: [UUID: [MCArtistRelease]] = [:]
+    @Published var artistProgress: [UUID: MCArtistProgress] = [:]
+    var artistRefreshed = Set<UUID>()
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key), let feeds = try? JSONDecoder().decode([MCDiscoverFeed].self, from: data) { self.feeds = feeds }
@@ -53,20 +65,26 @@ final class MCDiscoverModel: ObservableObject {
     }
     /// Marks results the shelf has not shown before; the first load only records what exists.
     private func recordSeen(_ feed: MCDiscoverFeed, keys: [String]) {
+        newKeys[feed.id] = recordSeenTokens(feed, tokens: keys)
+    }
+    /// Returns the tokens not seen on earlier loads and remembers them.
+    func recordSeenTokens(_ feed: MCDiscoverFeed, tokens keys: [String]) -> Set<String> {
         let id = feed.id.uuidString
+        var fresh = Set<String>()
         if let previous = seen[id] {
             let known = Set(previous)
-            newKeys[feed.id] = Set(keys.filter { !known.contains($0) })
+            fresh = Set(keys.filter { !known.contains($0) })
             var merged = keys
             merged.append(contentsOf: previous.filter { !Set(keys).contains($0) })
-            seen[id] = Array(merged.prefix(600))
+            seen[id] = Array(merged.prefix(1000))
         } else {
-            newKeys[feed.id] = []
             seen[id] = keys
         }
         UserDefaults.standard.set(seen, forKey: Self.seenKey)
+        return fresh
     }
     func load(_ feed: MCDiscoverFeed, force: Bool = false) async {
+        if feed.isArtists { await loadArtists(feed, force: force); return }
         guard !loading.contains(feed.id), force || entries[feed.id] == nil else { return }
         // Sources load after launch; the shelf retries when its source appears.
         guard SourceStore.shared.hasLoaded else { return }
@@ -97,6 +115,8 @@ final class MCDiscoverModel: ObservableObject {
     func remove(_ feed: MCDiscoverFeed) {
         feeds.removeAll { $0.id == feed.id }
         entries[feed.id] = nil; errors[feed.id] = nil; newKeys[feed.id] = nil
+        releases[feed.id] = nil; artistRefreshed.remove(feed.id)
+        if feed.isArtists { MCArtistShelf.removeResults(feed.id) }
         seen[feed.id.uuidString] = nil
         UserDefaults.standard.set(seen, forKey: Self.seenKey)
         save()
@@ -124,7 +144,16 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
             navigationController?.pushViewController(MangaViewController(source: SourceStore.shared.source(for: manga.sourceKey), manga: manga, parent: self), animated: true)
         }
         rootView.openListing = { [weak self] feed in
-            guard let self, let source = SourceStore.shared.source(for: feed.sourceKey) else { return }
+            guard let self else { return }
+            if feed.isArtists {
+                var view = MCArtistReleasesView(feedID: feed.id, model: self.model)
+                view.openManga = { [weak self] manga in self?.rootView.openManga(manga) }
+                let controller = UIHostingController(rootView: view)
+                controller.navigationItem.largeTitleDisplayMode = .always
+                navigationController?.pushViewController(controller, animated: true)
+                return
+            }
+            guard let source = SourceStore.shared.source(for: feed.sourceKey) else { return }
             if feed.isSearch {
                 let controller = NewSourceViewController(source: source, onlySearch: true, searchQuery: feed.query, initialFilters: feed.filters ?? [])
                 navigationController?.pushViewController(controller, animated: true)
@@ -136,6 +165,7 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
             }
         }
         rootView.openShelves = { [weak self] in self?.showShelves() }
+        rootView.editArtists = { [weak self] in self?.showShelves(kind: .artists) }
         rootView.openExtensions = { [weak self] in
             self?.navigationController?.pushViewController(BrowseViewController(), animated: true)
         }
@@ -152,9 +182,9 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private func showShelves() {
+    private func showShelves(kind: MCDiscoverConfiguration.Kind = .tab) {
         guard presentedViewController == nil else { return }
-        present(UIHostingController(rootView: MCDiscoverConfiguration(model: model).midokuAccent()), animated: true)
+        present(UIHostingController(rootView: MCDiscoverConfiguration(model: model, kind: kind).midokuAccent()), animated: true)
     }
 }
 
@@ -167,6 +197,7 @@ struct MCDiscoverView: View {
     var openManga: (AidokuRunner.Manga) -> Void = { _ in }
     var openListing: (MCDiscoverFeed) -> Void = { _ in }
     var openShelves: () -> Void = {}
+    var editArtists: () -> Void = {}
     var openExtensions: () -> Void = {}
     var openSource: (AidokuRunner.Source) -> Void = { _ in }
 
@@ -198,12 +229,22 @@ struct MCDiscoverView: View {
                 if !installed.isEmpty || !sources.hasLoaded {
                     if !model.feeds.isEmpty {
                         ForEach(Array(model.feeds.enumerated()), id: \.element.id) { index, feed in
-                            shelf(feed, featured: index == 0, index: index)
+                            Group {
+                                if feed.isArtists {
+                                    MCArtistShelfView(feed: feed, index: index, model: model, openManga: openManga,
+                                                      openAll: { openListing(feed) }, edit: editArtists)
+                                } else {
+                                    shelf(feed, featured: index == 0, index: index)
+                                }
+                            }
                                 .task(id: "\(feed.id)-\(sources.hasLoaded)-\(sources.source(for: feed.sourceKey) != nil)") { await model.load(feed) }
                         }
                         addShelfTile
                     } else if !installed.isEmpty {
                         firstShelfCard
+                    }
+                    if !installed.isEmpty, !model.feeds.contains(where: \.isArtists) {
+                        artistPromptTile
                     }
                 }
             }
@@ -280,6 +321,26 @@ struct MCDiscoverView: View {
             button: "Add a shelf",
             action: openShelves
         )
+    }
+
+    private var artistPromptTile: some View {
+        Button(action: editArtists) {
+            HStack(spacing: 14) {
+                Image(systemName: "paintbrush.pointed.fill").font(.title2).foregroundStyle(Color.accentColor)
+                    .frame(width: 44, height: 44).background(Color.accentColor.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Follow artists").font(.headline).foregroundStyle(.primary)
+                    Text("See the newest releases from artists you pick, across your extensions.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
     }
 
     private var addShelfTile: some View {
@@ -532,8 +593,8 @@ private struct MCDiscoverHero: View {
     }
 }
 
-private struct MCDiscoverConfiguration: View {
-    enum Kind: String, CaseIterable { case tab = "Tab", search = "Search" }
+struct MCDiscoverConfiguration: View {
+    enum Kind: String, CaseIterable { case tab = "Tab", search = "Search", artists = "Artists" }
 
     @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
@@ -549,6 +610,19 @@ private struct MCDiscoverConfiguration: View {
     @State private var showFilters = false
     @State private var loading = false
     @State private var error: String?
+    @State private var artistNames: [String] = []
+    @State private var artistSources: [String] = []
+    @State private var artistShelfName = ""
+
+    init(model: MCDiscoverModel, kind: Kind = .tab) {
+        self.model = model
+        _kind = State(initialValue: kind)
+        if let feed = model.feeds.first(where: \.isArtists) {
+            _artistNames = State(initialValue: feed.artists ?? [])
+            _artistSources = State(initialValue: feed.sourceKeys ?? [])
+            _artistShelfName = State(initialValue: feed.listingName == "New from your artists" ? "" : feed.listingName)
+        }
+    }
     private var installed: [AidokuRunner.Source] {
         sources.sourcesByKey.values.filter { !sources.isDisabled(sourceKey: $0.key) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -561,7 +635,7 @@ private struct MCDiscoverConfiguration: View {
                 Section {
                     ForEach(model.feeds) { feed in
                         HStack(spacing: 10) {
-                            Image(systemName: feed.isSearch ? "magnifyingglass" : "rectangle.stack")
+                            Image(systemName: feed.isArtists ? "paintbrush.pointed" : feed.isSearch ? "magnifyingglass" : "rectangle.stack")
                                 .foregroundStyle(.secondary).frame(width: 22)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(feed.listingName).font(.headline)
@@ -569,25 +643,31 @@ private struct MCDiscoverConfiguration: View {
                             }
                         }
                     }
-                    .onDelete { model.feeds.remove(atOffsets: $0); model.save() }
+                    .onDelete { offsets in offsets.map { model.feeds[$0] }.forEach(model.remove) }
                     .onMove { model.feeds.move(fromOffsets: $0, toOffset: $1); model.save() }
                 } header: { Text("Your shelves") } footer: { Text(model.feeds.isEmpty ? "Shelves you add appear on Discover." : "Reorder shelves with Edit. Swipe a shelf to remove it.") }
                 Section {
                     if installed.isEmpty { Text("Install an extension from Extensions first.").foregroundStyle(.secondary) }
                     else {
-                        Picker("Extension", selection: $sourceKey) {
-                            Text("Choose extension").tag("")
-                            ForEach(installed, id: \.key) { Text($0.name).tag($0.key) }
-                        }
                         Picker("Shelf type", selection: $kind) {
                             ForEach(Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
-                        if loading { ProgressView("Loading…") }
+                        if kind == .artists {
+                            artistFields
+                        } else {
+                            Picker("Extension", selection: $sourceKey) {
+                                Text("Choose extension").tag("")
+                                ForEach(installed, id: \.key) { Text($0.name).tag($0.key) }
+                            }
+                        }
+                        if kind == .artists { EmptyView() }
+                        else if loading { ProgressView("Loading…") }
                         else if !sourceKey.isEmpty {
                             switch kind {
                                 case .tab: tabFields
                                 case .search: searchFields
+                                case .artists: EmptyView()
                             }
                         }
                         if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
@@ -595,6 +675,8 @@ private struct MCDiscoverConfiguration: View {
                 } header: { Text("Add a shelf") } footer: {
                     if kind == .search {
                         Text("Search shelves rerun your term and filters each time Discover refreshes. Results you haven't seen before are marked New.")
+                    } else if kind == .artists {
+                        Text("The artist shelf leads Discover. It searches each artist in every chosen extension and lists the newest releases first, 15 on the shelf and up to 200 in See all.")
                     }
                 }
             }.navigationTitle("Shelves").navigationBarTitleDisplayMode(.inline)
@@ -650,8 +732,30 @@ private struct MCDiscoverConfiguration: View {
         .disabled(!canAddSearch)
     }
 
+    @ViewBuilder private var artistFields: some View {
+        let existing = model.feeds.contains(where: \.isArtists)
+        NavigationLink {
+            MCArtistPicker(selected: $artistNames)
+        } label: {
+            LabeledContent("Artists", value: artistNames.isEmpty ? "None" : artistNames.count <= 2 ? artistNames.joined(separator: ", ") : "\(artistNames.count) selected")
+        }
+        NavigationLink {
+            MCSourceMultiPicker(selected: $artistSources)
+        } label: {
+            LabeledContent("Extensions", value: artistSources.isEmpty ? "None" : "\(artistSources.count) selected")
+        }
+        TextField("Shelf name (optional)", text: $artistShelfName)
+        Button(existing ? "Save artist shelf" : "Add artist shelf", systemImage: existing ? "checkmark.circle.fill" : "plus.circle.fill") {
+            model.saveArtistShelf(artists: artistNames, sourceKeys: artistSources, name: artistShelfName)
+            if let feed = model.feeds.first(where: \.isArtists) { Task { await model.load(feed, force: true) } }
+            dismiss()
+        }
+        .disabled(artistNames.isEmpty || artistSources.isEmpty)
+    }
+
     private func loadOptions() async {
         listings = []; listingID = ""; searchFilters = []; error = nil
+        guard kind != .artists else { return }
         guard let source = sources.source(for: sourceKey) else { return }
         loading = true
         defer { loading = false }
