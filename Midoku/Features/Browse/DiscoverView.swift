@@ -772,6 +772,8 @@ struct MCDiscoverConfiguration: View {
                     // Filters from another extension don't apply here.
                     let ids = Set(loaded.map(\.id))
                     enabledFilters.removeAll { !ids.contains($0.id) }
+                case .artists:
+                    break
             }
         } catch is CancellationError { }
         catch { self.error = error.midokuDescription() }
