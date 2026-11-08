@@ -84,7 +84,11 @@ final class MCDiscoverModel: ObservableObject {
         return fresh
     }
     func load(_ feed: MCDiscoverFeed, force: Bool = false) async {
-        if feed.isArtists { await loadArtists(feed, force: force); return }
+        if feed.isArtists {
+            // Runs apart from the view's task so scrolling or a view refresh doesn't cancel a long search.
+            await Task { await loadArtists(feed, force: force) }.value
+            return
+        }
         guard !loading.contains(feed.id), force || entries[feed.id] == nil else { return }
         // Sources load after launch; the shelf retries when its source appears.
         guard SourceStore.shared.hasLoaded else { return }

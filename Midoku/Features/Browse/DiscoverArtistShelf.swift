@@ -1,5 +1,4 @@
 import AidokuRunner
-import CoreData
 import SwiftUI
 
 // MARK: - Data
@@ -181,24 +180,29 @@ enum MCArtistShelf {
     }
     static func removeResults(_ id: UUID) { try? FileManager.default.removeItem(at: resultsURL(id)) }
 
-    /// Artist and author names from the library, most frequent first.
-    static func libraryArtists() async -> [MCLibraryArtist] {
-        await CoreDataManager.shared.container.performBackgroundTask { context in
-            var counts: [String: MCLibraryArtist] = [:]
-            for item in CoreDataManager.shared.getLibraryManga(context: context) {
-                guard let manga = item.manga else { continue }
-                var seen = Set<String>()
-                for field in [manga.artist, manga.author] {
-                    for raw in (field ?? "").components(separatedBy: CharacterSet(charactersIn: ",;")) {
-                        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let key = normalize(name)
-                        guard !key.isEmpty, seen.insert(key).inserted else { continue }
-                        counts[key, default: MCLibraryArtist(name: name, count: 0)].count += 1
-                    }
-                }
-            }
-            return counts.values.sorted { $0.count != $1.count ? $0.count > $1.count : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    /// Artists credited in the personal collection, most frequent first. Edits win over source
+    /// credits, and a cleared credit stays cleared. Authors stand in only when an entry has no artist.
+    @MainActor static func libraryArtists() -> [MCLibraryArtist] {
+        let library = MCCollectionStore.shared.library
+        func names(_ override: String?, _ source: [String]?) -> [String] {
+            let raw = override.map { [$0] } ?? source ?? []
+            return raw.flatMap { $0.components(separatedBy: CharacterSet(charactersIn: ",;")) }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         }
+        var counts: [String: MCLibraryArtist] = [:]
+        for entry in library.rootEntries {
+            let details = library.listing(entry.primaryListingID)?.details
+            var credited = names(entry.artistOverride, details?.artists)
+            if credited.isEmpty { credited = names(entry.authorOverride, details?.authors) }
+            var seen = Set<String>()
+            for name in credited {
+                let key = normalize(name)
+                guard !key.isEmpty, seen.insert(key).inserted else { continue }
+                counts[key, default: MCLibraryArtist(name: name, count: 0)].count += 1
+            }
+        }
+        return counts.values.sorted { $0.count != $1.count ? $0.count > $1.count : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     static func sorted(_ releases: [MCArtistRelease]) -> [MCArtistRelease] {
@@ -251,11 +255,16 @@ extension MCDiscoverModel {
 
         loading.insert(feed.id); errors[feed.id] = nil
         artistRefreshed.insert(feed.id)
+        // Let the other shelves finish first so their extension calls and ours don't pile up.
+        for _ in 0..<60 where !loading.subtracting([feed.id]).isEmpty {
+            try? await Task.sleep(for: .milliseconds(500))
+            if Task.isCancelled { break }
+        }
         defer { loading.remove(feed.id); artistProgress[feed.id] = nil }
 
         // Each extension is asked how it searches by artist and sorts by latest.
         var plans: [String: MCArtistShelf.Plan] = [:]
-        await forEachLimited(sources, limit: 4, work: { source in
+        await forEachLimited(sources, limit: Self.extensionConcurrency, work: { source in
             let filters = (try? await source.getSearchFilters()) ?? []
             return (source.key, MCArtistShelf.plan(for: filters))
         }, handle: { result in plans[result.0] = result.1 })
@@ -269,7 +278,7 @@ extension MCDiscoverModel {
         var failures = 0, done = 0
         artistProgress[feed.id] = .init(done: 0, total: pairs.count, searching: true)
         let sourcesByKey = Dictionary(sources.map { ($0.key, $0) }, uniquingKeysWith: { lhs, _ in lhs })
-        await forEachLimited(pairs, limit: 4, work: { pair in
+        await forEachLimited(pairs, limit: Self.extensionConcurrency, work: { pair in
             await MCArtistShelf.search(source: pair.source, artist: pair.artist, plan: pair.plan)
         }, handle: { result in
             done += 1
@@ -332,7 +341,7 @@ extension MCDiscoverModel {
         artistProgress[feed.id] = .init(done: 0, total: stale.count, searching: false)
         struct Fetch: Sendable { let source: AidokuRunner.Source; let manga: AidokuRunner.Manga; let id: String }
         let fetches = stale.map { Fetch(source: $0.source, manga: $0.manga, id: "\($0.source.key)|\($0.manga.key)") }
-        await forEachLimited(fetches, limit: 6, work: { fetch in
+        await forEachLimited(fetches, limit: Self.extensionConcurrency, work: { fetch in
             let release = await MCArtistShelf.details(source: fetch.source, manga: fetch.manga)
             return (fetch.id, release)
         }, handle: { result in
@@ -356,6 +365,10 @@ extension MCDiscoverModel {
         let tokens = recordSeenTokens(feed, tokens: results.map(\.seenToken))
         newKeys[feed.id] = Set(results.filter { tokens.contains($0.seenToken) }.map(\.id))
     }
+
+    /// Extension calls hold a shared worker thread while they wait on the network, so running
+    /// many at once starves the pool and every call stalls. Two at a time stays clear of that.
+    static let extensionConcurrency = 2
 
     /// Runs `work` over `items` with at most `limit` running at once; `handle` sees each result on the main actor.
     private func forEachLimited<T: Sendable, R: Sendable>(
@@ -747,7 +760,7 @@ struct MCArtistPicker: View {
         .toolbar { if !selected.isEmpty { EditButton() } }
         .task {
             guard !loaded else { return }
-            library = await MCArtistShelf.libraryArtists()
+            library = MCArtistShelf.libraryArtists()
             loaded = true
         }
     }

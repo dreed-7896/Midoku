@@ -188,11 +188,11 @@ struct MangaDetailsHeaderView: View {
                             copy(manga.title)
                         }
                     } label: {
+                        // The full title shows; the header grows to fit it.
                         Text(manga.title)
-                            .lineLimit(4)
                             .font(.system(.title2).weight(.semibold))
                             .foregroundStyle(.primary)
-                            .minimumScaleFactor(0.75)
+                            .fixedSize(horizontal: false, vertical: true)
                             .contentTransitionDisabledPlease()
                             .multilineTextAlignment(.leading)
                             .contentShape(Rectangle())
@@ -236,7 +236,7 @@ struct MangaDetailsHeaderView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: 174)
+            .frame(minHeight: 174)
             .padding(.bottom, 14)
             .padding(.horizontal, 20)
 

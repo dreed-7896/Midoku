@@ -378,8 +378,9 @@ struct MCCollectionRootView: View {
             return namedGroupPages(prefix: "artist", emptyTitle: "Unknown artist", values: artistNames)
         case .author:
             return namedGroupPages(prefix: "author", emptyTitle: "Unknown author") { entry in
-                if let override = entry.authorOverride, !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    [override]
+                // An author cleared in the editor stays cleared instead of falling back to the source.
+                if let override = entry.authorOverride {
+                    override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [override]
                 } else {
                     store.library.listing(entry.primaryListingID)?.details.authors ?? []
                 }
