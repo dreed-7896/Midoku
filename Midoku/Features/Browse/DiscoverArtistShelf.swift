@@ -35,16 +35,20 @@ struct MCLibraryArtist: Sendable, Hashable {
 struct MCArtistProgress: Equatable {
     var done: Int
     var total: Int
-    var searching: Bool
 }
 
 enum MCArtistShelf {
     static let shelfLimit = 15
     static let resultLimit = 200
-    /// Search results checked per artist per extension.
-    static let candidatesPerSearch = 20
-    /// Chapter lists newer than this are reused instead of being fetched again.
-    static let detailLifetime: TimeInterval = 6 * 60 * 60
+    /// Results kept from each artist search in each extension.
+    static let candidatesPerSearch = 40
+    /// Saved results are shown without searching again for this long.
+    static let cacheLifetime: TimeInterval = 4 * 60 * 60
+    /// A search that takes longer is skipped, so one stuck extension can't hold up the shelf.
+    static let searchTimeout: Double = 20
+    /// Searches running at once. Each blocks a shared worker thread until its network call returns,
+    /// so this stays below the thread count to leave room for the network work itself.
+    static let concurrency = 4
 
     // MARK: Name matching
 
@@ -126,30 +130,18 @@ enum MCArtistShelf {
         }
     }
 
-    static func chapterLabel(_ chapter: AidokuRunner.Chapter) -> String? {
-        if let number = chapter.chapterNumber {
-            let text = number.rounded() == number ? String(Int(number)) : String(number)
-            return "Ch. \(text)"
+    /// Returns nil when `operation` outlasts `seconds`. The operation is left to finish on its own,
+    /// since an extension blocked on the network may not respond to cancellation.
+    static func withTimeout<T: Sendable>(_ seconds: Double, _ operation: @escaping @Sendable () async -> T) async -> T? {
+        let gate = MCTimeoutGate<T>()
+        return await withCheckedContinuation { continuation in
+            gate.install(continuation)
+            Task { gate.resume(await operation()) }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                gate.resume(nil)
+            }
         }
-        if let title = chapter.title, !title.isEmpty { return title }
-        if let volume = chapter.volumeNumber { return "Vol. \(volume.rounded() == volume ? String(Int(volume)) : String(volume))" }
-        return nil
-    }
-
-    /// Fetches details and chapters, then records the newest chapter.
-    static func details(source: AidokuRunner.Source, manga: AidokuRunner.Manga) async -> MCArtistRelease? {
-        guard let updated = try? await source.getMangaUpdate(manga: manga, needsDetails: true, needsChapters: true) else { return nil }
-        let newest = (updated.chapters ?? []).filter { $0.dateUploaded != nil }.max { ($0.dateUploaded ?? .distantPast) < ($1.dateUploaded ?? .distantPast) }
-        return MCArtistRelease(
-            sourceKey: source.key, key: manga.key,
-            title: updated.title.isEmpty ? manga.title : updated.title,
-            cover: updated.cover ?? manga.cover,
-            authors: updated.authors ?? manga.authors ?? [],
-            artists: updated.artists ?? manga.artists ?? [],
-            date: newest?.dateUploaded,
-            chapterLabel: (newest ?? updated.chapters?.first).flatMap(chapterLabel),
-            matched: [], checked: Date()
-        )
     }
 
     // MARK: Storage
@@ -159,21 +151,13 @@ enum MCArtistShelf {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
-    private static var detailsURL: URL { directory.appendingPathComponent("details.json") }
     private static func resultsURL(_ id: UUID) -> URL { directory.appendingPathComponent("\(id.uuidString).json") }
 
-    static func loadDetails() -> [String: MCArtistRelease] {
-        guard let data = try? Data(contentsOf: detailsURL) else { return [:] }
-        return (try? JSONDecoder().decode([String: MCArtistRelease].self, from: data)) ?? [:]
-    }
-    static func saveDetails(_ details: [String: MCArtistRelease]) {
-        let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
-        let kept = details.filter { $0.value.checked > cutoff }
-        try? JSONEncoder().encode(kept).write(to: detailsURL, options: .atomic)
-    }
-    static func loadResults(_ id: UUID) -> [MCArtistRelease]? {
-        guard let data = try? Data(contentsOf: resultsURL(id)) else { return nil }
-        return try? JSONDecoder().decode([MCArtistRelease].self, from: data)
+    static func loadResults(_ id: UUID) -> (results: [MCArtistRelease], saved: Date)? {
+        let url = resultsURL(id)
+        guard let data = try? Data(contentsOf: url), let results = try? JSONDecoder().decode([MCArtistRelease].self, from: data) else { return nil }
+        let saved = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        return (results, saved)
     }
     static func saveResults(_ results: [MCArtistRelease], for id: UUID) {
         try? JSONEncoder().encode(results).write(to: resultsURL(id), options: .atomic)
@@ -205,21 +189,45 @@ enum MCArtistShelf {
         return counts.values.sorted { $0.count != $1.count ? $0.count > $1.count : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    static func sorted(_ releases: [MCArtistRelease]) -> [MCArtistRelease] {
-        releases.sorted { lhs, rhs in
-            switch (lhs.date, rhs.date) {
-                case let (left?, right?): return left != right ? left > right : lhs.title < rhs.title
-                case (.some, nil): return true
-                case (nil, .some): return false
-                case (nil, nil): return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
-            }
-        }
-    }
-
     static func relativeDate(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: min(date, Date()), relativeTo: Date())
+    }
+}
+
+/// Resumes a continuation once, from whichever finishes first: the work or its timeout.
+final class MCTimeoutGate<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T?, Never>?
+    private var finished = false
+    private var early: T?
+    private var hasEarly = false
+
+    func install(_ continuation: CheckedContinuation<T?, Never>) {
+        lock.lock()
+        if hasEarly {
+            let value = early
+            lock.unlock()
+            continuation.resume(returning: value)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func resume(_ value: T?) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: value)
+        } else {
+            early = value; hasEarly = true
+            lock.unlock()
+        }
     }
 }
 
@@ -244,7 +252,15 @@ extension MCDiscoverModel {
 
     func loadArtists(_ feed: MCDiscoverFeed, force: Bool) async {
         guard !loading.contains(feed.id), force || !artistRefreshed.contains(feed.id) else { return }
-        if releases[feed.id] == nil, let cached = MCArtistShelf.loadResults(feed.id) { releases[feed.id] = cached }
+        if releases[feed.id] == nil, let cached = MCArtistShelf.loadResults(feed.id) {
+            releases[feed.id] = cached.results
+            artistUpdated[feed.id] = cached.saved
+        }
+        // Saved results stay for four hours unless the shelf is refreshed.
+        if !force, let updated = artistUpdated[feed.id], Date().timeIntervalSince(updated) < MCArtistShelf.cacheLifetime {
+            artistRefreshed.insert(feed.id)
+            return
+        }
         guard SourceStore.shared.hasLoaded else { return }
         let names = feed.artists ?? []
         let sources = (feed.sourceKeys ?? []).compactMap { key -> AidokuRunner.Source? in
@@ -253,38 +269,74 @@ extension MCDiscoverModel {
         guard !names.isEmpty else { errors[feed.id] = "Choose at least one artist for this shelf."; return }
         guard !sources.isEmpty else { errors[feed.id] = "None of this shelf's extensions are available. Edit the shelf to choose others."; return }
 
-        loading.insert(feed.id); errors[feed.id] = nil
+        loading.insert(feed.id); errors[feed.id] = nil; artistSkipped[feed.id] = nil
         artistRefreshed.insert(feed.id)
-        // Let the other shelves finish first so their extension calls and ours don't pile up.
-        for _ in 0..<60 where !loading.subtracting([feed.id]).isEmpty {
-            try? await Task.sleep(for: .milliseconds(500))
-            if Task.isCancelled { break }
-        }
         defer { loading.remove(feed.id); artistProgress[feed.id] = nil }
 
-        // Each extension is asked how it searches by artist and sorts by latest.
-        var plans: [String: MCArtistShelf.Plan] = [:]
-        await forEachLimited(sources, limit: Self.extensionConcurrency, work: { source in
-            let filters = (try? await source.getSearchFilters()) ?? []
-            return (source.key, MCArtistShelf.plan(for: filters))
-        }, handle: { result in plans[result.0] = result.1 })
-        guard !Task.isCancelled else { return }
+        struct Pair: Sendable { let source: AidokuRunner.Source; let artist: String }
+        struct Outcome: Sendable { let pair: Pair; let result: MCArtistShelf.SearchResult? }
+        struct Found { let pair: Pair; let entries: [AidokuRunner.Manga] }
+        // Artist by artist, so searches running together go to different extensions.
+        let pairs = names.flatMap { artist in sources.map { Pair(source: $0, artist: artist) } }
+        let sourceRank = Dictionary(sources.enumerated().map { ($0.element.key, $0.offset) }, uniquingKeysWith: { lhs, _ in lhs })
+        let artistRank = Dictionary(names.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { lhs, _ in lhs })
+        var lists: [Found] = []
+        var skipped = Set<String>(), failures = 0, done = 0
+        var plans: [String: Task<MCArtistShelf.Plan, Never>] = [:]
+        for source in sources {
+            plans[source.key] = Task {
+                let filters = (try? await source.getSearchFilters()) ?? []
+                return MCArtistShelf.plan(for: filters)
+            }
+        }
+        let planTasks = plans
 
-        struct Pair: Sendable { let source: AidokuRunner.Source; let artist: String; let plan: MCArtistShelf.Plan }
-        struct Candidate { let source: AidokuRunner.Source; let manga: AidokuRunner.Manga; var matched: [String]; var trusted: Bool }
-        let pairs = sources.flatMap { source in names.map { Pair(source: source, artist: $0, plan: plans[source.key] ?? .init()) } }
-        var candidates: [String: Candidate] = [:]
-        var order: [String] = []
-        var failures = 0, done = 0
-        artistProgress[feed.id] = .init(done: 0, total: pairs.count, searching: true)
-        let sourcesByKey = Dictionary(sources.map { ($0.key, $0) }, uniquingKeysWith: { lhs, _ in lhs })
-        await forEachLimited(pairs, limit: Self.extensionConcurrency, work: { pair in
-            await MCArtistShelf.search(source: pair.source, artist: pair.artist, plan: pair.plan)
-        }, handle: { result in
+        func publish() {
+            // Interleave by position: each extension's first results, then the second ones, and so on.
+            // Extensions sort newest first where they can, so this keeps the newest near the top.
+            struct Ranked { let rank: Int; let manga: AidokuRunner.Manga; let pair: Pair }
+            let ordered = lists.flatMap { list in list.entries.enumerated().map { Ranked(rank: $0.offset, manga: $0.element, pair: list.pair) } }
+                .sorted { lhs, rhs in
+                    if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+                    let lhsSource = sourceRank[lhs.pair.source.key] ?? 0, rhsSource = sourceRank[rhs.pair.source.key] ?? 0
+                    if lhsSource != rhsSource { return lhsSource < rhsSource }
+                    return (artistRank[lhs.pair.artist] ?? 0) < (artistRank[rhs.pair.artist] ?? 0)
+                }
+            var byTitle: [String: Int] = [:], byKey: [String: Int] = [:]
+            var results: [MCArtistRelease] = []
+            for item in ordered {
+                let manga = item.manga, artist = item.pair.artist
+                let id = "\(item.pair.source.key)|\(manga.key)"
+                let title = MCArtistShelf.normalize(manga.title)
+                // The same title from several extensions or artists shows once, from the first extension in the order.
+                if let index = byKey[id] ?? (title.isEmpty ? nil : byTitle[title]) {
+                    if !results[index].matched.contains(artist) { results[index].matched.append(artist) }
+                    continue
+                }
+                guard results.count < MCArtistShelf.resultLimit else { continue }
+                byKey[id] = results.count
+                if !title.isEmpty { byTitle[title] = results.count }
+                results.append(MCArtistRelease(
+                    sourceKey: item.pair.source.key, key: manga.key, title: manga.title, cover: manga.cover,
+                    authors: manga.authors ?? [], artists: manga.artists ?? [], date: nil, chapterLabel: nil,
+                    matched: [artist], checked: Date()
+                ))
+            }
+            releases[feed.id] = results
+        }
+
+        artistProgress[feed.id] = .init(done: 0, total: pairs.count)
+        await forEachLimited(pairs, limit: MCArtistShelf.concurrency, work: { pair in
+            let result = await MCArtistShelf.withTimeout(MCArtistShelf.searchTimeout) {
+                let plan = await planTasks[pair.source.key]?.value ?? MCArtistShelf.Plan()
+                return await MCArtistShelf.search(source: pair.source, artist: pair.artist, plan: plan)
+            }
+            return Outcome(pair: pair, result: result)
+        }, handle: { outcome in
             done += 1
-            artistProgress[feed.id] = .init(done: done, total: pairs.count, searching: true)
+            artistProgress[feed.id] = .init(done: done, total: pairs.count)
+            guard let result = outcome.result else { skipped.insert(outcome.pair.source.name); failures += 1; return }
             if result.failed { failures += 1; return }
-            guard let source = sourcesByKey[result.sourceKey] else { return }
             var unique = Set<String>()
             let entries = result.entries.filter { manga in
                 guard unique.insert(manga.key).inserted else { return false }
@@ -292,83 +344,23 @@ extension MCDiscoverModel {
                 let credited = (manga.artists ?? []) + (manga.authors ?? [])
                 return credited.isEmpty || credited.contains { MCArtistShelf.matches($0, result.artist) }
             }
-            for manga in entries.prefix(MCArtistShelf.candidatesPerSearch) {
-                let id = "\(result.sourceKey)|\(manga.key)"
-                if var existing = candidates[id] {
-                    if !existing.matched.contains(result.artist) { existing.matched.append(result.artist) }
-                    existing.trusted = existing.trusted || result.trusted
-                    candidates[id] = existing
-                } else {
-                    candidates[id] = Candidate(source: source, manga: manga, matched: [result.artist], trusted: result.trusted)
-                    order.append(id)
-                }
-            }
+            lists.append(Found(pair: outcome.pair, entries: Array(entries.prefix(MCArtistShelf.candidatesPerSearch))))
+            publish()
         })
         guard !Task.isCancelled else { return }
+        artistSkipped[feed.id] = skipped.isEmpty ? nil : skipped.sorted()
         if failures == pairs.count {
-            errors[feed.id] = "Searches failed in every extension. Check your connection and try again."
+            errors[feed.id] = skipped.isEmpty
+                ? "Searches failed in every extension. Check your connection and try again."
+                : "No extension responded in time. Try again, or remove slow extensions from this shelf."
             return
         }
-
-        // Chapter lists give each title's newest release date.
-        var details = MCArtistShelf.loadDetails()
-        var found: [String: MCArtistRelease] = [:]
-        func accept(_ release: MCArtistRelease, for candidate: Candidate) {
-            var release = release
-            let credited = release.artists + release.authors
-            if !candidate.trusted, !credited.isEmpty {
-                release.matched = MCArtistShelf.matching(credited, artists: candidate.matched)
-                guard !release.matched.isEmpty else { return }
-            } else {
-                release.matched = candidate.matched
-            }
-            found[release.id] = release
-        }
-        func publish() {
-            releases[feed.id] = Array(MCArtistShelf.sorted(Array(found.values)).prefix(MCArtistShelf.resultLimit))
-        }
-        var stale: [Candidate] = []
-        for id in order {
-            guard let candidate = candidates[id] else { continue }
-            if let cached = details[id], Date().timeIntervalSince(cached.checked) < MCArtistShelf.detailLifetime {
-                accept(cached, for: candidate)
-            } else {
-                stale.append(candidate)
-            }
-        }
         publish()
-        done = 0
-        artistProgress[feed.id] = .init(done: 0, total: stale.count, searching: false)
-        struct Fetch: Sendable { let source: AidokuRunner.Source; let manga: AidokuRunner.Manga; let id: String }
-        let fetches = stale.map { Fetch(source: $0.source, manga: $0.manga, id: "\($0.source.key)|\($0.manga.key)") }
-        await forEachLimited(fetches, limit: Self.extensionConcurrency, work: { fetch in
-            let release = await MCArtistShelf.details(source: fetch.source, manga: fetch.manga)
-            return (fetch.id, release)
-        }, handle: { result in
-            let (id, release) = result
-            done += 1
-            artistProgress[feed.id] = .init(done: done, total: fetches.count, searching: false)
-            guard let candidate = candidates[id] else { return }
-            if let release {
-                details[id] = release
-                accept(release, for: candidate)
-            } else if let cached = details[id] {
-                accept(cached, for: candidate)
-            }
-            if done % 8 == 0 { publish() }
-        })
-        guard !Task.isCancelled else { return }
-        publish()
-        MCArtistShelf.saveDetails(details)
         let results = releases[feed.id] ?? []
         MCArtistShelf.saveResults(results, for: feed.id)
-        let tokens = recordSeenTokens(feed, tokens: results.map(\.seenToken))
-        newKeys[feed.id] = Set(results.filter { tokens.contains($0.seenToken) }.map(\.id))
+        artistUpdated[feed.id] = Date()
+        newKeys[feed.id] = recordSeenTokens(feed, tokens: results.map(\.id))
     }
-
-    /// Extension calls hold a shared worker thread while they wait on the network, so running
-    /// many at once starves the pool and every call stalls. Two at a time stays clear of that.
-    static let extensionConcurrency = 2
 
     /// Runs `work` over `items` with at most `limit` running at once; `handle` sees each result on the main actor.
     private func forEachLimited<T: Sendable, R: Sendable>(
@@ -414,14 +406,19 @@ struct MCArtistShelfView: View {
                 MCArtistChips(artists: feed.artists ?? [], selection: $artist)
             }
             content
+            if let skipped = model.artistSkipped[feed.id] {
+                Label("No response from \(skipped.joined(separator: ", ")); skipped.", systemImage: "clock.badge.exclamationmark")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+            }
         }
     }
 
     private var subtitle: String {
         if let progress = model.artistProgress[feed.id] {
-            return progress.searching
-                ? "Searching \(progress.done) of \(progress.total)…"
-                : "Checking chapters \(progress.done) of \(progress.total)…"
+            return "Searching \(progress.done) of \(progress.total)…"
+        }
+        if let updated = model.artistUpdated[feed.id] {
+            return "\(feed.subtitle) · \(MCArtistShelf.relativeDate(updated))"
         }
         return feed.subtitle
     }
@@ -555,32 +552,18 @@ struct MCArtistReleaseRow: View {
                 .frame(width: 64, height: 96).clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(release.title).font(.subheadline.weight(.semibold)).lineLimit(2).foregroundStyle(.primary)
+                .overlay(alignment: .topLeading) { if isNew { MCArtistNewBadge().padding(4) } }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(release.title).font(.subheadline.weight(.semibold)).lineLimit(3).foregroundStyle(.primary)
                 Text(release.matched.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 0)
-                HStack(spacing: 6) {
-                    if isNew { MCArtistNewBadge() }
-                    if let label = release.chapterLabel {
-                        Text(label).font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor).lineLimit(1)
-                    }
-                    if let date = release.date {
-                        Text(MCArtistShelf.relativeDate(date)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    Text(sources.source(for: release.sourceKey)?.name ?? "").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                }
+                Text(sources.source(for: release.sourceKey)?.name ?? "").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             }
-            .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: Self.height)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([
-            isNew ? "New" : nil, release.title, release.matched.joined(separator: ", "),
-            release.chapterLabel, release.date.map(MCArtistShelf.relativeDate)
-        ].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([isNew ? "New" : nil, release.title, release.matched.joined(separator: ", ")].compactMap { $0 }.joined(separator: ", "))
     }
 
     static var placeholder: some View {
@@ -606,7 +589,7 @@ private struct MCArtistNewBadge: View {
 
 // MARK: - See all
 
-/// Every release the artist shelf found (up to 200), newest first and grouped by age.
+/// Every result the artist shelf found, up to 200, newest first.
 struct MCArtistReleasesView: View {
     let feedID: UUID
     @ObservedObject var model: MCDiscoverModel
@@ -615,33 +598,9 @@ struct MCArtistReleasesView: View {
 
     private var feed: MCDiscoverFeed? { model.feeds.first { $0.id == feedID } }
 
-    private struct ReleaseSection: Identifiable {
-        let title: String
-        var items: [MCArtistRelease]
-        var id: String { title }
-    }
-
-    private var sections: [ReleaseSection] {
+    private var items: [MCArtistRelease] {
         let all = model.releases[feedID] ?? []
-        let filtered = artist.map { name in all.filter { $0.matched.contains(name) } } ?? all
-        let calendar = Calendar.current
-        let now = Date()
-        func bucket(_ date: Date?) -> String {
-            guard let date else { return "Date unknown" }
-            if calendar.isDateInToday(date) { return "Today" }
-            if calendar.isDateInYesterday(date) { return "Yesterday" }
-            let days = calendar.dateComponents([.day], from: date, to: now).day ?? 0
-            if days < 7 { return "This week" }
-            if days < 31 { return "This month" }
-            return "Earlier"
-        }
-        var result: [ReleaseSection] = []
-        for release in filtered {
-            let title = bucket(release.date)
-            if result.last?.title == title { result[result.count - 1].items.append(release) }
-            else { result.append(ReleaseSection(title: title, items: [release])) }
-        }
-        return result
+        return artist.map { name in all.filter { $0.matched.contains(name) } } ?? all
     }
 
     var body: some View {
@@ -656,20 +615,16 @@ struct MCArtistReleasesView: View {
             if let progress = model.artistProgress[feedID] {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text(progress.searching ? "Searching \(progress.done) of \(progress.total)…" : "Checking chapters \(progress.done) of \(progress.total)…")
+                    Text("Searching \(progress.done) of \(progress.total)…")
                         .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 }
                 .listRowSeparator(.hidden)
             }
-            ForEach(sections) { section in
-                Section(section.title) {
-                    ForEach(section.items) { release in
-                        Button { openManga(release.manga) } label: {
-                            MCArtistReleaseRow(release: release, isNew: fresh.contains(release.id))
-                        }
-                        .buttonStyle(.plain)
-                    }
+            ForEach(items) { release in
+                Button { openManga(release.manga) } label: {
+                    MCArtistReleaseRow(release: release, isNew: fresh.contains(release.id))
                 }
+                .buttonStyle(.plain)
             }
         }
         .listStyle(.plain)
@@ -680,6 +635,14 @@ struct MCArtistReleasesView: View {
             }
         }
         .refreshable { if let feed { await model.load(feed, force: true) } }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    if let feed { Task { await model.load(feed, force: true) } }
+                }
+                .disabled(model.loading.contains(feedID))
+            }
+        }
         .navigationTitle(feed?.listingName ?? "Artists")
         .navigationBarTitleDisplayMode(.large)
         .midokuAccent()
@@ -781,7 +744,8 @@ struct MCArtistPicker: View {
     }
 }
 
-/// Picks the extensions an artist shelf searches.
+/// Picks the extensions an artist shelf searches, in order. The order decides which extension's
+/// copy shows when several have the same title, and which results come first.
 struct MCSourceMultiPicker: View {
     @Binding var selected: [String]
     @ObservedObject private var sources = SourceStore.shared
@@ -792,33 +756,53 @@ struct MCSourceMultiPicker: View {
     }
 
     var body: some View {
+        let available = installed.filter { !selected.contains($0.key) }
         List {
             Section {
-                ForEach(installed, id: \.key) { source in
-                    let isOn = selected.contains(source.key)
-                    Button {
-                        if isOn { selected.removeAll { $0 == source.key } } else { selected.append(source.key) }
-                    } label: {
-                        HStack(spacing: 12) {
-                            SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 32)
-                            Text(source.name).foregroundStyle(.primary)
-                            Spacer()
-                            Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
-                                .font(.title3)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                if selected.isEmpty {
+                    Text("Add extensions below.").foregroundStyle(.secondary)
                 }
-            } footer: { Text("Each artist is searched in every selected extension. More extensions find more, but take longer to refresh.") }
+                ForEach(selected, id: \.self) { key in
+                    row(key: key, name: sources.source(for: key)?.name ?? key, imageUrl: sources.source(for: key)?.imageUrl)
+                }
+                .onMove { selected.move(fromOffsets: $0, toOffset: $1) }
+                .onDelete { selected.remove(atOffsets: $0) }
+            } header: { Text("Search order") } footer: {
+                Text("Drag to reorder. When several extensions have the same title, the one higher in this list is shown.")
+            }
+            if !available.isEmpty {
+                Section("Add extensions") {
+                    ForEach(available, id: \.key) { source in
+                        Button {
+                            selected.append(source.key)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "plus.circle.fill").foregroundStyle(.green).font(.title3)
+                                SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 32)
+                                Text(source.name).foregroundStyle(.primary)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
+        .environment(\.editMode, .constant(.active))
         .navigationTitle("Extensions")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            Button(selected.count == installed.count ? "Clear" : "Select all") {
-                selected = selected.count == installed.count ? [] : installed.map(\.key)
+            Button(available.isEmpty ? "Clear" : "Add all") {
+                if available.isEmpty { selected = [] } else { selected.append(contentsOf: available.map(\.key)) }
             }
+        }
+    }
+
+    private func row(key: String, name: String, imageUrl: URL?) -> some View {
+        HStack(spacing: 12) {
+            SourceIconView(sourceId: key, imageUrl: imageUrl, iconSize: 32)
+            Text(name)
         }
     }
 }

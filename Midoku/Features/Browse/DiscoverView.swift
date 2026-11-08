@@ -42,6 +42,9 @@ final class MCDiscoverModel: ObservableObject {
     @Published var releases: [UUID: [MCArtistRelease]] = [:]
     @Published var artistProgress: [UUID: MCArtistProgress] = [:]
     var artistRefreshed = Set<UUID>()
+    @Published var artistUpdated: [UUID: Date] = [:]
+    /// Extensions that didn't answer in time on the last refresh.
+    @Published var artistSkipped: [UUID: [String]] = [:]
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key), let feeds = try? JSONDecoder().decode([MCDiscoverFeed].self, from: data) { self.feeds = feeds }
@@ -119,7 +122,7 @@ final class MCDiscoverModel: ObservableObject {
     func remove(_ feed: MCDiscoverFeed) {
         feeds.removeAll { $0.id == feed.id }
         entries[feed.id] = nil; errors[feed.id] = nil; newKeys[feed.id] = nil
-        releases[feed.id] = nil; artistRefreshed.remove(feed.id)
+        releases[feed.id] = nil; artistRefreshed.remove(feed.id); artistUpdated[feed.id] = nil; artistSkipped[feed.id] = nil
         if feed.isArtists { MCArtistShelf.removeResults(feed.id) }
         seen[feed.id.uuidString] = nil
         UserDefaults.standard.set(seen, forKey: Self.seenKey)
