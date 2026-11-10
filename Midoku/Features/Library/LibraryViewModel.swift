@@ -254,13 +254,14 @@ extension LibraryViewModel {
 
                 let categories = (libraryObject.categories?.allObjects as? [CategoryObject])?.map { $0.title } ?? []
 
-                let info = MangaInfo(
+                var info = MangaInfo(
                     id: mangaObject.identifier,
                     coverUrl: mangaObject.cover.flatMap { URL(string: $0) },
                     title: mangaObject.title,
                     author: mangaObject.author,
                     url: mangaObject.url.flatMap { URL(string: $0) }
                 )
+                info.status = mangaObject.status
 
                 sourceKeys.insert(mangaObject.sourceId)
 
@@ -764,5 +765,108 @@ extension LibraryViewModel {
             mangaId: manga.id,
             categories: [currentCategory]
         )
+    }
+}
+
+// MARK: - Grouping
+
+extension LibraryViewModel {
+    /// How titles are split into groups inside a category. Chosen per category.
+    enum GroupMethod: String, CaseIterable {
+        case none
+        case readingStatus
+        case publishingStatus
+        case source
+
+        var title: String {
+            switch self {
+                case .none: "None"
+                case .readingStatus: "Reading Status"
+                case .publishingStatus: "Publishing Status"
+                case .source: "Source"
+            }
+        }
+
+        var image: String {
+            switch self {
+                case .none: "square.slash"
+                case .readingStatus: "book"
+                case .publishingStatus: "flag"
+                case .source: "puzzlepiece.extension"
+            }
+        }
+    }
+
+    struct MangaGroup {
+        let key: String
+        let title: String
+        var manga: [MangaInfo]
+    }
+
+    private static let groupingKey = "Library.categoryGrouping"
+
+    /// Storage key for the current category: "all" for the whole library, "uncategorized" for titles without one.
+    private var groupingCategoryKey: String {
+        guard let currentCategory else { return "all" }
+        return currentCategory.isEmpty ? "uncategorized" : "category:\(currentCategory)"
+    }
+
+    var groupMethod: GroupMethod {
+        let stored = UserDefaults.standard.dictionary(forKey: Self.groupingKey) as? [String: String] ?? [:]
+        return stored[groupingCategoryKey].flatMap(GroupMethod.init) ?? .none
+    }
+
+    func setGroupMethod(_ method: GroupMethod) {
+        var stored = UserDefaults.standard.dictionary(forKey: Self.groupingKey) as? [String: String] ?? [:]
+        stored[groupingCategoryKey] = method == .none ? nil : method.rawValue
+        UserDefaults.standard.set(stored, forKey: Self.groupingKey)
+    }
+
+    /// Splits titles into groups in a fixed order, keeping the library sort order inside each group.
+    func groups(of manga: [MangaInfo]) -> [MangaGroup] {
+        let method = groupMethod
+        guard method != .none else { return [] }
+        var groups: [String: MangaGroup] = [:]
+        var order: [String: Int] = [:]
+        for info in manga {
+            let key: String
+            let title: String
+            let rank: Int
+            switch method {
+                case .none:
+                    return []
+                case .readingStatus:
+                    let unread = info.unread > 0
+                    key = unread ? "unread" : "read"
+                    title = unread ? "Unread" : "Read"
+                    rank = unread ? 0 : 1
+                case .publishingStatus:
+                    let status = PublishingStatus(rawValue: Int(info.status)) ?? .unknown
+                    key = "status-\(status.rawValue)"
+                    title = status.toString()
+                    rank = switch status {
+                        case .ongoing: 0
+                        case .hiatus: 1
+                        case .completed: 2
+                        case .cancelled: 3
+                        case .notPublished: 4
+                        case .unknown: 5
+                    }
+                case .source:
+                    key = "source-\(info.id.sourceKey)"
+                    title = SourceManager.shared.store.source(for: info.id.sourceKey)?.name ?? info.id.sourceKey
+                    rank = 0
+            }
+            if groups[key] == nil {
+                groups[key] = MangaGroup(key: key, title: title, manga: [])
+                order[key] = rank
+            }
+            groups[key]?.manga.append(info)
+        }
+        return groups.values.sorted {
+            let lhs = order[$0.key] ?? 0, rhs = order[$1.key] ?? 0
+            if lhs != rhs { return lhs < rhs }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
     }
 }

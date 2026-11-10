@@ -81,17 +81,12 @@ class OldMangaCollectionViewController: BaseCollectionViewController {
 
     // MARK: Collection View Layout
     override func makeCollectionViewLayout() -> UICollectionViewLayout {
-        let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, environment in
+        let layout = UICollectionViewCompositionalLayout { [weak self] _, environment in
             guard let self else { return nil }
-            switch Section(rawValue: sectionIndex) {
-                case .pinned, .regular:
-                    if self.usesListLayout {
-                        return Self.makeListLayoutSection(environment: environment)
-                    } else {
-                        return Self.makeGridLayoutSection(environment: environment)
-                    }
-                case nil:
-                    return nil
+            if self.usesListLayout {
+                return Self.makeListLayoutSection(environment: environment)
+            } else {
+                return Self.makeGridLayoutSection(environment: environment)
             }
         }
         let config = UICollectionViewCompositionalLayoutConfiguration()
@@ -261,9 +256,11 @@ extension OldMangaCollectionViewController {
 
 // MARK: - Data Source
 extension OldMangaCollectionViewController {
-    enum Section: Int, CaseIterable {
+    enum Section: Hashable {
         case pinned
         case regular
+        /// A library group inside a category, identified by its group key.
+        case group(String)
     }
 
     func makeDataSource() -> UICollectionViewDiffableDataSource<Section, MangaInfo> {

@@ -589,12 +589,14 @@ private struct MCArtistNewBadge: View {
 
 // MARK: - See all
 
-/// Every result the artist shelf found, up to 200, newest first.
+/// Every result the artist shelf found, up to 200, newest first, as a cover grid like the library.
 struct MCArtistReleasesView: View {
     let feedID: UUID
     @ObservedObject var model: MCDiscoverModel
     var openManga: (AidokuRunner.Manga) -> Void = { _ in }
     @State private var artist: String?
+    @State private var columns = HomeGridView.getColumns()
+    @ObservedObject private var sources = SourceStore.shared
 
     private var feed: MCDiscoverFeed? { model.feeds.first { $0.id == feedID } }
 
@@ -605,29 +607,37 @@ struct MCArtistReleasesView: View {
 
     var body: some View {
         let fresh = model.newKeys[feedID] ?? []
-        List {
-            if let artists = feed?.artists, artists.count > 1 {
-                MCArtistChips(artists: artists, selection: $artist)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-            if let progress = model.artistProgress[feedID] {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Searching \(progress.done) of \(progress.total)…")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let artists = feed?.artists, artists.count > 1 {
+                    MCArtistChips(artists: artists, selection: $artist)
                 }
-                .listRowSeparator(.hidden)
-            }
-            ForEach(items) { release in
-                Button { openManga(release.manga) } label: {
-                    MCArtistReleaseRow(release: release, isNew: fresh.contains(release.id))
+                if let progress = model.artistProgress[feedID] {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Searching \(progress.done) of \(progress.total)…")
+                            .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    .padding(.horizontal)
                 }
-                .buttonStyle(.plain)
+                LazyVGrid(columns: columns, spacing: HomeGridView.spacing) {
+                    ForEach(items) { release in
+                        Button { openManga(release.manga) } label: {
+                            MangaGridItem(source: sources.source(for: release.sourceKey), title: release.title, coverImage: release.cover ?? "")
+                                .overlay(alignment: .topLeading) {
+                                    if fresh.contains(release.id) { MCArtistNewBadge().padding(6) }
+                                }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel([fresh.contains(release.id) ? "New" : nil, release.title,
+                                                     release.matched.joined(separator: ", ")].compactMap { $0 }.joined(separator: ", "))
+                        }
+                        .buttonStyle(MangaGridButtonStyle())
+                    }
+                }
+                .padding([.horizontal, .bottom])
             }
+            .padding(.top, 4)
         }
-        .listStyle(.plain)
         .overlay {
             if (model.releases[feedID] ?? []).isEmpty, model.artistProgress[feedID] == nil {
                 ContentUnavailableView("No releases yet", systemImage: "paintbrush.pointed",
@@ -635,6 +645,12 @@ struct MCArtistReleasesView: View {
             }
         }
         .refreshable { if let feed { await model.load(feed, force: true) } }
+        .onReceive(NotificationCenter.default.publisher(for: .orientationDidChange)) { _ in
+            columns = HomeGridView.getColumns()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init(AppSettings.appearance.layout.key))) { _ in
+            columns = HomeGridView.getColumns()
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Refresh", systemImage: "arrow.clockwise") {

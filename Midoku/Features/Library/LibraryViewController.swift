@@ -56,6 +56,10 @@ class LibraryViewController: OldMangaCollectionViewController {
     private lazy var lockedStackView = LockedPageStackView()
 
     private lazy var locked = viewModel.isCategoryLocked()
+    /// Title and size of each group shown in the current category, by group key.
+    private var groupHeaders: [String: (title: String, count: Int)] = [:]
+    /// Collapsed groups, keyed by category and group.
+    private var collapsedGroups: Set<String> = []
     private var ignoreOptionChange = false
     private var lastSearch: String?
 
@@ -205,10 +209,22 @@ class LibraryViewController: OldMangaCollectionViewController {
             }
         }
 
+        let groupRegistration = UICollectionView.SupplementaryRegistration<LibraryGroupHeaderView>(
+            elementKind: LibraryGroupHeaderView.elementKind
+        ) { [weak self] header, _, indexPath in
+            self?.configureGroupHeader(header, at: indexPath)
+        }
+
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
             if kind == UICollectionView.elementKindSectionHeader {
                 return collectionView.dequeueConfiguredReusableSupplementary(
                     using: registration,
+                    for: indexPath
+                )
+            }
+            if kind == LibraryGroupHeaderView.elementKind {
+                return collectionView.dequeueConfiguredReusableSupplementary(
+                    using: groupRegistration,
                     for: indexPath
                 )
             }
@@ -454,11 +470,28 @@ class LibraryViewController: OldMangaCollectionViewController {
 
     // collection view layout with header
     override func makeCollectionViewLayout() -> UICollectionViewLayout {
-        let layout = super.makeCollectionViewLayout()
-        guard let layout = layout as? UICollectionViewCompositionalLayout else { return layout }
+        let layout = UICollectionViewCompositionalLayout { [weak self] sectionIndex, environment in
+            guard let self else { return nil }
+            let section = self.usesListLayout
+                ? Self.makeListLayoutSection(environment: environment)
+                : Self.makeGridLayoutSection(environment: environment)
+            if case .group = self.dataSource.sectionIdentifier(for: sectionIndex) {
+                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: NSCollectionLayoutSize(
+                        widthDimension: .fractionalWidth(1),
+                        heightDimension: .absolute(36)
+                    ),
+                    elementKind: LibraryGroupHeaderView.elementKind,
+                    alignment: .top
+                )
+                section.boundarySupplementaryItems = [header]
+                section.contentInsets.top = 6
+            }
+            return section
+        }
 
         let config = UICollectionViewCompositionalLayoutConfiguration()
-        config.interSectionSpacing = layout.configuration.interSectionSpacing
+        config.interSectionSpacing = Self.itemSpacing + Self.sectionSpacing
         if !viewModel.categories.isEmpty || !viewModel.filterGroups.isEmpty {
             let globalHeader = NSCollectionLayoutBoundarySupplementaryItem(
                 layoutSize: NSCollectionLayoutSize(
@@ -754,18 +787,33 @@ extension LibraryViewController {
     func updateDataSource() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, MangaInfo>()
 
+        var headers: [String: (title: String, count: Int)] = [:]
+
         if !locked {
             if !viewModel.pinnedManga.isEmpty {
-                snapshot.appendSections(Section.allCases)
+                snapshot.appendSections([.pinned])
                 snapshot.appendItems(viewModel.pinnedManga, toSection: .pinned)
-            } else {
-                snapshot.appendSections([.regular])
             }
 
-            snapshot.appendItems(viewModel.manga, toSection: .regular)
+            let groups = viewModel.groups(of: viewModel.manga)
+            if groups.isEmpty {
+                snapshot.appendSections([.regular])
+                snapshot.appendItems(viewModel.manga, toSection: .regular)
+            } else {
+                for group in groups {
+                    let section = Section.group(group.key)
+                    headers[group.key] = (group.title, group.manga.count)
+                    snapshot.appendSections([section])
+                    if !collapsedGroups.contains(collapseKey(for: group.key)) {
+                        snapshot.appendItems(group.manga, toSection: section)
+                    }
+                }
+            }
         }
 
+        groupHeaders = headers
         dataSource.apply(snapshot)
+        refreshVisibleGroupHeaders()
 
         // handle empty library or category
         if navigationItem.searchController?.searchBar.text?.isEmpty ?? true {
@@ -773,6 +821,42 @@ extension LibraryViewController {
         }
         collectionView.isScrollEnabled = emptyStackView.isHidden && lockedStackView.isHidden
         collectionView.refreshControl = collectionView.isScrollEnabled ? refreshControl : nil
+    }
+
+    private func collapseKey(for groupKey: String) -> String {
+        "\(viewModel.currentCategory ?? "#all")|\(viewModel.groupMethod.rawValue)|\(groupKey)"
+    }
+
+    private func configureGroupHeader(_ header: LibraryGroupHeaderView, at indexPath: IndexPath) {
+        guard case let .group(key) = dataSource.sectionIdentifier(for: indexPath.section) else { return }
+        let info = groupHeaders[key] ?? (key, 0)
+        header.configure(title: info.title, count: info.count, collapsed: collapsedGroups.contains(collapseKey(for: key)))
+        header.onTap = { [weak self] in
+            guard let self, !self.isEditing else { return }
+            let collapse = self.collapseKey(for: key)
+            if self.collapsedGroups.contains(collapse) {
+                self.collapsedGroups.remove(collapse)
+            } else {
+                self.collapsedGroups.insert(collapse)
+            }
+            self.updateDataSource()
+        }
+    }
+
+    /// Diffable updates keep headers of unchanged groups, so their counts are refreshed here.
+    private func refreshVisibleGroupHeaders() {
+        let kind = LibraryGroupHeaderView.elementKind
+        for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+            if let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? LibraryGroupHeaderView {
+                configureGroupHeader(header, at: indexPath)
+            }
+        }
+    }
+
+    func setGroupMethod(_ method: LibraryViewModel.GroupMethod) {
+        guard viewModel.groupMethod != method else { return }
+        viewModel.setGroupMethod(method)
+        updateDataSource()
     }
 
     func reloadItems() {
@@ -1219,11 +1303,40 @@ extension LibraryViewController {
             }
         }
 
+        let groupMenu = UIDeferredMenuElement.uncached { [weak self] completion in
+            guard let self else {
+                completion([])
+                return
+            }
+            let current = self.viewModel.groupMethod
+            let categoryName: String = if let category = self.viewModel.currentCategory {
+                category.isEmpty ? NSLocalizedString("UNCATEGORIZED") : category
+            } else {
+                NSLocalizedString("ALL")
+            }
+            completion([
+                UIMenu(
+                    title: "Group By",
+                    subtitle: current == .none ? "Off in \(categoryName)" : "\(current.title) in \(categoryName)",
+                    image: UIImage(systemName: "rectangle.3.group"),
+                    children: LibraryViewModel.GroupMethod.allCases.map { method in
+                        UIAction(
+                            title: method.title,
+                            image: UIImage(systemName: method.image),
+                            state: current == method ? .on : .off
+                        ) { [weak self] _ in
+                            self?.setGroupMethod(method)
+                        }
+                    }
+                )
+            ])
+        }
+
         moreBarButton.menu = UIMenu(
             children: [
                 UIMenu(options: .displayInline, children: [selectAction]),
                 UIMenu(options: .displayInline, children: layoutActions),
-                UIMenu(options: .displayInline, children: [sortMenu, filterMenu])
+                UIMenu(options: .displayInline, children: [sortMenu, filterMenu, groupMenu])
             ]
         )
 
@@ -1389,13 +1502,7 @@ extension LibraryViewController {
     }
 
     private func mangaInfo(at path: IndexPath) -> MangaInfo {
-        let manga: [MangaInfo] = if path.section == 0 && !viewModel.pinnedManga.isEmpty {
-            viewModel.pinnedManga
-        } else {
-            viewModel.manga
-        }
-
-        return manga[path.row]
+        dataSource.itemIdentifier(for: path) ?? viewModel.manga[path.row]
     }
 
     func collectionView(

@@ -37,7 +37,7 @@ struct HomeGridView: View {
         self._columns = State(initialValue: Self.getColumns())
     }
 
-    static private func getColumns() -> [GridItem] {
+    static func getColumns() -> [GridItem] {
         let layout = AppSettings.appearance.layout.get()
 
         let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
