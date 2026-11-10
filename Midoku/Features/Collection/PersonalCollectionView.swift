@@ -197,7 +197,8 @@ struct MCCollectionRootView: View {
             ].filter { !$0.entries.isEmpty }
         case .status:
             let buckets = Dictionary(grouping: values, by: \.status)
-            return MCPersonalStatus.allCases.compactMap { status in
+            let order: [MCPersonalStatus] = [.reading, .planned, .onHold, .completed, .dropped]
+            return order.compactMap { status in
                 guard let entries = buckets[status], !entries.isEmpty else { return nil }
                 return MCLibrarySubgroup(id: status.rawValue, title: status.title, entries: entries)
             }
