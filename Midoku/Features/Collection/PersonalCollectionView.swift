@@ -23,6 +23,26 @@ private enum MCLibraryGrouping: String, CaseIterable, Identifiable {
     }
 }
 
+/// Sections inside one library tab. Chosen separately for each tab.
+private enum MCLibrarySubgrouping: String, CaseIterable, Identifiable {
+    case none, progress, status
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .none: "None"
+        case .progress: "Read / Unread"
+        case .status: "Status"
+        }
+    }
+}
+
+private struct MCLibrarySubgroup: Identifiable {
+    let id: String
+    let title: String
+    let entries: [MCPersonalEntry]
+}
+
 private enum MCLibraryProgressFilter: String, CaseIterable, Identifiable {
     case all, notStarted, inProgress, completed
 
@@ -143,6 +163,45 @@ struct MCCollectionRootView: View {
             values[activeGroupPage ?? "all"] = value.rawValue
             savedSorts = (try? JSONEncoder().encode(values)) ?? Data()
         })
+    }
+    @AppStorage("Midoku.librarySubgroupsByPage.v1") private var savedSubgroups = Data()
+    @State private var collapsedSubgroups = Set<String>()
+    private func subgrouping(in page: String?) -> MCLibrarySubgrouping {
+        guard page != Self.readingPageID else { return .none }
+        let values = (try? JSONDecoder().decode([String: String].self, from: savedSubgroups)) ?? [:]
+        return values[page ?? "all"].flatMap(MCLibrarySubgrouping.init(rawValue:)) ?? .none
+    }
+    private func subgroupBinding(for page: String?) -> Binding<MCLibrarySubgrouping> {
+        Binding(get: { subgrouping(in: page) }, set: { value in
+            var values = (try? JSONDecoder().decode([String: String].self, from: savedSubgroups)) ?? [:]
+            values[page ?? "all"] = value == .none ? nil : value.rawValue
+            savedSubgroups = (try? JSONEncoder().encode(values)) ?? Data()
+        })
+    }
+    /// Splits a tab's entries into sections, keeping the tab's sort order inside each.
+    private func subgroups(_ values: [MCPersonalEntry], by grouping: MCLibrarySubgrouping) -> [MCLibrarySubgroup] {
+        switch grouping {
+        case .none:
+            return []
+        case .progress:
+            var unread: [MCPersonalEntry] = [], read: [MCPersonalEntry] = [], empty: [MCPersonalEntry] = []
+            for entry in values {
+                if store.chapterCount(entryID: entry.id) == 0 { empty.append(entry) }
+                else if store.unreadCount(entryID: entry.id) > 0 { unread.append(entry) }
+                else { read.append(entry) }
+            }
+            return [
+                MCLibrarySubgroup(id: "unread", title: "Unread", entries: unread),
+                MCLibrarySubgroup(id: "read", title: "Read", entries: read),
+                MCLibrarySubgroup(id: "empty", title: "No chapters", entries: empty)
+            ].filter { !$0.entries.isEmpty }
+        case .status:
+            let buckets = Dictionary(grouping: values, by: \.status)
+            return MCPersonalStatus.allCases.compactMap { status in
+                guard let entries = buckets[status], !entries.isEmpty else { return nil }
+                return MCLibrarySubgroup(id: status.rawValue, title: status.title, entries: entries)
+            }
+        }
     }
     @State private var categoryEntry: MCID?
     @State private var showCategories = false
@@ -468,6 +527,13 @@ struct MCCollectionRootView: View {
                             }
                             Picker("Sort", selection: sortBinding) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
                                 .disabled(activeGroupPage == Self.readingPageID)
+                            Picker(selection: subgroupBinding(for: activeGroupPage)) {
+                                ForEach(MCLibrarySubgrouping.allCases) { Text($0.title).tag($0) }
+                            } label: {
+                                Label("Group in \(activePageTitle)", systemImage: "rectangle.3.group")
+                            }
+                            .pickerStyle(.menu)
+                            .disabled(activeGroupPage == Self.readingPageID || showsFlatResults)
                             readingMenu
                             Toggle("Cover grid", isOn: $grid)
                             Toggle("Chapter grid", isOn: $chapterGrid)
@@ -613,7 +679,8 @@ struct MCCollectionRootView: View {
                 if !trimmedQuery.isEmpty { pinSearchBar }
                 GeometryReader { geometry in
                     if pages.isEmpty || showsFlatResults {
-                        collectionPage(values: visibleEntries, size: geometry.size)
+                        collectionPage(values: visibleEntries, size: geometry.size,
+                                       pageID: showsFlatResults ? nil : "all", subgrouping: showsFlatResults ? .none : subgrouping(in: nil))
                     } else {
                         ScrollViewReader { proxy in
                             ScrollView(.horizontal) {
@@ -621,7 +688,10 @@ struct MCCollectionRootView: View {
                                     ForEach(pages) { page in
                                         Group {
                                             if page.kind == .reading { readingPage(size: geometry.size) }
-                                            else { collectionPage(values: entries(for: page), size: geometry.size, kind: page.kind) }
+                                            else {
+                                                collectionPage(values: entries(for: page), size: geometry.size, kind: page.kind,
+                                                               pageID: page.id, subgrouping: subgrouping(in: page.id))
+                                            }
                                         }
                                         .frame(width: geometry.size.width, height: geometry.size.height)
                                         .id(page.id)
@@ -726,6 +796,14 @@ struct MCCollectionRootView: View {
             }
         case .group, .all:
             EmptyView()
+        }
+        if page.kind != .reading {
+            Picker(selection: subgroupBinding(for: page.id)) {
+                ForEach(MCLibrarySubgrouping.allCases) { Text($0.title).tag($0) }
+            } label: {
+                Label("Group in tab", systemImage: "rectangle.3.group")
+            }
+            .pickerStyle(.menu)
         }
     }
 
@@ -849,22 +927,71 @@ struct MCCollectionRootView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
     }
 
-    @ViewBuilder private func collectionPage(values: [MCPersonalEntry], size: CGSize, kind: MCLibraryPageKind? = nil) -> some View {
+    @ViewBuilder private func collectionPage(values: [MCPersonalEntry], size: CGSize, kind: MCLibraryPageKind? = nil,
+                                             pageID: String? = nil, subgrouping: MCLibrarySubgrouping = .none) -> some View {
         if values.isEmpty {
             let libraryIsEmpty = store.library.entries.isEmpty
             UnavailableView(libraryIsEmpty ? "Library Empty" : "No matches", systemImage: "books.vertical.fill",
                 description: Text(libraryIsEmpty ? "Add a title from Browse." : "Try another search, group, or filter."))
         } else {
+            let sections = subgroups(values, by: subgrouping)
             ScrollView {
-                LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
-                    ForEach(values) { entry in
-                        entryButton(entry, kind: kind)
+                if sections.isEmpty {
+                    LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
+                        ForEach(values) { entry in
+                            entryButton(entry, kind: kind)
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.vertical)
+                } else {
+                    LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14, pinnedViews: [.sectionHeaders]) {
+                        ForEach(sections) { section in
+                            let key = "\(pageID ?? "all")|\(subgrouping.rawValue)|\(section.id)"
+                            let collapsed = collapsedSubgroups.contains(key)
+                            Section {
+                                if !collapsed {
+                                    ForEach(section.entries) { entry in
+                                        entryButton(entry, kind: kind)
+                                    }
+                                }
+                            } header: {
+                                subgroupHeader(section, collapsed: collapsed) {
+                                    withAnimation(.snappy) {
+                                        if collapsed { collapsedSubgroups.remove(key) } else { collapsedSubgroups.insert(key) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
                 }
-                .padding(.horizontal)
-                .padding(.vertical)
             }.mcRefreshable { await store.refresh() }
         }
+    }
+
+    private func subgroupHeader(_ section: MCLibrarySubgroup, collapsed: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Text(section.title).font(.headline).foregroundStyle(.primary)
+                Text("\(section.entries.count)").font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                Spacer()
+                Image(systemName: "chevron.down").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(collapsed ? -90 : 0))
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityLabel("\(section.title), \(section.entries.count)")
+        .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+    }
+
+    private var activePageTitle: String {
+        guard let id = activeGroupPage else { return "All" }
+        return libraryPages.first { $0.id == id }?.title ?? "All"
     }
 
     private func entryButton(_ entry: MCPersonalEntry, kind: MCLibraryPageKind? = nil) -> some View {
@@ -1115,10 +1242,7 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
                 HStack(spacing: 24) {
                     ForEach(pages) { page in
                         let active = (selected ?? pages.first?.id) == page.id
-                        Group {
-                            if page.kind == .group || page.kind == .all { tabButton(page, active: active) }
-                            else { tabButton(page, active: active).contextMenu { menu(page) } }
-                        }
+                        tabButton(page, active: active).contextMenu { menu(page) }
                         .id(page.id)
                         .accessibilityLabel(page.kind == .group || page.kind == .all ? page.title
                             : page.kind == .reading ? "Reading" : "Saved tab, \(page.title)")

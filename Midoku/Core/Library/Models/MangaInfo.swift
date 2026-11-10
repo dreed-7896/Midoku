@@ -18,8 +18,6 @@ struct MangaInfo: Hashable, Sendable {
 
     var unread: Int = 0
     var downloads: Int = 0
-    /// Publishing status raw value, used to group the library.
-    var status: Int16 = 0
 
     func toManga() -> Manga {
         Manga(
