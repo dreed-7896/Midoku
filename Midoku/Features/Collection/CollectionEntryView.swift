@@ -454,7 +454,7 @@ struct MCEntryView: View {
                             .contentShape(Rectangle())
                             .gesture(copyOrSearchGesture(for: artist))
                     }
-                    Text("\(entry.status.title) · \(entry.links.count) sources").font(.caption).foregroundStyle(.secondary)
+                    Text(([publishingStatus(entry)].compactMap { $0 } + ["\(entry.links.count) sources"]).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                     if let sourceName = mainSourceName(entry) {
                         Label("Main source: \(sourceName)", systemImage: "globe")
                             .font(.caption)
@@ -594,6 +594,18 @@ struct MCEntryView: View {
         return listingIDs.compactMap { store.library.listing($0)?.details.tags }.flatMap { $0 }.filter { tag in
             let key = tag.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             return seen.insert(key).inserted
+        }
+    }
+
+    /// The series' publishing status as the main source reports it, not the personal reading status.
+    private func publishingStatus(_ entry: MCPersonalEntry) -> String? {
+        let listingID = entry.primaryListingID ?? entry.links.first?.listingID
+        switch store.storedManga(listingID: listingID)?.status {
+            case .ongoing: return "Ongoing"
+            case .completed: return "Completed"
+            case .cancelled: return "Cancelled"
+            case .hiatus: return "Hiatus"
+            case .unknown, nil: return nil
         }
     }
 
