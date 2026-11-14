@@ -163,6 +163,7 @@ struct MCEntryView: View {
     @State private var selected = Set<UUID>()
     @State private var selecting = false
     @State private var editingChapter: MCID?
+    @State private var splittingChapter: MCID?
     @State private var addingChapter: MCID?
     @State private var reader: MCReaderSheet?
     @State private var showBookmarks = false
@@ -326,6 +327,9 @@ struct MCEntryView: View {
         }
         .sheet(item: $editingChapter) { item in
             MCChapterEditor(entryID: entryID, slotID: item.id, resetThumbnail: { resetChapterThumbnails(slotIDs: [item.id]) })
+        }
+        .sheet(item: $splittingChapter) { item in
+            MCChapterSplitter(entryID: entryID, slotID: item.id)
         }
         .sheet(item: $addingChapter) { item in
             if let variant = entry?.slots.first(where: { $0.id == item.id })?.preferred,
@@ -688,7 +692,9 @@ struct MCEntryView: View {
                 if let url = chapterWebURL(slot) {
                     Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
                 }
-                Button(slot.preferred?.pageSelection?.ranges.isEmpty == false ? "Edit chapter / splits" : "Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
+                Button("Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
+                Button(slot.preferred?.pageSelection?.ranges.isEmpty == false ? "Edit split" : "Split chapter", systemImage: "scissors") { splittingChapter = MCID(id: slot.id) }
+                    .disabled(slot.variants.count > 1)
                 Button("Add to entry", systemImage: "text.badge.plus") { addingChapter = MCID(id: slot.id) }
                 Menu("Reading progress", systemImage: "checkmark.circle") {
                     Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: true) }
