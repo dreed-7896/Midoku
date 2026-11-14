@@ -130,9 +130,6 @@ struct MCChapterSplitter: View {
             VStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
                     MCSplitPageThumbnail(page: pages[page - 1], sourceKey: sourceKey)
-                        .aspectRatio(2 / 3, contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .clipped()
                         .opacity(isExcluded ? 0.3 : 1)
                     if isExcluded {
                         Image(systemName: "xmark.circle.fill").font(.title2)
@@ -245,17 +242,22 @@ private struct MCSplitPageThumbnail: View {
     @State private var failed = false
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .tertiarySystemFill)
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else if failed {
-                Image(systemName: "photo").foregroundStyle(.secondary)
-            } else {
-                ProgressView()
+        // A fixed 2:3 box sized by the grid column; the image fits inside it, so wide spreads
+        // shrink to the cell width instead of widening the cell.
+        Color(uiColor: .tertiarySystemFill)
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else if failed {
+                    Image(systemName: "photo").foregroundStyle(.secondary)
+                } else {
+                    ProgressView()
+                }
             }
-        }
-        .task(id: page) { await load() }
+            .clipped()
+            .task(id: page) { await load() }
     }
 
     private func load() async {
