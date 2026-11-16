@@ -1,0 +1,28 @@
+services:
+  dev:
+    image: mcr.microsoft.com/devcontainers/typescript-node:22
+    volumes:
+      - ../..:/workspaces:cached
+    command: sleep infinity
+
+  suwayomi:
+    image: ghcr.io/suwayomi/suwayomi-server:stable
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      FLARESOLVERR_ENABLED: "true"
+      FLARESOLVERR_URL: http://flaresolverr:8191
+      EXTENSION_STORES: '["https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json"]'
+    volumes:
+      - suwayomi-data:/home/suwayomi/.local/share/Tachidesk
+    depends_on:
+      - flaresolverr
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+
+volumes:
+  suwayomi-data:
