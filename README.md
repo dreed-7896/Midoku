@@ -11,3 +11,8 @@ Web client for Midoku, backed by [Suwayomi-Server](https://github.com/Suwayomi/S
 - GraphQL playground: `<forwarded-url>/api/graphql`
 - Keiyoushi extension repo and FlareSolverr are preconfigured.
 - Data persists until the codespace is deleted. Codespaces stop after 30 min idle; reopening restarts everything.
+
+## Web app
+
+- Dev (inside the codespace): `npm run dev` → open port 5173. `/api` is proxied to Suwayomi.
+- Vercel: set `SUWAYOMI_URL` to the Suwayomi URL (e.g. the codespace's public 4567 URL). `/api/*` is forwarded there by `api/suwayomi.ts`.

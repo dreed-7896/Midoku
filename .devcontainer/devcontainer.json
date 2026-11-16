@@ -4,6 +4,7 @@
   "service": "dev",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "shutdownAction": "stopCompose",
+  "postCreateCommand": "npm install",
   "forwardPorts": [4567, 5173],
   "portsAttributes": {
     "4567": { "label": "Suwayomi", "onAutoForward": "notify" },
