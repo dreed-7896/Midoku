@@ -4,6 +4,10 @@ services:
     volumes:
       - ../..:/workspaces:cached
     command: sleep infinity
+    # Share Suwayomi's network so it is reachable at localhost:4567
+    network_mode: service:suwayomi
+    depends_on:
+      - suwayomi
 
   suwayomi:
     image: ghcr.io/suwayomi/suwayomi-server:stable

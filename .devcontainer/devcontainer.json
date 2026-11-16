@@ -4,9 +4,9 @@
   "service": "dev",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "shutdownAction": "stopCompose",
-  "forwardPorts": ["suwayomi:4567", 5173],
+  "forwardPorts": [4567, 5173],
   "portsAttributes": {
-    "suwayomi:4567": { "label": "Suwayomi", "onAutoForward": "notify" },
+    "4567": { "label": "Suwayomi", "onAutoForward": "notify" },
     "5173": { "label": "Web app" }
   },
   "hostRequirements": { "cpus": 2, "memory": "8gb" }
