@@ -1,4 +1,5 @@
 // Forwards /api/* to the Suwayomi server set in SUWAYOMI_URL (GraphQL + images).
+declare const process: { env: Record<string, string | undefined> }
 export const config = { runtime: 'edge' }
 
 export default async function handler(req: Request): Promise<Response> {
