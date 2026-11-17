@@ -6,7 +6,7 @@ const SHELL = ['/', '/manifest.webmanifest', '/icon.svg', ...[] /* __ASSETS__ */
 // Kept across deploys: downloaded chapters, cached covers/icons, chapter thumbnails (thumbs.ts) and the app's offline data (cache.ts).
 const DOWNLOADS = 'midoku-downloads'
 const IMAGES = 'midoku-images'
-const KEEP = new Set([CACHE, DOWNLOADS, IMAGES, 'midoku-data', 'midoku-thumbs'])
+const KEEP = new Set([CACHE, DOWNLOADS, IMAGES, 'midoku-data', 'midoku-thumbs', 'midoku-pages'])
 const MAX_IMAGES = 800
 
 self.addEventListener('install', (event) => {

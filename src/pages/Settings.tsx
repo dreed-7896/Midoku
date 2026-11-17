@@ -9,6 +9,8 @@ import { useStore } from '../data/store'
 import { clearData } from '../data/cache'
 import { changePassword, lockApp, usePendingWrites } from '../data/db'
 import { savedBytes, useDownloads } from '../data/downloads'
+import { clearPageCache, pageCacheBytes } from '../data/pageCache'
+import { resetThumbs } from '../data/thumbs'
 import { testServer } from '../data/suwayomi'
 import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
@@ -233,8 +235,11 @@ function StorageSection() {
     navigator.storage?.estimate?.().then((e) => setUsage({ used: e.usage ?? 0, quota: e.quota ?? 0 })).catch(() => {})
   }, [count])
 
+  const settings = useSettings()
+  const [kept, setKept] = useState(() => pageCacheBytes())
   const clearCache = async () => {
-    await Promise.all([clearData(), caches.delete('midoku-images').catch(() => false)])
+    await Promise.all([clearData(), caches.delete('midoku-images').catch(() => false), clearPageCache(), resetThumbs()])
+    setKept(0)
     store.toast('Cache cleared')
   }
 
@@ -258,7 +263,21 @@ function StorageSection() {
           <span className="card-meta card-meta--wrap">Changes made offline are sent when the device is back online. Opened titles stay readable offline for 3 days.</span>
         </div>
       </div>
-      <div className="row-btns">
+      <div className="setting">
+        <span className="setting__icon"><Icon name="image" size={22} /></span>
+        <div className="setting__text">
+          <strong>Recently read pages</strong>
+          <span className="card-meta card-meta--wrap">{mb(kept)} kept · page lists for 3 days. Reopening a chapter then loads from this device instead of the server.</span>
+        </div>
+      </div>
+      <div className="segmented">
+        {[0, 150, 300, 600, 1000].map((n) => (
+          <button key={n} type="button" className={settings.pageCacheMB === n ? 'is-on' : ''} onClick={() => { updateSettings({ pageCacheMB: n }); if (!n) void clearPageCache().then(() => setKept(0)) }}>
+            {n ? (n >= 1000 ? '1 GB' : `${n} MB`) : 'Off'}
+          </button>
+        ))}
+      </div>
+      <div className="row-btns pad-t-sm">
         <button type="button" className="btn btn--ghost" onClick={() => nav.go('/downloads')}>Manage downloads</button>
         <button type="button" className="btn btn--ghost" onClick={clearCache}>Clear cache</button>
       </div>

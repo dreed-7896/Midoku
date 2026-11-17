@@ -1,6 +1,7 @@
 import { chapterKey, getSaved, savedPageUrl } from './downloads'
 import { shownPages } from './library'
-import { fetchImage, getPages } from './suwayomi'
+import { cachedPageList, keepPageList } from './pageCache'
+import { fetchImage, getPages, serverKey } from './suwayomi'
 import type { Chapter } from './types'
 
 /**
@@ -28,14 +29,25 @@ export function thumbPage(c: Chapter): number {
 /** The key a chapter's thumbnail is stored under; changes when another page is picked. */
 export const thumbKey = (c: Chapter) => (c.sourceUrl ? `${chapterKey(c.sourceId, c.sourceUrl)}#${thumbPage(c)}` : '')
 
-/** Page addresses of a chapter: from the device when downloaded, else from the server (asked once per session). */
-export function chapterPages(c: Chapter): Promise<string[]> {
+/** Where a chapter's page list is kept on the device (the addresses include the server). */
+export const pageListKey = (c: Chapter) => `${serverKey()}|${c.sourceUrl ? chapterKey(c.sourceId, c.sourceUrl) : c.remoteId}`
+
+/**
+ * Page addresses of a chapter: from the device when downloaded, else the list kept from the last few days
+ * (pageCache.ts), else from the server. `fresh` asks the server again (and keeps the new list).
+ */
+export function chapterPages(c: Chapter, fresh = false): Promise<string[]> {
   const saved = c.sourceUrl ? getSaved(chapterKey(c.sourceId, c.sourceUrl)) : undefined
   if (saved) return Promise.resolve(saved.pages)
   if (!c.remoteId) return Promise.resolve([])
-  let p = pageLists.get(c.remoteId)
+  const key = pageListKey(c)
+  if (!fresh) {
+    const kept = cachedPageList(key)
+    if (kept) return Promise.resolve(kept)
+  }
+  let p = fresh ? undefined : pageLists.get(c.remoteId)
   if (!p) {
-    p = getPages(c.remoteId)
+    p = getPages(c.remoteId).then((list) => { keepPageList(key, list); return list })
     p.catch(() => pageLists.delete(c.remoteId!))
     pageLists.set(c.remoteId, p)
   }

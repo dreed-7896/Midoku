@@ -2,6 +2,7 @@ import { CSSProperties, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
 import { savedPageUrl } from '../data/downloads'
+import { cachedPage, keepPage } from '../data/pageCache'
 import { fetchImage, needsAuthForImages } from '../data/suwayomi'
 import { cachedThumb, chapterThumb } from '../data/thumbs'
 import type { Chapter, CoverArt } from '../data/types'
@@ -44,9 +45,10 @@ function release(src: string) {
  * fromDevice reads a downloaded page from the device first (works offline, without the service worker).
  * Covers and icons are cached by the service worker (sw.js), so they also show offline.
  */
-export function RemoteImage({ src, alt = '', className, onLoad, fromDevice }: { src: string; alt?: string; className?: string; onLoad?: () => void; fromDevice?: boolean }) {
+export function RemoteImage({ src, alt = '', className, onLoad, fromDevice, persist }: { src: string; alt?: string; className?: string; onLoad?: () => void; fromDevice?: boolean; persist?: boolean }) {
   const auth = needsAuthForImages()
-  const direct = !auth && !fromDevice
+  // persist: a chapter page, kept on the device for a while after it's read (pageCache.ts).
+  const direct = !auth && !fromDevice && !persist
   const [url, setUrl] = useState(() => (direct ? src : blobs.get(src)?.url ?? ''))
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -60,7 +62,9 @@ export function RemoteImage({ src, alt = '', className, onLoad, fromDevice }: { 
     const load = async () => {
       saved = fromDevice ? await savedPageUrl(src) : undefined
       if (saved) return saved
-      const blob = await fetchImage(src, ctrl.signal)
+      const kept = persist ? await cachedPage(src) : undefined
+      const blob = kept ?? await fetchImage(src, ctrl.signal)
+      if (persist && !kept) void keepPage(src, blob)
       // Another copy of this image may have finished first.
       const again = take(src)
       if (again) return again
@@ -72,7 +76,7 @@ export function RemoteImage({ src, alt = '', className, onLoad, fromDevice }: { 
       .then((u) => { held = blobs.get(src)?.url === u; if (ctrl.signal.aborted) { if (held) release(src) } else setUrl(u) })
       .catch(() => { if (!ctrl.signal.aborted) setFailed(true) })
     return () => { ctrl.abort(); if (held) release(src); if (saved) URL.revokeObjectURL(saved) }
-  }, [src, direct, fromDevice])
+  }, [src, direct, fromDevice, persist])
   if (failed || !url) return null
   // CORS mode (Suwayomi allows any origin) so the service worker can cache real, readable responses.
   return <img src={url} alt={alt} className={className} loading={direct ? 'lazy' : undefined} crossOrigin={direct ? 'anonymous' : undefined} onLoad={onLoad} onError={() => setFailed(true)} />
@@ -129,7 +133,7 @@ function useNear<T extends HTMLElement>(margin = '300px') {
 /** A server image that is only fetched once it scrolls near the screen; a page placeholder until then. */
 export function LazyImage({ src, fromDevice, placeholder = 0 }: { src: string; fromDevice?: boolean; placeholder?: number }) {
   const [ref, near] = useNear<HTMLDivElement>()
-  return <div ref={ref} className="lazy-img">{near && src ? <RemoteImage src={src} fromDevice={fromDevice} /> : <PageThumb layout={placeholder} />}</div>
+  return <div ref={ref} className="lazy-img">{near && src ? <RemoteImage src={src} fromDevice={fromDevice} persist={!fromDevice} /> : <PageThumb layout={placeholder} />}</div>
 }
 
 /**

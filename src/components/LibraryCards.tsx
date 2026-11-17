@@ -38,7 +38,7 @@ export function CoverCorner({ entry: e }: { entry: Entry }) {
   const store = useStore()
   const unread = newCount(e)
   const holds = store.children(e.id).length > 0
-  const inside = !!e.parentId
+  const inside = !!e.parentId && !!store.entry(e.parentId)?.inLibrary
   if (!unread && !holds && !inside) return null
   return (
     <span className="thumb__corner">

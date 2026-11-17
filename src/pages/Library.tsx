@@ -49,12 +49,16 @@ export default function Library() {
   const [more, setMore] = useState(false)
   const [menuFor, setMenuFor] = useState<Entry | null>(null)
   const [readingAdd, setReadingAdd] = useState(false)
+  const [tabMenu, setTabMenu] = useState<LibraryTab | null>(null)
+  // Holding a tab you made (or a saved filter) offers Rename and Delete.
+  const tabPress = useLongPress<LibraryTab>((t) => { if (t.kind === 'tab' || t.kind === 'smart') setTabMenu(t) })
   // Shuffle (Reading tab): a tap picks from Reading, a long press (or an empty Reading list) from the whole library.
   const shufflePress = useLongPress<void>(() => shuffle(true))
   const pager = useRef<HTMLDivElement>(null)
   const strip = useRef<HTMLDivElement>(null)
 
-  const roots = store.entries.filter((e) => e.inLibrary && !e.parentId)
+  // A title inside a series that left the library shows on its own.
+  const roots = store.entries.filter((e) => e.inLibrary && (!e.parentId || !store.entry(e.parentId)?.inLibrary))
   const filterCount = filters.statuses.length + (filters.newOnly ? 1 : 0)
   const unreadTotal = roots.reduce((n, e) => n + unreadCount(e), 0)
   const tab = tabs[Math.min(active, tabs.length - 1)]
@@ -172,7 +176,9 @@ export default function Library() {
       {!q && (
         <div className="chips pad-x pad-t tabstrip" role="tablist" aria-label="Library tabs" ref={strip}>
           {tabs.map((t, i) => (
-            <button key={t.id} type="button" role="tab" aria-selected={i === active} className={`chip chip--lg${i === active ? ' is-on' : ''}`} onClick={() => goTab(i)}>
+            <button key={t.id} type="button" role="tab" aria-selected={i === active} className={`chip chip--lg${i === active ? ' is-on' : ''}`}
+              onClick={() => { if (!tabPress(t).wasLongPress()) goTab(i) }} title={t.kind === 'tab' || t.kind === 'smart' ? 'Hold to rename or delete' : undefined}
+              onPointerDown={tabPress(t).onPointerDown} onPointerMove={tabPress(t).onPointerMove} onPointerUp={tabPress(t).onPointerUp} onPointerLeave={tabPress(t).onPointerLeave} onContextMenu={tabPress(t).onContextMenu}>
               {t.kind === 'reading' && <Icon name="book" size={15} stroke={2} />}
               {t.kind === 'smart' && <Icon name="sparkle" size={15} stroke={2} />}
               {t.name}
@@ -216,6 +222,22 @@ export default function Library() {
         </button>
       )}
       {readingAdd && <ReadingAddSheet onClose={() => setReadingAdd(false)} />}
+      <Sheet open={!!tabMenu} title={tabMenu?.name ?? ''} onClose={() => setTabMenu(null)}>
+        {tabMenu && <div className="menu">
+          <MenuRow icon="settings" title="Rename" onClick={() => {
+            const t = tabMenu; setTabMenu(null)
+            const name = window.prompt('Rename tab', t.name)
+            if (name?.trim()) store.renameTab(t.id, name.trim())
+          }} />
+          <MenuRow icon="trash" title="Delete tab" detail="Its titles stay in your library" onClick={() => {
+            const t = tabMenu; setTabMenu(null)
+            if (!window.confirm(`Delete the “${t.name}” tab? Its titles stay in your library.`)) return
+            const i = tabs.findIndex((x) => x.id === t.id)
+            store.deleteTab(t.id)
+            if (i <= active) goTab(Math.max(0, active - 1))
+          }} />
+        </div>}
+      </Sheet>
 
       {menuFor && (() => {
         const e = store.entry(menuFor.id) ?? menuFor

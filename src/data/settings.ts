@@ -13,10 +13,12 @@ export interface Settings {
   /** Optional basic-auth login when the server has AUTH_MODE=basic_auth. */
   serverUser: string
   serverPass: string
+  /** Page images kept on this device after reading (MB); 0 keeps none. */
+  pageCacheMB: number
 }
 
 const KEY = 'midoku.settings'
-const DEFAULTS: Settings = { readerMode: 'webtoon', lockCredential: '', lockDelay: 0, serverUrl: '', serverUser: '', serverPass: '' }
+const DEFAULTS: Settings = { readerMode: 'webtoon', lockCredential: '', lockDelay: 0, serverUrl: '', serverUser: '', serverPass: '', pageCacheMB: 300 }
 
 function read(): Settings {
   try {

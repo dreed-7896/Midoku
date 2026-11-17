@@ -69,6 +69,7 @@ const CHAPTER = 'id url name chapterNumber uploadDate scanlator pageCount source
 
 const normalise = (url: string) => url.trim().replace(/\/+$/, '')
 const serverBase = () => normalise(getSettings().serverUrl)
+export const serverKey = () => serverBase()
 
 export function authHeaders(user = getSettings().serverUser, pass = getSettings().serverPass): Record<string, string> {
   return user ? { Authorization: `Basic ${btoa(`${user}:${pass}`)}` } : {}

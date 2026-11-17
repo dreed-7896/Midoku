@@ -1114,7 +1114,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // The Reading list is kept by hand (like native Midoku): titles added to it, in their order.
   const queue = useMemo(() => (server.status === 'off' ? state.queue : entries
-    .filter((e) => e.readingPos != null)
+    .filter((e) => e.readingPos != null && e.inLibrary)
     .sort((a, b) => a.readingPos! - b.readingPos!)
     .map((e) => e.id)), [server.status, state.queue, entries])
 

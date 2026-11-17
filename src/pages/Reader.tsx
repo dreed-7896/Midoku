@@ -8,9 +8,9 @@ import { Empty, Loading } from '../components/Status'
 import { useNav } from '../components/Nav'
 import { updateSettings, useSettings } from '../data/settings'
 import { useStore, visibleChapters } from '../data/store'
-import { chapterKey, getSaved } from '../data/downloads'
 import { shownPages } from '../data/library'
-import { getPages } from '../data/suwayomi'
+import { chapterPages, pageListKey } from '../data/thumbs'
+import { cachedPageList } from '../data/pageCache'
 import { READER_LABEL, type Chapter, type CoverArt, type ReaderMode } from '../data/types'
 
 /**
@@ -97,9 +97,11 @@ export default function Reader() {
     heights.current = new Map()
     if (!chapter?.remoteId) return
     let alive = true
-    // A downloaded chapter reads from the device; others ask the server for their pages.
-    const saved = chapter.sourceUrl ? getSaved(chapterKey(chapter.sourceId, chapter.sourceUrl)) : undefined
-    ;(saved ? Promise.resolve(saved.pages) : getPages(chapter.remoteId))
+    // A downloaded chapter reads from the device; others use the page list kept from the last few days, or ask
+    // the server. Trying again, or a page count that no longer matches the server's, asks the server afresh.
+    const whole = entry?.chapters.find((c) => c.id === (chapter.physicalId ?? chapter.id)) ?? chapter
+    const kept = loadTry === 0 && !whole.downloaded ? cachedPageList(pageListKey(whole)) : undefined
+    ;(kept && (!whole.pages || kept.length === whole.pages) ? Promise.resolve(kept) : chapterPages(whole, loadTry > 0 || !!kept))
       .then((list) => {
         if (!alive) return
         // A part shows only its pages; the whole chapter's page count is kept on the whole chapter.
@@ -333,10 +335,10 @@ export default function Reader() {
               : (known ? { height: known, aspectRatio: 'auto' } : undefined)
             return mode === 'webtoon' ? (
               <div key={n} className="wt-page wt-page--img" data-page={n} style={style}>
-                {near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="wt-img" onLoad={onLoad} fromDevice={fromDevice} />}
+                {near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="wt-img" onLoad={onLoad} fromDevice={fromDevice} persist={!fromDevice} />}
               </div>
             ) : (
-              <div key={n} className="pg-page" data-page={n}>{near && <Zoomable active={n === page} onZoom={setZoomed}><RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" fromDevice={fromDevice} /></Zoomable>}</div>
+              <div key={n} className="pg-page" data-page={n}>{near && <Zoomable active={n === page} onZoom={setZoomed}><RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" fromDevice={fromDevice} persist={!fromDevice} /></Zoomable>}</div>
             )
           }
           return mode === 'webtoon' ? (
