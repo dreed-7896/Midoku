@@ -46,6 +46,13 @@ export interface SManga extends SMangaCard {
   chapters?: { totalCount: number }
   lastReadChapter?: { lastReadAt: string } | null
   latestUploadedChapter?: { uploadDate: string } | null
+  categories?: { nodes: { id: number }[] }
+}
+
+export interface SCategory {
+  id: number
+  name: string
+  order: number
 }
 
 export interface SChapter {
@@ -66,7 +73,7 @@ const EXT = 'pkgName name lang iconUrl versionName isInstalled hasUpdate isNsfw'
 const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw'
 const CARD = 'id title thumbnailUrl inLibrary'
 const MANGA = `${CARD} author artist description genre status realUrl sourceId initialized source { id displayName iconUrl lang }`
-const SUMMARY = `${MANGA} unreadCount chapters { totalCount } lastReadChapter { lastReadAt } latestUploadedChapter { uploadDate }`
+const SUMMARY = `${MANGA} unreadCount chapters { totalCount } lastReadChapter { lastReadAt } latestUploadedChapter { uploadDate } categories { nodes { id } }`
 const CHAPTER = 'id name chapterNumber uploadDate scanlator isRead isBookmarked isDownloaded lastPageRead pageCount sourceOrder'
 
 export const isConnected = () => !!getSettings().serverUrl
@@ -210,6 +217,36 @@ export function updateChapters(ids: number[], patch: { isRead?: boolean; isBookm
   return gql(`mutation($ids: [Int!]!) { updateChapters(input: { ids: $ids, patch: { ${fields} } }) { chapters { id } } }`, { ids })
 }
 
+// Categories (the library tabs a person files titles into)
+
+/** Suwayomi's built-in "Default" category (id 0) holds uncategorised titles and is not shown as a tab. */
+export const getCategories = () =>
+  gql<{ categories: { nodes: SCategory[] } }>('{ categories { nodes { id name order } } }')
+    .then((d) => d.categories.nodes.filter((c) => c.id !== 0).sort((a, b) => a.order - b.order))
+
+export const createCategory = (name: string) =>
+  gql<{ createCategory: { category: SCategory } }>(
+    'mutation($name: String!) { createCategory(input: { name: $name }) { category { id name order } } }', { name },
+  ).then((d) => d.createCategory.category)
+
+export const renameCategory = (id: number, name: string) =>
+  gql('mutation($id: Int!, $name: String!) { updateCategory(input: { id: $id, patch: { name: $name } }) { category { id } } }', { id, name })
+
+export const deleteCategory = (id: number) =>
+  gql('mutation($id: Int!) { deleteCategory(input: { categoryId: $id }) { category { id } } }', { id })
+
+export function setMangaCategory(mangaId: number, categoryId: number, on: boolean) {
+  const key = on ? 'addToCategories' : 'removeFromCategories'
+  return gql(
+    `mutation($id: Int!, $cat: Int!) { updateMangaCategories(input: { id: $id, patch: { ${key}: [$cat] } }) { manga { id } } }`,
+    { id: mangaId, cat: categoryId },
+  )
+}
+
+/** Tab ids for server categories. */
+export const categoryTabId = (id: number) => `k${id}`
+export const categoryIdOf = (tabId: string) => (/^k\d+$/.test(tabId) ? Number(tabId.slice(1)) : undefined)
+
 // Mapping server data onto the app's model
 
 const PALETTE: CoverArt[] = [
@@ -267,7 +304,7 @@ export function toEntry(m: SManga, chapters?: SChapter[]): Entry {
     art: artFor(m.id),
     coverUrl: assetUrl(m.thumbnailUrl),
     publishing: publishing(m.status),
-    tabs: [],
+    tabs: (m.categories?.nodes ?? []).filter((c) => c.id !== 0).map((c) => categoryTabId(c.id)),
     tags: m.genre ?? [],
     description: m.description ?? '',
     sources: [{
