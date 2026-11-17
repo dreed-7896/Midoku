@@ -12,7 +12,7 @@ import {
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
 import { useSettings } from './settings'
 import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
-import type { Chapter, CopiedChapter, CustomDetails, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
+import type { Chapter, CustomDetails, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
 
 /*
  * Where things live:
@@ -105,8 +105,6 @@ interface State {
   offline: boolean
   /** Progress of the check for new chapters. */
   updating: { done: number; total: number } | null
-  /** Chapters copied from a title, ready to paste into another. */
-  clipboard: CopiedChapter[]
 }
 
 const initial: State = {
@@ -119,15 +117,10 @@ const initial: State = {
   server: { status: 'off' },
   offline: false,
   updating: null,
-  clipboard: [],
 }
 
 const SAMPLE_QUEUE = initial.queue
 
-/** Copied chapters stay on the device until pasted or discarded, across reloads. */
-const CLIPBOARD_KEY = 'midoku.clipboard'
-const keepClipboard = (list: CopiedChapter[]) => { try { localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(list)) } catch { /* kept for this session */ } }
-try { initial.clipboard = JSON.parse(localStorage.getItem(CLIPBOARD_KEY) ?? '[]') } catch { /* starts empty */ }
 
 /** Finds a title by app id, or by the server id of any of its linked sources. */
 function findIn(entries: Entry[], id: string) {
@@ -684,45 +677,31 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         toast(`Merged ${parts.length} titles`)
         return keep.id
       },
-      /** Keeps chapters to paste into another title. */
-      copyChapters: (id: string, chapterIds: Set<string>) => {
-        const e = find(id)
-        if (!e) return
-        const ids = new Set([...chapterIds].map(physicalIdOf))
-        const copied: CopiedChapter[] = e.chapters.filter((c) => ids.has(c.id) && c.sourceUrl && c.remoteId).map((c) => ({
-          sourceId: c.sourceId,
-          mangaUrl: e.inserted?.find((i) => i.id === c.insertId)?.mangaUrl ?? e.sources.find((x) => x.sourceId === c.sourceId)?.mangaUrl ?? '',
-          chapterUrl: c.sourceUrl!, remoteId: c.remoteId, number: c.number, label: c.label, fromTitle: e.title,
-        }))
-        if (!copied.length) { toast(e.remote ? 'Nothing to copy' : 'Copying chapters needs a server'); return }
-        set((s) => ({ ...s, clipboard: copied }))
-        keepClipboard(copied)
-        toast(`Copied ${copied.length} chapter${copied.length === 1 ? '' : 's'} · paste from another title's ⋯ menu`)
-      },
-      clearClipboard: () => { set((s) => ({ ...s, clipboard: [] })); keepClipboard([]) },
       /**
-       * Pastes copied chapters: as chapters of their own, as another version of the chapter with that number,
-       * or replacing it (the old one is hidden and can be restored).
+       * Adds chapters of one title to another library entry (Midoku's "Add to entry"). The first one gets
+       * `name`; its number (from the name, or the entry's next number) places it, the rest follow it.
        */
-      pasteChapters: (id: string, plan: { copy: CopiedChapter; action: 'add' | 'separate' | 'version' | 'replace'; number: number; replaces?: string }[]) => {
-        const e = find(id)
-        if (!e || !plan.length) return
-        const added: InsertedChapter[] = plan.map(({ copy, action, number }) => ({
-          id: crypto.randomUUID(), sourceId: copy.sourceId, mangaUrl: copy.mangaUrl, chapterUrl: copy.chapterUrl, remoteId: copy.remoteId,
-          number, label: copy.label, fromTitle: copy.fromTitle, mode: action === 'version' ? 'version' : 'chapter',
+      addToEntry: (fromId: string, chapterIds: Set<string>, targetId: string, name: string) => {
+        const from = find(fromId)
+        const target = find(targetId)
+        if (!from || !target) return
+        const ids = new Set([...chapterIds].map(physicalIdOf))
+        const picked = from.chapters.filter((c) => ids.has(c.id) && c.sourceUrl).sort((a, b) => a.number - b.number)
+        if (!picked.length) { toast('Nothing to add'); return }
+        const { prefix, number } = parseChapterName(name.trim()) ?? { prefix: chapterPrefix(target), number: nextChapterNumber(target) }
+        const added: InsertedChapter[] = picked.map((c, i) => ({
+          id: crypto.randomUUID(), sourceId: c.sourceId,
+          mangaUrl: from.inserted?.find((x) => x.id === c.insertId)?.mangaUrl ?? from.sources.find((x) => x.sourceId === c.sourceId)?.mangaUrl ?? '',
+          chapterUrl: c.sourceUrl!, remoteId: c.remoteId, number: number + i,
+          label: i === 0 && name.trim() ? name.trim() : `${prefix}${Number((number + i).toFixed(3))}`, fromTitle: from.title,
         }))
-        editEntry(e.id, (x) => {
+        editEntry(target.id, (x) => {
           const inserted = [...(x.inserted ?? []), ...added]
-          return { ...x, inserted, chapters: withDownloads(applyStates(withInserted(x.chapters, inserted), [])) }
+          return { ...x, inserted, chapters: x.chapters.length ? withDownloads(withInserted(x.chapters, inserted)) : x.chapters }
         })
-        const dbId = ensureEntry(e.id)
+        const dbId = ensureEntry(target.id)
         if (dbId) added.forEach((i) => saveInserted(insertedRow(dbId, i)))
-        const replaced = new Set(plan.map((p) => p.replaces).filter((r): r is string => !!r))
-        if (replaced.size) {
-          editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (replaced.has(c.id) ? { ...c, removed: true } : c)) }))
-          saveChapters(e.id, replaced)
-        }
-        toast(`Pasted ${added.length} chapter${added.length === 1 ? '' : 's'}`)
+        toast(`Added ${added.length === 1 ? added[0].label : `${added.length} chapters`} to ${target.title}`)
       },
       /** Moves a chapter in the reading order: after another chapter, or first when `afterId` is null. */
       moveChapter: (id: string, chapterId: string, afterId: string | null) => {
@@ -1003,3 +982,21 @@ export function agoLabel(hours: number): string {
   const d = Math.round(hours / 24)
   return d < 7 ? `${d}d` : `${Math.round(d / 7)}w`
 }
+
+/** "Chapter 12" → prefix "Chapter ", number 12. */
+export function parseChapterName(name: string): { prefix: string; number: number } | undefined {
+  const m = name.match(/^(.*?)(\d+(?:\.\d+)?)\s*$/)
+  return m ? { prefix: m[1], number: Number(m[2]) } : undefined
+}
+/** How the entry names its chapters ("Ch. ", "Chapter "), from its last numbered chapter. */
+export function chapterPrefix(e: Entry): string {
+  const last = [...visibleChapters(e)].sort((a, b) => b.number - a.number).map((c) => parseChapterName(c.label.split(' · ')[0])).find(Boolean)
+  return last?.prefix || 'Chapter '
+}
+/** The number after the entry's last chapter (from the totals when its chapters aren't loaded yet). */
+export function nextChapterNumber(e: Entry): number {
+  const shown = visibleChapters(e).filter((c) => !c.physicalId)
+  if (!shown.length) return (e.counts?.total ?? 0) + 1
+  return Math.floor(Math.max(...shown.map((c) => c.number))) + 1
+}
+export const suggestedChapterName = (e: Entry) => `${chapterPrefix(e)}${nextChapterNumber(e)}`

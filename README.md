@@ -25,7 +25,7 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - Chapters: long-press a chapter to pick which version (source) to read, split a long chapter into parts, insert a chapter from another title or source, bookmark, download or hide it.
 - Titles: edit the title, author, description, cover and reading status (⋯ → Edit details, or tap the cover).
 - Library: Select titles to group them into a series or merge their chapters into one title, file them into tabs or remove them. The shuffle button opens a random title from the tab (hold for the whole library). Filter sheet → Find duplicates.
-- Chapter order: long-press a chapter → Move; copy chapters (Select → Copy) and paste them into another title from its ⋯ menu.
+- Chapters: long-press a chapter → Move to change the reading order, or Add to entry to put it in another library entry (Select → Add to for several).
 - New chapters: checked on launch (every 6 hours) or with the refresh button in Library.
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".
 - App lock: a device passkey (Face ID / Touch ID / fingerprint) guards the app on this device. Turn it on in Settings.

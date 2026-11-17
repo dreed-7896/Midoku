@@ -158,17 +158,6 @@ export interface Entry {
   original?: { title: string; author: string; description: string; coverUrl?: string }
 }
 
-/** Chapters copied from a title, waiting to be pasted into another. */
-export interface CopiedChapter {
-  sourceId: string
-  mangaUrl: string
-  chapterUrl: string
-  remoteId?: number
-  number: number
-  label: string
-  fromTitle: string
-}
-
 export interface CatalogItem {
   id: string
   title: string

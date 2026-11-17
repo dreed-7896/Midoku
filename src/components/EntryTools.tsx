@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { statusOf, useStore, visibleChapters } from '../data/store'
+import { statusOf, suggestedChapterName, totalCount, useStore } from '../data/store'
 import { STATUS_LABEL, type Chapter, type CustomDetails, type Entry, type ManualStatus } from '../data/types'
 import { Cover } from './Art'
 import { Sheet } from './Chrome'
@@ -97,75 +97,55 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
   )
 }
 
-type PasteAction = 'add' | 'skip' | 'separate' | 'version' | 'replace'
-const ACTION_LABEL: Record<PasteAction, string> = { add: 'Add', skip: 'Skip', separate: 'Separate', version: 'Version', replace: 'Replace' }
-
-/** Reviews copied chapters before pasting: chapters already here can be skipped, kept separately, added as a version or replace the old one. */
-export function PasteSheet({ entry, onClose }: { entry: Entry; onClose: () => void }) {
+/**
+ * Midoku's "Add to entry": search the library, pick an entry, and the chapters are added to it. The name
+ * starts as the entry's next chapter ("Chapter 13"); its number places the chapter, the rest follow.
+ */
+export function AddToEntrySheet({ entry, chapterIds, onClose }: { entry: Entry; chapterIds: Set<string>; onClose: () => void }) {
   const store = useStore()
-  const [place, setPlace] = useState<'number' | 'end'>('number')
-  const shown = useMemo(() => visibleChapters(entry).filter((c) => !c.physicalId), [entry])
-  const last = Math.max(0, ...entry.chapters.map((c) => c.number))
-
-  const rows = useMemo(() => store.clipboard.map((copy, i) => {
-    const same = entry.chapters.find((c) => c.sourceUrl === copy.chapterUrl && c.sourceId === copy.sourceId)
-      ?? entry.chapters.find((c) => c.alts?.some((a) => a.url === copy.chapterUrl && a.sourceId === copy.sourceId))
-    const number = place === 'end' ? last + i + 1 : copy.number
-    const clash = place === 'number' ? shown.find((c) => Math.abs(c.number - number) < 1e-6 && !c.insertId) : undefined
-    return { copy, number, same, clash }
-  }), [store.clipboard, entry.chapters, shown, place, last])
-
-  const [choice, setChoice] = useState<Record<number, PasteAction>>({})
-  const actionOf = (i: number): PasteAction => choice[i] ?? (rows[i].same ? 'skip' : rows[i].clash ? 'version' : 'add')
-  const optionsOf = (i: number): PasteAction[] => (rows[i].same ? ['skip', 'separate'] : rows[i].clash ? ['skip', 'separate', 'version', 'replace'] : ['add', 'skip'])
-  const setAll = (a: PasteAction) => setChoice(Object.fromEntries(rows.map((_, i) => [i, optionsOf(i).includes(a) ? a : actionOf(i)])))
-  const dupes = rows.filter((r) => r.same || r.clash).length
-
-  const paste = () => {
-    const plan = rows.flatMap((r, i) => {
-      const a = actionOf(i)
-      if (a === 'skip') return []
-      // A separate copy of a chapter with the same number goes right after it.
-      const number = a === 'separate' ? r.number + 0.001 : r.number
-      return [{ copy: r.copy, action: a === 'add' ? 'add' as const : a, number, replaces: a === 'replace' ? r.clash?.id : undefined }]
-    })
-    if (!plan.length) { store.toast('Nothing to paste'); return }
-    store.pasteChapters(entry.id, plan)
-    store.clearClipboard()
+  const [query, setQuery] = useState('')
+  const [target, setTarget] = useState<string>()
+  const [name, setName] = useState('')
+  const count = chapterIds.size
+  const q = query.trim().toLowerCase()
+  const list = useMemo(() => store.entries
+    .filter((e) => e.inLibrary && e.id !== entry.id && (!q || e.title.toLowerCase().includes(q)))
+    .sort((a, b) => a.title.localeCompare(b.title)), [store.entries, entry.id, q])
+  const picked = target ? store.entry(target) : undefined
+  const pick = (e: Entry) => { setTarget(e.id); setName(suggestedChapterName(e)) }
+  const add = () => {
+    if (!picked) return
+    store.addToEntry(entry.id, chapterIds, picked.id, name)
     onClose()
   }
-
   return (
-    <Sheet open tall title={`Paste ${rows.length} chapter${rows.length === 1 ? '' : 's'}`} onClose={onClose}>
-      <p className="hint">From {[...new Set(store.clipboard.map((c) => c.fromTitle))].join(', ')}.</p>
-      <div className="label label--flush">Place them</div>
-      <div className="segmented">
-        <button type="button" className={place === 'number' ? 'is-on' : ''} onClick={() => setPlace('number')}>By chapter number</button>
-        <button type="button" className={place === 'end' ? 'is-on' : ''} onClick={() => setPlace('end')}>After the last chapter</button>
+    <Sheet open tall title="Add to entry" onClose={onClose}>
+      <div className="label label--flush">{count === 1 ? 'Chapter name' : `First of ${count} chapters`}</div>
+      <input className="form-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={picked ? suggestedChapterName(picked) : 'Pick an entry first'} aria-label="Chapter name" />
+      {count > 1 && <p className="hint">The others are numbered after it.</p>}
+      <div className="label">Library entry</div>
+      <label className="field">
+        <Icon name="search" size={18} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search library" aria-label="Search library" />
+      </label>
+      {!list.length && <Empty compact icon="library" title={q ? 'No entries found' : 'Library empty'} detail={q ? 'Try another search.' : 'Save an entry to the Library first.'} />}
+      <div className="check-list pad-t-sm">
+        {list.map((e) => {
+          const parent = e.parentId ? store.entry(e.parentId) : undefined
+          return (
+            <button key={e.id} type="button" className="check-row" onClick={() => pick(e)}>
+              <span className="check-row__name check-row__name--stack">
+                <strong>{e.title}</strong>
+                <span className="card-meta">{parent ? `in ${parent.title} · ` : ''}{totalCount(e)} chapters · {STATUS_LABEL[statusOf(e)]}</span>
+              </span>
+              {target === e.id && <span className="pick-dot"><Icon name="check" size={14} stroke={2.6} /></span>}
+            </button>
+          )
+        })}
       </div>
-      {dupes > 0 && <>
-        <div className="label">{dupes} already here · set all to</div>
-        <div className="chips wrap">
-          {(['skip', 'separate', 'version', 'replace'] as PasteAction[]).map((a) => <button key={a} type="button" className="chip" onClick={() => setAll(a)}>{ACTION_LABEL[a]}</button>)}
-        </div>
-      </>}
-      <div className="check-list pad-t">
-        {rows.map((r, i) => (
-          <div key={`${r.copy.sourceId}-${r.copy.chapterUrl}`} className="paste-row">
-            <span className="check-row__name check-row__name--stack">
-              <strong>{r.copy.label}</strong>
-              <span className="card-meta">{r.same ? 'Already in this title' : r.clash ? `Same number as ${r.clash.label}` : place === 'end' ? `As chapter ${r.number}` : 'New here'}</span>
-            </span>
-            <div className="segmented segmented--sm">
-              {optionsOf(i).map((a) => <button key={a} type="button" className={actionOf(i) === a ? 'is-on' : ''} onClick={() => setChoice((c) => ({ ...c, [i]: a }))}>{ACTION_LABEL[a]}</button>)}
-            </div>
-          </div>
-        ))}
-      </div>
-      <p className="hint pad-t-sm">Version adds it as another way to read that chapter. Replace hides the old one; it can be restored.</p>
       <div className="sheet__actions">
-        <button type="button" className="btn btn--ghost" onClick={() => { store.clearClipboard(); onClose() }}>Discard copied</button>
-        <button type="button" className="btn btn--accent" onClick={paste}>Paste</button>
+        <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn--accent" onClick={add} disabled={!picked}><Icon name="plus" size={16} />{count === 1 ? 'Add chapter' : `Add ${count} chapters`}</button>
       </div>
     </Sheet>
   )

@@ -526,7 +526,7 @@ button.check-row { width: 100%; background: none; border-left: 0; border-right: 
 .splitter__sum strong { font-size: 14px; }
 .splitter__sum small { color: var(--text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Edit details, grouping, pasting */
+/* Edit details, grouping, adding to entries */
 .form-input { display: block; width: 100%; min-height: 46px; padding: 11px 14px; background: var(--s1); border: 1px solid var(--line); border-radius: 0; color: var(--text); font: inherit; font-size: 16px; outline: 0; }
 .form-input:focus { border-color: var(--accent); }
 .form-input--area { min-height: 110px; resize: vertical; line-height: 1.45; }
@@ -534,9 +534,7 @@ button.check-row { width: 100%; background: none; border-left: 0; border-right: 
 .edit-cover__img { width: 96px; flex: none; }
 .edit-cover__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .edit-cover__actions .btn { cursor: pointer; }
-.segmented--sm button { min-height: 32px; font-size: 12px; padding: 2px 8px; }
-.paste-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
-.paste-row:first-child { border-top: 0; }
+.pick-dot { width: 24px; height: 24px; flex: none; display: flex; align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); }
 .order-row { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 6px 10px; border-top: 1px solid var(--line); }
 .order-row:first-child { border-top: 0; }
 .order-row__cover { width: 34px; flex: none; }

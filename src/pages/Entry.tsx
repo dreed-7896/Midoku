@@ -5,7 +5,7 @@ import { Chip, IconButton, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { TLink as Link, useNav } from '../components/Nav'
 import { PageSplitter } from '../components/PageSplitter'
-import { EditDetailsSheet, MoveSheet, PasteSheet } from '../components/EntryTools'
+import { AddToEntrySheet, EditDetailsSheet, MoveSheet } from '../components/EntryTools'
 import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
 import { Banner, Empty, Loading } from '../components/Status'
 import { chapterKey, getSaved, useDownloads } from '../data/downloads'
@@ -15,7 +15,7 @@ import { getChapters, getPages, SChapter, toChapter } from '../data/suwayomi'
 import { STATUS_LABEL, type Chapter } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
-type Panel = null | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'paste' | 'move'
+type Panel = null | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'addTo' | 'move'
 
 /** Long press (or right click) runs `onLong`; the click that ends a long press is ignored. */
 function useLongPress<T>(onLong: (item: T) => void) {
@@ -57,6 +57,7 @@ export default function EntryPage() {
   const [insertAfter, setInsertAfter] = useState<Chapter | null>(null)
   const [pickedTitle, setPickedTitle] = useState<PickedTitle | null>(null)
   const [moving, setMoving] = useState<Chapter | null>(null)
+  const [adding, setAdding] = useState<Set<string>>(new Set())
   const downloads = useDownloads()
   const longPress = useLongPress<Chapter>((c) => setSheetFor(c.id))
   const libraryPress = useLongPress<void>(() => setPanel('tabs'))
@@ -136,8 +137,9 @@ export default function EntryPage() {
     }
   }
 
-  const copySelected = () => {
-    store.copyChapters(entry.id, selected)
+  const addSelectedTo = () => {
+    setAdding(new Set(selected))
+    setPanel('addTo')
     setSelected(new Set())
     setSelecting(false)
   }
@@ -383,7 +385,6 @@ export default function EntryPage() {
       <Sheet open={panel === 'options'} title={entry.title} onClose={() => setPanel(null)}>
         <div className="menu">
           <MenuRow icon="settings" title="Edit details" detail="Title, author, description, cover, reading status" onClick={() => setPanel('edit')} />
-          {store.clipboard.length > 0 && <MenuRow icon="plus" title={`Paste ${store.clipboard.length} chapter${store.clipboard.length === 1 ? '' : 's'}`} detail={`Copied from ${store.clipboard[0].fromTitle}`} onClick={() => setPanel('paste')} />}
           <MenuRow icon="folder" title="Library tabs" detail={userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => t.name).join(', ') || 'Not in any tab'} onClick={() => setPanel('tabs')} />
           <MenuRow icon="sources" title="Sources" detail={`${entry.sources.length} linked · main: ${main?.name ?? '—'}`} onClick={() => setPanel('sources')} />
           <MenuRow icon="books" title="Series" detail={kids.length ? `${kids.length} title${kids.length === 1 ? '' : 's'} inside` : parent ? `Part of ${parent.title}` : 'Group volumes or seasons together'} onClick={() => setPanel('series')} />
@@ -467,12 +468,13 @@ export default function EntryPage() {
       </Sheet>
 
       {panel === 'edit' && <EditDetailsSheet entry={entry} onClose={() => setPanel(null)} />}
-      {panel === 'paste' && <PasteSheet entry={entry} onClose={() => setPanel(null)} />}
+      {panel === 'addTo' && adding.size > 0 && <AddToEntrySheet entry={entry} chapterIds={adding} onClose={() => { setPanel(null); setAdding(new Set()) }} />}
       {panel === 'move' && moving && <MoveSheet entry={entry} chapter={moving} onClose={() => { setPanel(null); setMoving(null) }} />}
 
       {sheetChapter && (
         <ChapterSheet entryId={entry.id} chapter={sheetChapter} onClose={() => setSheetFor(null)}
           onMove={() => { setMoving(sheetChapter); setSheetFor(null); setPanel('move') }}
+          onAddTo={() => { setAdding(new Set([sheetChapter.id])); setSheetFor(null); setPanel('addTo') }}
           onInsert={() => { setInsertAfter(sheetChapter); setSheetFor(null); setPanel('insert') }} canEdit={!!entry.remote} />
       )}
 
@@ -499,7 +501,7 @@ export default function EntryPage() {
           <button type="button" disabled={!selected.size} onClick={() => act({ read: false }, 'Marked unread:')}><Icon name="undo" size={18} />Unread</button>
           <button type="button" disabled={!selected.size} onClick={() => act({ bookmarked: true }, 'Bookmarked')}><Icon name="bookmark" size={18} />Mark</button>
           <button type="button" disabled={!selected.size} onClick={saveSelected}><Icon name="download" size={18} />Save</button>
-          {entry.remote && <button type="button" disabled={!selected.size} onClick={copySelected}><Icon name="layers" size={18} />Copy</button>}
+          {entry.remote && <button type="button" disabled={!selected.size} onClick={addSelectedTo}><Icon name="plus" size={18} />Add to</button>}
           <button type="button" disabled={!selected.size} onClick={() => act({ removed: true }, 'Removed')}><Icon name="trash" size={18} />Remove</button>
         </div>
       )}
@@ -518,7 +520,7 @@ function MenuRow({ icon, title, detail, onClick }: { icon: Parameters<typeof Ico
 }
 
 /** Everything for one chapter: which version to read, marks, download, splitting and inserting after it. */
-function ChapterSheet({ entryId, chapter, onClose, onInsert, onMove, canEdit }: { entryId: string; chapter: Chapter; onClose: () => void; onInsert: () => void; onMove: () => void; canEdit: boolean }) {
+function ChapterSheet({ entryId, chapter, onClose, onInsert, onMove, onAddTo, canEdit }: { entryId: string; chapter: Chapter; onClose: () => void; onInsert: () => void; onMove: () => void; onAddTo: () => void; canEdit: boolean }) {
   const store = useStore()
   const entry = store.entry(entryId)!
   const whole = entry.chapters.find((c) => c.id === physicalIdOf(chapter.id)) ?? chapter
@@ -566,7 +568,7 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, onMove, canEdit }: 
         {canEdit && <button type="button" onClick={onInsert}><Icon name="plus" size={18} />Insert after</button>}
         <button type="button" onClick={onMove}><Icon name="sort" size={18} />Move</button>
         {whole.order != null && <button type="button" onClick={() => done(() => store.resetOrder(entryId, whole.id))}><Icon name="undo" size={18} />Original place</button>}
-        {canEdit && <button type="button" onClick={() => done(() => store.copyChapters(entryId, ids))}><Icon name="layers" size={18} />Copy</button>}
+        {canEdit && <button type="button" onClick={onAddTo}><Icon name="plus" size={18} />Add to entry</button>}
         <button type="button" onClick={() => done(() => store.editChapters(entryId, ids, { removed: true }))}>
           <Icon name="trash" size={18} />{chapter.insertId ? 'Remove insert' : 'Hide chapter'}
         </button>
