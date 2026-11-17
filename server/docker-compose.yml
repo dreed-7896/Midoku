@@ -1,24 +1,27 @@
-# Suwayomi + FlareSolverr, reachable only inside your Tailscale network (no public ports).
-# Setup steps: server/README.md
+# Reachable only inside your Tailscale network (no public ports). Setup: server/README.md
+# Neutral names so it doesn't stand out in `docker ps` on a shared machine.
+name: ${STACK_NAME:-cache}
 services:
-  tailscale:
+  net:
+    container_name: ${STACK_NAME:-cache}-net
     image: tailscale/tailscale:stable
-    hostname: ${TS_HOSTNAME:-reader}
+    hostname: ${TS_HOSTNAME:-node}
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY}
-      TS_HOSTNAME: ${TS_HOSTNAME:-reader}
+      TS_HOSTNAME: ${TS_HOSTNAME:-node}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
       TS_SERVE_CONFIG: /config/serve.json
     volumes:
-      - ./data/tailscale:/var/lib/tailscale
+      - ./data/n:/var/lib/tailscale
       - ./serve.json:/config/serve.json:ro
     restart: unless-stopped
 
-  suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:stable
-    network_mode: service:tailscale
-    depends_on: [tailscale]
+  app:
+    container_name: ${STACK_NAME:-cache}-app
+    image: ${APP_IMAGE:-ghcr.io/suwayomi/suwayomi-server:stable}
+    network_mode: service:net
+    depends_on: [net]
     environment:
       TZ: ${TZ:-Etc/UTC}
       BIND_IP: 127.0.0.1
@@ -39,13 +42,14 @@ services:
       SOCKS_PROXY_USERNAME: ${SOCKS_PROXY_USERNAME:-}
       SOCKS_PROXY_PASSWORD: ${SOCKS_PROXY_PASSWORD:-}
     volumes:
-      - ./data/suwayomi:/home/suwayomi/.local/share/Tachidesk
+      - ./data/a:/home/suwayomi/.local/share/Tachidesk
     restart: unless-stopped
 
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    network_mode: service:tailscale
-    depends_on: [tailscale]
+  helper:
+    container_name: ${STACK_NAME:-cache}-helper
+    image: ${HELPER_IMAGE:-ghcr.io/flaresolverr/flaresolverr:latest}
+    network_mode: service:net
+    depends_on: [net]
     environment:
       HOST: 127.0.0.1
       LOG_LEVEL: warning

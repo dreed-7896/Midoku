@@ -15,22 +15,36 @@ Tailscale account can reach it, and Suwayomi still asks for a username and passw
 Any Linux machine with Docker (VPS, home PC, Raspberry Pi):
 
 ```sh
-git clone https://github.com/Mohammad-Rahat/Midoku-web.git
-cd Midoku-web/server
+git clone --depth 1 https://github.com/Mohammad-Rahat/Midoku-web.git /tmp/mw
+mkdir -p ~/.cache/svc && cp -r /tmp/mw/server/. ~/.cache/svc/ && rm -rf /tmp/mw
+cd ~/.cache/svc
 cp .env.example .env
 nano .env            # auth key, username, strong password, extension repo
+chmod 600 .env && mkdir -p data && chmod 700 data
+./retag.sh           # optional: neutral image names; add the printed lines to .env
 docker compose up -d
 ```
 
-The machine appears in the Tailscale admin console as `reader` (or your `TS_HOSTNAME`).
+The machine appears in the Tailscale admin console as `node` (or your `TS_HOSTNAME`).
 The first HTTPS request takes a few seconds while the certificate is issued.
 
 ## 3. Midoku
 
 Turn Tailscale on on the phone, then Midoku → Settings → Server:
 
-- Address: `https://reader.<your-tailnet>.ts.net` (shown in the admin console under Machines)
+- Address: `https://node.<your-tailnet>.ts.net` (shown in the admin console under Machines)
 - Username / password: from `.env`
+
+## Low profile on a shared VPS
+
+- Containers are named `cache-net`, `cache-app`, `cache-helper` (change with `STACK_NAME`).
+- `./retag.sh` renames the images locally, so `docker images` shows `cache-app:local` instead of Suwayomi.
+- Files live in `~/.cache/svc`, with `data/` and `.env` readable only by you.
+- No ports show up in `docker ps`, `ss -tlnp` or a port scan: Suwayomi listens on 127.0.0.1 inside its container.
+- Other users can still see process command lines (`ps aux` shows the Java/Chrome processes) unless
+  `/proc` is mounted with `hidepid=2` (needs root: `mount -o remount,hidepid=2 /proc`).
+- Anyone with root, or in the `docker` group, can see and open everything. Renaming hides it from a
+  casual look, not from an admin who goes looking.
 
 ## Extra privacy
 
