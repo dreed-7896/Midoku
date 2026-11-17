@@ -13,6 +13,7 @@ import './styles.css'
 
 // Home and Library open with the app; the other screens load the first time they are opened.
 const EntryPage = lazy(() => import('./pages/Entry'))
+const History = lazy(() => import('./pages/History'))
 const Reader = lazy(() => import('./pages/Reader'))
 const Search = lazy(() => import('./pages/Search'))
 const SettingsPage = lazy(() => import('./pages/Settings'))
@@ -40,6 +41,7 @@ function App() {
         <Route path="/sources" element={<Screen page={Sources} />} />
         <Route path="/sources/:id" element={<Screen page={SourceBrowse} />} />
         <Route path="/read/:entryId/:chapterId" element={<Screen page={Reader} />} />
+        <Route path="/history" element={<Screen page={History} />} />
         <Route path="/settings" element={<Screen page={SettingsPage} />} />
         <Route path="*" element={<Home />} />
       </StackRoutes>

@@ -24,7 +24,10 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - Offline: download chapters from a title (or select chapters → Save); the library and titles opened in the last 3 days stay available offline, and changes made offline sync when back online. Settings → Storage shows what is kept.
 - Chapters: long-press a chapter to pick which version (source) to read, split a long chapter into parts, insert a chapter from another title or source, bookmark, download or hide it.
 - Titles: edit the title, author, description, cover and reading status (⋯ → Edit details, or tap the cover).
-- Library: Select titles to group them into a series or merge their chapters into one title, file them into tabs or remove them. The shuffle button opens a random title from the tab (hold for the whole library). Filter sheet → Find duplicates.
+- Library: the ⋯ button has Check for new chapters, Select titles (group into a series or merge chapters into one title, file into tabs, remove), Random title (this tab or the whole library), History and Find duplicates.
+- History: recently read titles by day, with resume and remove (Home's clock button or Library ⋯).
+- Reader: Webtoon, Paged or Right to left, as a device default or per title (reader top bar). Pinch or double-tap to zoom in paged modes.
+- Not planned: trackers (AniList, MyAnimeList).
 - Chapters: long-press a chapter → Move to change the reading order, or Add to entry to put it in another library entry (Select → Add to for several).
 - New chapters: checked on launch (every 6 hours) or with the refresh button in Library.
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".

@@ -32,6 +32,7 @@ export default function Home() {
   return (
     <div className="page">
       <PageHead kicker={`${weekday} · ${totalNew} new chapters`} title="Feed">
+        <IconButton icon="clock" label="History" onClick={() => nav.go('/history')} />
         <IconButton icon="settings" label="Settings" onClick={() => nav.go('/settings')} />
         <IconButton icon="bell" label={`Notifications, ${totalNew} new`} badge={totalNew || undefined} />
       </PageHead>

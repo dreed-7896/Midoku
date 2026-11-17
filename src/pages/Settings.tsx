@@ -1,3 +1,4 @@
+import { READER_LABEL, type ReaderMode } from '../data/types'
 import { useEffect, useState } from 'react'
 import { IconButton } from '../components/Chrome'
 import { Icon } from '../components/Icon'
@@ -77,12 +78,13 @@ export default function SettingsPage() {
         <div className="setting">
           <div className="setting__text">
             <strong>Default mode</strong>
-            <span className="card-meta card-meta--wrap">Webtoon scrolls down without breaks. Paged turns one page at a time.</span>
+            <span className="card-meta card-meta--wrap">Webtoon scrolls down without breaks. Paged turns one page at a time; right to left turns the other way, for manga. A title can have its own mode (reader's top bar).</span>
           </div>
         </div>
         <div className="segmented segmented--lg">
-          <button type="button" className={settings.readerMode === 'webtoon' ? 'is-on' : ''} onClick={() => updateSettings({ readerMode: 'webtoon' })}>Webtoon</button>
-          <button type="button" className={settings.readerMode === 'paged' ? 'is-on' : ''} onClick={() => updateSettings({ readerMode: 'paged' })}>Paged</button>
+          {(Object.keys(READER_LABEL) as ReaderMode[]).map((m) => (
+            <button key={m} type="button" className={settings.readerMode === m ? 'is-on' : ''} onClick={() => updateSettings({ readerMode: m })}>{READER_LABEL[m]}</button>
+          ))}
         </div>
       </section>
 

@@ -117,6 +117,9 @@ export interface ChapterStateRow {
   removed: boolean
   preferred: boolean
   position: number | null
+  /** Set when the chapter is read in the reader; drives the History screen. */
+  read_at?: string | null
+  chapter_label?: string | null
 }
 export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }
 export interface InsertedRow {
@@ -267,3 +270,14 @@ export const deleteEntryRow = (id: string) => enqueue({ kind: 'delete', table: '
 /** Merges titles into `keep` in the database (see merge_entries in the migrations). */
 export const mergeEntryRows = (keep: string, parts: string[], segments: number[]) =>
   enqueue({ kind: 'rpc', fn: 'merge_entries', args: { keep, parts, segments } })
+
+/** Clears reading history for one title (its row id), or for everything. */
+export const clearHistoryRows = (entry: string | null) => enqueue({ kind: 'rpc', fn: 'clear_history', args: { entry } })
+
+export interface HistoryRow { entry_id: string; source_id: string; chapter_url: string; chapter_label: string | null; chapter_number: number | null; page: number; read: boolean; read_at: string }
+/** Recently read chapters, newest first. Waits for queued changes so the latest reads are included. */
+export async function loadHistory(limit = 400): Promise<HistoryRow[]> {
+  await flushWrites()
+  return all<HistoryRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_label, chapter_number, page, read, read_at')
+    .not('read_at', 'is', null).order('read_at', { ascending: false }).limit(limit))
+}

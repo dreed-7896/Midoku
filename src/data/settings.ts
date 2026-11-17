@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react'
+import type { ReaderMode } from './types'
 
 /** Per-device preferences, kept in localStorage. */
 export interface Settings {
-  readerMode: 'webtoon' | 'paged'
+  readerMode: ReaderMode
   /** Passkey credential id used for the app lock; empty when the lock is off. */
   lockCredential: string
   /** Seconds in the background before the app locks again. */

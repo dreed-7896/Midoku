@@ -4,15 +4,17 @@ import {
   DbLibrary, deleteEntryRow, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
   saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
+import type { ChapterStateRow } from './db'
 import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
 import {
   applyCustom, applyStates, entriesFromDb, LOCAL, entryRow, expandSplits, insertedFromRow, shownPages, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
   sourceRow, stateRow, statesOf, tabRow, toTab, withDownloads, withInserted,
 } from './library'
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
+import { recordLocalHistory } from './history'
 import { useSettings } from './settings'
 import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
-import type { Chapter, CustomDetails, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
+import type { Chapter, CustomDetails, ReaderMode, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
 
 /*
  * Where things live:
@@ -168,10 +170,10 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       return dbId
     }
 
-    const saveChapters = (id: string, chapterIds: Set<string>) => {
+    const saveChapters = (id: string, chapterIds: Set<string>, extra?: Partial<ChapterStateRow>) => {
       const dbId = ensureEntry(id)
       if (!dbId) return
-      const rows = (find(id)?.chapters ?? []).filter((c) => chapterIds.has(c.id) && c.sourceUrl).map((c) => stateRow(dbId, c))
+      const rows = (find(id)?.chapters ?? []).filter((c) => chapterIds.has(c.id) && c.sourceUrl).map((c) => ({ ...stateRow(dbId, c), ...extra }))
       if (rows.length) saveChapterStates(rows)
     }
 
@@ -542,9 +544,16 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
             }),
           }),
         }))
-        saveChapters(e.id, new Set([chapterId]))
+        // History names the chapter as it was shown (a part keeps its own name).
+        const label = (part ?? shown.find((c) => c.id === chapterId) ?? e.chapters.find((c) => c.id === chapterId))?.label ?? ''
+        const at = new Date().toISOString()
+        saveChapters(e.id, new Set([chapterId]), { read_at: at, chapter_label: label })
+        if (get().server.status === 'off') {
+          const c = find(e.id)?.chapters.find((x) => x.id === chapterId)
+          recordLocalHistory({ entryId: e.id, chapterId: part?.id ?? chapterId, label, page: pageIn, read: !!c?.read, at: Date.now() })
+        }
         const dbId = find(e.id)?.dbId
-        if (dbId) updateEntry(dbId, { last_read_at: new Date().toISOString() })
+        if (dbId) updateEntry(dbId, { last_read_at: at })
       },
       /** Adds a category tab and returns its id. */
       createTab: (name: string) => {
@@ -588,6 +597,16 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         // A series made in Midoku has nothing from a server: its details are all its own.
         if (e.sources.length === 0 && !custom.title) custom.title = e.title
         editEntry(e.id, (x) => applyCustom(x, custom))
+        const dbId = ensureEntry(e.id)
+        if (dbId) updateEntry(dbId, { custom })
+      },
+      /** Reading mode for one title; undefined goes back to the device default. */
+      setReaderMode: (id: string, mode: ReaderMode | undefined) => {
+        const e = find(id)
+        if (!e) return
+        const custom: CustomDetails = { ...e.custom, reader: mode }
+        if (!mode) delete custom.reader
+        editEntry(e.id, (x) => ({ ...x, custom }))
         const dbId = ensureEntry(e.id)
         if (dbId) updateEntry(dbId, { custom })
       },

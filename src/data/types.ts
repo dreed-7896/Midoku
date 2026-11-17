@@ -18,7 +18,12 @@ export interface CustomDetails {
   /** An image address or a picture saved as a data URL. */
   cover?: string
   status?: ManualStatus
+  /** Reading mode for this title; the device default is used without one. */
+  reader?: ReaderMode
 }
+
+export type ReaderMode = 'webtoon' | 'paged' | 'rtl'
+export const READER_LABEL: Record<ReaderMode, string> = { webtoon: 'Webtoon', paged: 'Paged', rtl: 'Right to left' }
 
 export interface CoverArt {
   c1: string

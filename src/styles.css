@@ -79,6 +79,8 @@ a { color: inherit; text-decoration: none; }
 .icon-btn { width: 44px; height: 44px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--s1); color: var(--text); position: relative; padding: 0; }
 .icon-btn--glass { background: rgba(9, 9, 11, 0.42); border-color: rgba(255, 255, 255, 0.12); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .icon-btn--sm { width: 36px; height: 36px; border: 0; background: var(--s3); }
+.icon-btn--accent { background: var(--accent); color: var(--on-accent); }
+.icon-btn--accent:disabled { opacity: 0.5; }
 .icon-btn--xl { width: 56px; height: 56px; }
 .icon-btn.is-active, .icon-btn.is-accent { color: var(--accent); border-color: var(--accent); }
 .icon-btn.is-spinning svg { animation: spin 0.9s linear infinite; }
@@ -562,3 +564,17 @@ body:has(.action-bar) .mini { display: none; }
 /* No visible scrollbars anywhere; scrolling still works by touch, wheel and keyboard. */
 * { scrollbar-width: none; }
 *::-webkit-scrollbar { display: none; }
+
+/* History */
+.history-row { gap: 8px; }
+.history-row .order-row__cover { width: 38px; }
+.history-row .check-row__name { min-width: 0; }
+
+/* Paged reader: zoom and right to left */
+.zoom { position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: pan-x; }
+.zoom.is-zoomed { touch-action: none; }
+.zoom__inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transform-origin: center; will-change: transform; }
+.reader.is-zoomed .reader__scroll { overflow: hidden; }
+.reader--rtl .reader__scroll { direction: rtl; }
+.reader--rtl .pg-page, .reader--rtl .reader__end { direction: ltr; }
+.reader--rtl .reader__slider input { direction: rtl; }

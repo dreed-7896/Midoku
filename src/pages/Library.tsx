@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, ServerStatus, Sheet } from '../components/Chrome'
-import { Icon } from '../components/Icon'
+import { Icon, type IconName } from '../components/Icon'
 import { Banner, Empty, Loading } from '../components/Status'
 import { EntryGrid, type Pick } from '../components/LibraryCards'
 import { DuplicatesSheet, GroupSheet } from '../components/LibraryTools'
@@ -45,8 +45,7 @@ export default function Library() {
   const [picked, setPicked] = useState<string[]>([])
   const [tool, setTool] = useState<null | 'group' | 'tabs' | 'dupes'>(null)
   const nav = useNav()
-  const shuffleTimer = useRef<ReturnType<typeof setTimeout>>()
-  const shuffleLong = useRef(false)
+  const [more, setMore] = useState(false)
   const pager = useRef<HTMLDivElement>(null)
   const strip = useRef<HTMLDivElement>(null)
 
@@ -126,7 +125,7 @@ export default function Library() {
       : roots
     return [...base, ...base.flatMap((e) => store.children(e.id))]
   }
-  /** Opens a random title from this tab; a long press picks from the whole library. */
+  /** Opens a random title from this tab, or from the whole library. */
   const shuffle = (everything: boolean) => {
     const pool = (everything ? store.entries.filter((e) => e.inLibrary) : inTab(tab)).filter((e) => e.sources.length || e.chapters.length)
     if (!pool.length) { store.toast('Nothing to pick from'); return }
@@ -140,20 +139,9 @@ export default function Library() {
   return (
     <div className="page library">
       <PageHead kicker={`${roots.length} titles · ${unreadTotal} unread`} title="Library">
-        {store.server.status !== 'off' && (
-          <IconButton icon="refresh" label={store.updating ? `Checking ${store.updating.done} of ${store.updating.total}` : 'Check for new chapters'}
-            active={!!store.updating} onClick={() => void store.checkUpdates()} />
-        )}
-        <button type="button" className="icon-btn" aria-label="Random title from this tab (hold for the whole library)" title="Hold for the whole library"
-          onPointerDown={() => { shuffleLong.current = false; shuffleTimer.current = setTimeout(() => { shuffleLong.current = true; navigator.vibrate?.(10); shuffle(true) }, 450) }}
-          onPointerUp={() => clearTimeout(shuffleTimer.current)} onPointerLeave={() => clearTimeout(shuffleTimer.current)}
-          onContextMenu={(e) => { e.preventDefault(); clearTimeout(shuffleTimer.current); shuffleLong.current = true; shuffle(true) }}
-          onClick={() => { if (!shuffleLong.current) shuffle(false); shuffleLong.current = false }}>
-          <Icon name="shuffle" />
-        </button>
-        <IconButton icon="select" label={picking ? 'Done selecting' : 'Select titles'} active={picking} onClick={() => (picking ? stopPicking() : setPicking(true))} />
         <IconButton icon="search" label="Search library" active={searching} onClick={() => { setSearching((s) => !s); setQuery('') }} />
         <IconButton icon="sliders" label={`Filter and sort, ${filterCount} filters active`} badge={filterCount || undefined} onClick={() => setSheet(true)} />
+        <IconButton icon="more" label="More library actions" active={!!store.updating} onClick={() => setMore(true)} />
       </PageHead>
 
       <ServerStatus />
@@ -235,16 +223,29 @@ export default function Library() {
             </div>
           </>
         )}
-        <div className="label">Tidy up</div>
-        <button type="button" className="btn btn--ghost btn--block btn--flush" onClick={() => { setSheet(false); setTool('dupes') }}><Icon name="layers" size={16} />Find duplicates</button>
         <div className="sheet__actions">
           <button type="button" className="btn btn--ghost" onClick={() => setFilters(EMPTY)}>Clear filters</button>
           <button type="button" className="btn btn--accent" onClick={saveFiltersAsTab} disabled={!filterCount}>Save as tab</button>
         </div>
       </Sheet>
 
+      <Sheet open={more} title="Library" onClose={() => setMore(false)}>
+        <div className="menu">
+          {store.server.status !== 'off' && (
+            <MenuRow icon="refresh" title={store.updating ? `Checking ${store.updating.done} of ${store.updating.total}…` : 'Check for new chapters'}
+              detail="Asks the server for new chapters of followed titles" onClick={() => { setMore(false); void store.checkUpdates() }} />
+          )}
+          <MenuRow icon="select" title="Select titles" detail="Group, file into tabs or remove several at once" onClick={() => { setMore(false); setPicking(true) }} />
+          <MenuRow icon="shuffle" title="Random title" detail={`From ${tab.name}`} onClick={() => { setMore(false); shuffle(false) }} />
+          <MenuRow icon="shuffle" title="Random from the whole library" onClick={() => { setMore(false); shuffle(true) }} />
+          <MenuRow icon="clock" title="History" detail="Chapters you read, newest first" onClick={() => { setMore(false); nav.go('/history') }} />
+          <MenuRow icon="layers" title="Find duplicates" detail="Same name or same source title" onClick={() => { setMore(false); setTool('dupes') }} />
+        </div>
+      </Sheet>
+
       {picking && (
         <div className="action-bar" role="toolbar" aria-label="Title actions">
+          <button type="button" onClick={stopPicking} aria-label="Done selecting"><Icon name="x" size={18} />Done</button>
           <span className="action-bar__count">{picked.length} selected</span>
           <button type="button" disabled={picked.length < 2} onClick={() => setTool('group')}><Icon name="layers" size={18} />Group</button>
           <button type="button" disabled={!picked.length} onClick={() => setTool('tabs')}><Icon name="folder" size={18} />Tabs</button>
@@ -283,6 +284,15 @@ export default function Library() {
     if (t.kind === 'tab') return roots.filter((e) => e.tabs.includes(t.id)).length
     return roots.filter((e) => matches(e, t.filters)).length
   }
+}
+
+function MenuRow({ icon, title, detail, onClick }: { icon: IconName; title: string; detail?: string; onClick: () => void }) {
+  return (
+    <button type="button" className="menu__row" onClick={onClick}>
+      <span className="menu__icon"><Icon name={icon} size={20} /></span>
+      <span className="menu__text"><strong>{title}</strong>{detail && <span>{detail}</span>}</span>
+    </button>
+  )
 }
 
 function TabPanel({ tab, filters, sort, groupBy, roots, pick }: { tab: LibraryTab; filters: LibraryFilters; sort: SortBy; groupBy: GroupBy; roots: Entry[]; pick?: Pick }) {

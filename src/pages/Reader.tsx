@@ -10,7 +10,7 @@ import { useStore, visibleChapters } from '../data/store'
 import { chapterKey, getSaved } from '../data/downloads'
 import { shownPages } from '../data/library'
 import { getPages } from '../data/suwayomi'
-import type { Chapter, CoverArt } from '../data/types'
+import { READER_LABEL, type Chapter, type CoverArt, type ReaderMode } from '../data/types'
 
 /**
  * Only pages within this distance of the current page are rendered; the rest are empty boxes that keep
@@ -52,8 +52,15 @@ export default function Reader() {
   const { entryId = '', chapterId = '' } = useParams()
   const store = useStore()
   const nav = useNav()
-  const { readerMode: mode } = useSettings()
+  const { readerMode } = useSettings()
   const entry = store.entry(entryId)
+  // A title's own mode wins over the device default. Right to left is paged, turned the other way.
+  const titleMode = entry?.custom?.reader
+  const chosen: ReaderMode = titleMode ?? readerMode
+  const mode = chosen === 'webtoon' ? 'webtoon' : 'paged'
+  const [modes, setModes] = useState(false)
+  const [zoomed, setZoomed] = useState(false)
+  const tapTimer = useRef<ReturnType<typeof setTimeout>>()
   // Parts of split chapters and inserted chapters are found among the shown chapters.
   const chapter = entry ? visibleChapters(entry).find((c) => c.id === chapterId) ?? entry.chapters.find((c) => c.id === chapterId) : undefined
   const [versions, setVersions] = useState(false)
@@ -139,7 +146,7 @@ export default function Reader() {
     scrollToPage(startPage.current)
     setUi(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId, mode, pages])
+  }, [chapterId, chosen, pages])
 
   // The page crossing the middle of the screen is the current page.
   useEffect(() => {
@@ -154,7 +161,7 @@ export default function Reader() {
     const endEl = root.querySelector('.reader__end')
     if (endEl) end.observe(endEl)
     return () => { io.disconnect(); end.disconnect() }
-  }, [chapterId, mode, pages, urls])
+  }, [chapterId, chosen, pages, urls])
 
   // Save progress shortly after the page settles; the last page marks the chapter read.
   useEffect(() => {
@@ -189,8 +196,13 @@ export default function Reader() {
   const list = Array.from({ length: pages }, (_, i) => i + 1)
 
   return (
-    <div className={`reader reader--${mode}`}>
-      <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => setUi((v) => !v)}>
+    <div className={`reader reader--${mode}${chosen === 'rtl' ? ' reader--rtl' : ''}${zoomed ? ' is-zoomed' : ''}`}>
+      <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => {
+        // Paged pages zoom on a double tap, so a single tap waits a moment before toggling the controls.
+        if (mode === 'webtoon') { setUi((v) => !v); return }
+        if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = undefined; return }
+        tapTimer.current = setTimeout(() => { tapTimer.current = undefined; setUi((v) => !v) }, 260)
+      }}>
         {isRemote && !urls && (
           <div className="reader__loading" onClick={(e) => e.stopPropagation()}>
             {pagesError
@@ -212,7 +224,7 @@ export default function Reader() {
                 {near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="wt-img" onLoad={onLoad} fromDevice={fromDevice} />}
               </div>
             ) : (
-              <div key={n} className="pg-page" data-page={n}>{near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" fromDevice={fromDevice} />}</div>
+              <div key={n} className="pg-page" data-page={n}>{near && <Zoomable active={n === page} onZoom={setZoomed}><RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" fromDevice={fromDevice} /></Zoomable>}</div>
             )
           }
           return mode === 'webtoon' ? (
@@ -220,7 +232,7 @@ export default function Reader() {
               {near && <WebtoonContent n={n} art={entry.art} />}
             </div>
           ) : (
-            <div key={n} className="pg-page" data-page={n}>{near && <PagedContent n={n} />}</div>
+            <div key={n} className="pg-page" data-page={n}>{near && <Zoomable active={n === page} onZoom={setZoomed}><PagedContent n={n} /></Zoomable>}</div>
           )
         })}
         {(!isRemote || urls) && <div className="reader__end" onClick={(e) => e.stopPropagation()}>
@@ -247,9 +259,8 @@ export default function Reader() {
             </button>
           ) : <span className="reader__chapter">{chapter.label} · {chapter.part ?? chapter.title}</span>}
         </div>
-        <button type="button" className="icon-btn icon-btn--glass" aria-label={mode === 'webtoon' ? 'Switch to paged mode' : 'Switch to webtoon mode'}
-          onClick={() => updateSettings({ readerMode: mode === 'webtoon' ? 'paged' : 'webtoon' })}>
-          <Icon name={mode === 'webtoon' ? 'paged' : 'webtoon'} />
+        <button type="button" className="icon-btn icon-btn--glass" aria-label={`Reading mode: ${READER_LABEL[chosen]}`} onClick={() => setModes(true)}>
+          <Icon name={mode === 'webtoon' ? 'webtoon' : 'paged'} />
         </button>
       </header>
 
@@ -266,6 +277,28 @@ export default function Reader() {
           <Icon name="next" />
         </button>
       </footer>
+      <Sheet open={modes} title="Reading mode" onClose={() => setModes(false)}>
+        <div className="label label--flush">For {entry.title}</div>
+        <div className="check-list">
+          <button type="button" className="check-row" onClick={() => { store.setReaderMode(entry.id, undefined); setModes(false) }}>
+            <span className="check-row__name">Default<span className="card-meta"> · {READER_LABEL[readerMode]}</span></span>
+            {!titleMode && <Icon name="check" size={18} />}
+          </button>
+          {(Object.keys(READER_LABEL) as ReaderMode[]).map((m) => (
+            <button key={m} type="button" className="check-row" onClick={() => { store.setReaderMode(entry.id, m); setModes(false) }}>
+              <span className="check-row__name">{READER_LABEL[m]}</span>
+              {titleMode === m && <Icon name="check" size={18} />}
+            </button>
+          ))}
+        </div>
+        <div className="label">Default for other titles</div>
+        <div className="segmented">
+          {(Object.keys(READER_LABEL) as ReaderMode[]).map((m) => (
+            <button key={m} type="button" className={readerMode === m ? 'is-on' : ''} onClick={() => updateSettings({ readerMode: m })}>{READER_LABEL[m]}</button>
+          ))}
+        </div>
+        <p className="hint">Paged pages zoom with a pinch or a double tap.</p>
+      </Sheet>
       <Sheet open={versions} title={`${chapter.label} · versions`} onClose={() => setVersions(false)}>
         <div className="check-list">
           {chapter.alts?.map((a, i) => (
@@ -277,6 +310,100 @@ export default function Reader() {
         </div>
       </Sheet>
       <span className="reader__line" style={{ width: `${pages ? (Math.min(page, pages) / pages) * 100 : 0}%` }} aria-hidden="true" />
+    </div>
+  )
+}
+
+/**
+ * Pinch and double-tap zoom for a paged page. While zoomed, one finger pans the page and the pager stops
+ * turning pages; zooming back out (or leaving the page) hands swiping back to the pager.
+ */
+function Zoomable({ active, onZoom, children }: { active: boolean; onZoom: (zoomed: boolean) => void; children: React.ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  const view = useRef({ s: 1, x: 0, y: 0 })
+  const g = useRef<{ d0: number; s0: number; mx: number; my: number; x0: number; y0: number; px?: number; py?: number; moved: boolean; t: number } | null>(null)
+  const lastTap = useRef(0)
+  const [isZoomed, setIsZoomed] = useState(false)
+  const zoomedRef = useRef(false)
+
+  const apply = (s: number, x: number, y: number, animate = false) => {
+    const el = box.current
+    if (!el) return
+    const w = el.clientWidth, h = el.clientHeight
+    s = Math.min(4, Math.max(1, s))
+    const mx = ((s - 1) * w) / 2, my = ((s - 1) * h) / 2
+    x = Math.min(mx, Math.max(-mx, x))
+    y = Math.min(my, Math.max(-my, y))
+    view.current = { s, x, y }
+    const inner = el.firstElementChild as HTMLElement | null
+    if (inner) {
+      inner.style.transition = animate ? 'transform 0.2s ease-out' : 'none'
+      inner.style.transform = s === 1 ? '' : `translate(${x}px, ${y}px) scale(${s})`
+    }
+    const z = s > 1.01
+    if (z !== zoomedRef.current) { zoomedRef.current = z; setIsZoomed(z); onZoom(z) }
+  }
+
+  // Leaving the page resets it.
+  useEffect(() => { if (!active && view.current.s !== 1) apply(1, 0, 0) })
+  useEffect(() => () => { if (view.current.s > 1.01) onZoom(false) }, [onZoom])
+
+  const center = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 } }
+  const onTouchStart = (e: React.TouchEvent) => {
+    const el = box.current
+    if (!el) return
+    const { s, x, y } = view.current
+    if (e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]]
+      const { cx, cy } = center(el)
+      g.current = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), s0: s, mx: (a.clientX + b.clientX) / 2 - cx, my: (a.clientY + b.clientY) / 2 - cy, x0: x, y0: y, moved: true, t: Date.now() }
+      onZoom(true)
+    } else if (e.touches.length === 1) {
+      g.current = { d0: 0, s0: s, mx: 0, my: 0, x0: x, y0: y, px: e.touches[0].clientX, py: e.touches[0].clientY, moved: false, t: Date.now() }
+    }
+  }
+  const onTouchMove = (e: React.TouchEvent) => {
+    const st = g.current
+    const el = box.current
+    if (!st || !el) return
+    if (e.touches.length === 2 && st.d0) {
+      const [a, b] = [e.touches[0], e.touches[1]]
+      const { cx, cy } = center(el)
+      const s = Math.min(4, Math.max(1, st.s0 * (Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / st.d0)))
+      const mx = (a.clientX + b.clientX) / 2 - cx, my = (a.clientY + b.clientY) / 2 - cy
+      // Keep the point under the fingers in place while scaling, and follow the fingers as they move.
+      apply(s, mx - (st.mx - st.x0) * (s / st.s0), my - (st.my - st.y0) * (s / st.s0))
+    } else if (e.touches.length === 1 && st.px !== undefined) {
+      const dx = e.touches[0].clientX - st.px, dy = e.touches[0].clientY - st.py!
+      if (Math.abs(dx) + Math.abs(dy) > 8) st.moved = true
+      if (view.current.s > 1.01) apply(view.current.s, st.x0 + dx, st.y0 + dy)
+    }
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const st = g.current
+    if (e.touches.length === 1 && view.current.s > 1.01) {
+      // One finger left after a pinch: carry on panning from here.
+      const { x, y } = view.current
+      g.current = { d0: 0, s0: view.current.s, mx: 0, my: 0, x0: x, y0: y, px: e.touches[0].clientX, py: e.touches[0].clientY, moved: true, t: Date.now() }
+      return
+    }
+    if (e.touches.length) return
+    g.current = null
+    if (view.current.s < 1.05) apply(1, 0, 0, true)
+    if (!st || st.moved || st.d0 || Date.now() - st.t > 250) return
+    const now = Date.now()
+    if (now - lastTap.current < 300) {
+      lastTap.current = 0
+      const el = box.current!
+      const { cx, cy } = center(el)
+      if (view.current.s > 1.01) apply(1, 0, 0, true)
+      else { const s = 2.5, px = st.px! - cx, py = st.py! - cy; apply(s, px * (1 - s), py * (1 - s), true) }
+    } else lastTap.current = now
+  }
+
+  return (
+    <div ref={box} className={`zoom${isZoomed ? ' is-zoomed' : ''}`} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
+      <div className="zoom__inner">{children}</div>
     </div>
   )
 }
