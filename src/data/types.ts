@@ -51,6 +51,8 @@ export interface Chapter {
   layout: number
   /** Suwayomi chapter id, for chapters that come from the server. */
   remoteId?: number
+  /** The source's chapter url; reading state in Midoku's database is keyed by it. */
+  sourceUrl?: string
 }
 
 export interface EntrySource {
@@ -84,8 +86,12 @@ export interface Entry {
   addedOrder: number
   /** Real cover image; the drawn placeholder is used until it loads. */
   coverUrl?: string
+  /** Server path of the cover, kept in Midoku's database. */
+  coverPath?: string
   /** Set for titles that come from the Suwayomi server. */
-  remote?: { mangaId: number; url?: string; chaptersLoaded: boolean }
+  remote?: { mangaId: number; sourceId: string; mangaUrl: string; url?: string; chaptersLoaded: boolean }
+  /** Row id in Midoku's database once the title has been saved there. */
+  dbId?: string
   /** Chapter totals from the library list, used before the chapters themselves are loaded. */
   counts?: { total: number; unread: number }
 }

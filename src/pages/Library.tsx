@@ -32,7 +32,7 @@ function sorter(sort: SortBy) {
 export default function Library() {
   const store = useStore()
   const tabs = store.tabs
-  const [active, setActive] = useState(() => Math.max(0, tabs.findIndex((t) => t.id === 'all')))
+  const [active, setActive] = useState(() => Math.max(0, tabs.findIndex((t) => t.kind === 'all')))
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY)
   const [groupBy, setGroupBy] = useState<GroupBy>('none')
   const [sort, setSort] = useState<SortBy>('recent')

@@ -83,13 +83,16 @@ export function UpdateCard() {
 export function ServerStatus() {
   const { server } = useStore()
   const nav = useNav()
-  if (server.status === 'loading') return <p className="hint pad-x pad-t">Loading your library from Suwayomi…</p>
-  if (server.status !== 'error') return null
+  if (server.status === 'loading') return <p className="hint pad-x pad-t">Loading your library…</p>
+  if (server.status !== 'error' && server.status !== 'signin') return null
+  const [title, detail] = server.status === 'signin'
+    ? ['Sign in to see your library', 'Your library, tabs and reading progress are kept in your Midoku account.']
+    : [server.where === 'library' ? "Couldn't load your library" : "Can't reach your server", server.error]
   return (
     <div className="pad-x pad-t">
       <div className="notice">
         <span className="notice__icon"><Icon name="alert" /></span>
-        <span className="grow"><strong>Can't reach your server</strong><span className="card-meta card-meta--wrap">{server.error}</span></span>
+        <span className="grow"><strong>{title}</strong><span className="card-meta card-meta--wrap">{detail}</span></span>
         <button type="button" className="btn btn--light btn--sm" onClick={() => nav.go('/settings')}>Settings</button>
       </div>
     </div>

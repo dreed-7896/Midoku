@@ -37,11 +37,12 @@ function Notice({ title, detail, onRetry }: { title: string; detail: string; onR
 const langLabel = (lang: string) => (lang === 'all' ? 'Multi' : lang.toUpperCase())
 
 function MangaCard({ m, rail }: { m: SMangaCard; rail?: boolean }) {
+  const saved = !!useStore().entry(`s${m.id}`)?.inLibrary
   return (
     <Link to={`/entry/s${m.id}`} className={rail ? 'rail__item' : 'card'}>
       <div className="thumb">
         <Cover art={artFor(m.id)} title={m.title} url={assetUrl(m.thumbnailUrl)} />
-        {m.inLibrary && <span className="badge badge--tl badge--glass"><Icon name="check" size={11} stroke={2.6} />Saved</span>}
+        {saved && <span className="badge badge--tl badge--glass"><Icon name="check" size={11} stroke={2.6} />Saved</span>}
       </div>
       <div className="card-title card-title--2">{m.title}</div>
     </Link>
@@ -267,7 +268,7 @@ export function RemoteBrowse() {
       {loading && <p className="hint center pad-t">Loading…</p>}
       {!loading && !error && items.length === 0 && sourceId && <p className="empty pad-x">No results.</p>}
       {!loading && hasNext && <div className="center pad-t"><button type="button" className="btn btn--ghost" onClick={() => setPage((p) => p + 1)}>Load more</button></div>}
-      {store.server.status === 'error' && <p className="hint pad-x">{store.server.error}</p>}
+      {store.server.status === 'error' && store.server.where === 'server' && <p className="hint pad-x">{store.server.error}</p>}
     </div>
   )
 }

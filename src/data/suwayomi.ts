@@ -29,7 +29,6 @@ export interface SMangaCard {
   id: number
   title: string
   thumbnailUrl: string | null
-  inLibrary: boolean
 }
 
 export interface SManga extends SMangaCard {
@@ -39,42 +38,33 @@ export interface SManga extends SMangaCard {
   genre: string[]
   status: string
   realUrl: string | null
+  url: string
   sourceId: string
   initialized: boolean
   source?: { id: string; displayName: string; iconUrl: string; lang: string } | null
-  unreadCount?: number
   chapters?: { totalCount: number }
-  lastReadChapter?: { lastReadAt: string } | null
   latestUploadedChapter?: { uploadDate: string } | null
-  categories?: { nodes: { id: number }[] }
-}
-
-export interface SCategory {
-  id: number
-  name: string
-  order: number
 }
 
 export interface SChapter {
   id: number
+  url: string
   name: string
   chapterNumber: number
   uploadDate: string
   scanlator: string | null
-  isRead: boolean
-  isBookmarked: boolean
   isDownloaded: boolean
-  lastPageRead: number
   pageCount: number
   sourceOrder: number
 }
 
 const EXT = 'pkgName name lang iconUrl versionName isInstalled hasUpdate isNsfw'
 const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw'
-const CARD = 'id title thumbnailUrl inLibrary'
-const MANGA = `${CARD} author artist description genre status realUrl sourceId initialized source { id displayName iconUrl lang }`
-const SUMMARY = `${MANGA} unreadCount chapters { totalCount } lastReadChapter { lastReadAt } latestUploadedChapter { uploadDate } categories { nodes { id } }`
-const CHAPTER = 'id name chapterNumber uploadDate scanlator isRead isBookmarked isDownloaded lastPageRead pageCount sourceOrder'
+const CARD = 'id title thumbnailUrl'
+const MANGA = `${CARD} author artist description genre status realUrl url sourceId initialized source { id displayName iconUrl lang }`
+// Only what the source says. Reading state on the server is ignored; Midoku keeps its own.
+const SUMMARY = `${MANGA} chapters { totalCount } latestUploadedChapter { uploadDate }`
+const CHAPTER = 'id url name chapterNumber uploadDate scanlator isDownloaded pageCount sourceOrder'
 
 export const isConnected = () => !!getSettings().serverUrl
 
@@ -191,61 +181,18 @@ export async function getChapters(mangaId: number, refresh = false): Promise<SCh
   return d.fetchChapters.chapters
 }
 
-export const getLibrary = () =>
-  gql<{ mangas: { nodes: SManga[] } }>(`{ mangas(condition: { inLibrary: true }) { nodes { ${SUMMARY} } } }`).then((d) => d.mangas.nodes)
+/** Chapter totals and newest upload for titles in the library, by server id. */
+export const getMangaSummaries = (ids: number[]) =>
+  ids.length
+    ? gql<{ mangas: { nodes: SManga[] } }>(`query($ids: [Int!]) { mangas(filter: { id: { in: $ids } }) { nodes { ${SUMMARY} } } }`, { ids })
+      .then((d) => d.mangas.nodes)
+    : Promise.resolve([])
 
 /** Page image URLs for a chapter. */
 export const getPages = (chapterId: number) =>
   gql<{ fetchChapterPages: { pages: string[] } }>(
     `mutation($id: Int!) { fetchChapterPages(input: { chapterId: $id }) { pages } }`, { id: chapterId },
   ).then((d) => d.fetchChapterPages.pages.map(assetUrl))
-
-export const setInLibrary = (id: number, inLibrary: boolean) =>
-  gql(`mutation($id: Int!) { updateManga(input: { id: $id, patch: { inLibrary: ${inLibrary} } }) { manga { id } } }`, { id })
-
-/** Suwayomi counts pages from 0; the app counts from 1. */
-export function saveChapterProgress(id: number, page: number, pages: number) {
-  const done = page >= pages
-  return gql(
-    `mutation($id: Int!, $page: Int!) { updateChapter(input: { id: $id, patch: { lastPageRead: $page${done ? ', isRead: true' : ''} } }) { chapter { id } } }`,
-    { id, page: Math.max(0, page - 1) },
-  )
-}
-
-export function updateChapters(ids: number[], patch: { isRead?: boolean; isBookmarked?: boolean }) {
-  const fields = Object.entries(patch).map(([k, v]) => `${k}: ${v}`).join(', ')
-  return gql(`mutation($ids: [Int!]!) { updateChapters(input: { ids: $ids, patch: { ${fields} } }) { chapters { id } } }`, { ids })
-}
-
-// Categories (the library tabs a person files titles into)
-
-/** Suwayomi's built-in "Default" category (id 0) holds uncategorised titles and is not shown as a tab. */
-export const getCategories = () =>
-  gql<{ categories: { nodes: SCategory[] } }>('{ categories { nodes { id name order } } }')
-    .then((d) => d.categories.nodes.filter((c) => c.id !== 0).sort((a, b) => a.order - b.order))
-
-export const createCategory = (name: string) =>
-  gql<{ createCategory: { category: SCategory } }>(
-    'mutation($name: String!) { createCategory(input: { name: $name }) { category { id name order } } }', { name },
-  ).then((d) => d.createCategory.category)
-
-export const renameCategory = (id: number, name: string) =>
-  gql('mutation($id: Int!, $name: String!) { updateCategory(input: { id: $id, patch: { name: $name } }) { category { id } } }', { id, name })
-
-export const deleteCategory = (id: number) =>
-  gql('mutation($id: Int!) { deleteCategory(input: { categoryId: $id }) { category { id } } }', { id })
-
-export function setMangaCategory(mangaId: number, categoryId: number, on: boolean) {
-  const key = on ? 'addToCategories' : 'removeFromCategories'
-  return gql(
-    `mutation($id: Int!, $cat: Int!) { updateMangaCategories(input: { id: $id, patch: { ${key}: [$cat] } }) { manga { id } } }`,
-    { id: mangaId, cat: categoryId },
-  )
-}
-
-/** Tab ids for server categories. */
-export const categoryTabId = (id: number) => `k${id}`
-export const categoryIdOf = (tabId: string) => (/^k\d+$/.test(tabId) ? Number(tabId.slice(1)) : undefined)
 
 // Mapping server data onto the app's model
 
@@ -260,7 +207,7 @@ const PALETTE: CoverArt[] = [
 export const artFor = (id: number): CoverArt => PALETTE[id % PALETTE.length]
 
 const HOUR = 3_600_000
-const hoursSince = (ms?: string | number | null) => {
+export const hoursSince = (ms?: string | number | null) => {
   const n = Number(ms)
   return n > 0 ? Math.max(0, (Date.now() - n) / HOUR) : undefined
 }
@@ -284,11 +231,13 @@ function toChapter(c: SChapter, sourceId: string): Chapter {
     title: c.scanlator ? `${c.name} · ${c.scanlator}` : c.name,
     date: uploaded > 0 ? new Date(uploaded).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '',
     pages: c.pageCount > 0 ? c.pageCount : 0,
-    page: c.isRead ? 0 : c.lastPageRead > 0 ? c.lastPageRead + 1 : 0,
-    read: c.isRead,
-    bookmarked: c.isBookmarked,
+    // Progress and marks come from Midoku's database, not from the server.
+    page: 0,
+    read: false,
+    bookmarked: false,
     downloaded: c.isDownloaded,
-    isNew: !c.isRead && uploaded > Date.now() - 7 * 24 * HOUR,
+    isNew: uploaded > Date.now() - 7 * 24 * HOUR,
+    sourceUrl: c.url,
     versions: 1,
     sourceId,
     layout: c.id % 4,
@@ -304,7 +253,7 @@ export function toEntry(m: SManga, chapters?: SChapter[]): Entry {
     art: artFor(m.id),
     coverUrl: assetUrl(m.thumbnailUrl),
     publishing: publishing(m.status),
-    tabs: (m.categories?.nodes ?? []).filter((c) => c.id !== 0).map((c) => categoryTabId(c.id)),
+    tabs: [],
     tags: m.genre ?? [],
     description: m.description ?? '',
     sources: [{
@@ -312,11 +261,11 @@ export function toEntry(m: SManga, chapters?: SChapter[]): Entry {
       name: m.source?.displayName, iconUrl: m.source?.iconUrl ? assetUrl(m.source.iconUrl) : undefined,
     }],
     chapters: (chapters ?? []).map((c) => toChapter(c, m.sourceId)),
-    inLibrary: m.inLibrary,
-    lastReadAgo: hoursSince(m.lastReadChapter?.lastReadAt),
+    inLibrary: false,
     updatedAgo: hoursSince(m.latestUploadedChapter?.uploadDate) ?? 1e6,
     addedOrder: m.id,
-    remote: { mangaId: m.id, url: m.realUrl ?? undefined, chaptersLoaded: !!chapters },
-    counts: { total, unread: m.unreadCount ?? 0 },
+    coverPath: m.thumbnailUrl ?? undefined,
+    remote: { mangaId: m.id, sourceId: m.sourceId, mangaUrl: m.url, url: m.realUrl ?? undefined, chaptersLoaded: !!chapters },
+    counts: { total, unread: total },
   }
 }

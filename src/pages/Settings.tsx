@@ -5,6 +5,7 @@ import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
 import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
+import { signIn, signOut, signUp, useAuth } from '../data/db'
 import { testServer } from '../data/suwayomi'
 import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
@@ -148,7 +149,7 @@ function ServerSection() {
     }
   }
   const disconnect = () => {
-    if (!window.confirm('Disconnect from this server? The app goes back to sample data. Nothing on the server changes.')) return
+    if (!window.confirm('Disconnect from this server? The app goes back to sample data. Your library stays in your account.')) return
     updateSettings({ serverUrl: '', serverUser: '', serverPass: '' })
     setUrl(''); setUser(''); setPass('')
   }
@@ -164,13 +165,12 @@ function ServerSection() {
               <strong>Suwayomi</strong>
               <span className="card-meta card-meta--wrap">{settings.serverUrl}</span>
               <span className="card-meta card-meta--wrap">
-                {store.server.status === 'ready' ? `Connected · ${store.entries.filter((e) => e.inLibrary).length} titles in your library`
-                  : store.server.status === 'loading' ? 'Connecting…'
-                  : `Not reachable: ${store.server.error ?? ''}`}
+                {store.server.status === 'error' && store.server.where === 'server' ? `Not reachable: ${store.server.error}` : 'Titles, chapters and extensions'}
               </span>
             </div>
           </div>
           <button type="button" className="btn btn--ghost btn--block" onClick={disconnect}>Disconnect</button>
+          <AccountSection />
         </>
       ) : (
         <>
@@ -192,5 +192,65 @@ function ServerSection() {
         </>
       )}
     </section>
+  )
+}
+
+/** Midoku's own account: the library, tabs and reading progress are kept here, never on the Suwayomi server. */
+function AccountSection() {
+  const auth = useAuth()
+  const store = useStore()
+  const [email, setEmail] = useState('')
+  const [pass, setPass] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  const go = async (action: 'in' | 'up') => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      if (action === 'in') await signIn(email.trim(), pass)
+      else if (await signUp(email.trim(), pass)) store.toast('Check your email to confirm the account, then sign in')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="label">Account</div>
+      {!auth.ready ? <p className="hint">Checking…</p> : auth.userId ? (
+        <>
+          <div className="setting">
+            <span className="setting__icon"><Icon name="shield" size={22} /></span>
+            <div className="setting__text">
+              <strong>{auth.email}</strong>
+              <span className="card-meta card-meta--wrap">
+                {store.server.status === 'ready' || (store.server.status === 'error' && store.server.where === 'server')
+                  ? `${store.entries.filter((e) => e.inLibrary).length} titles in your library`
+                  : store.server.status === 'error' ? store.server.error : 'Loading…'}
+              </span>
+            </div>
+          </div>
+          <button type="button" className="btn btn--ghost btn--block" onClick={() => signOut().catch((e: Error) => store.toast(e.message))}>Sign out</button>
+        </>
+      ) : (
+        <>
+          <p className="hint">Your library, tabs and reading progress are kept in your Midoku account, not on the server.</p>
+          <div className="form">
+            <label className="form__row"><span>Email</span>
+              <input className="field-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" autoCorrect="off" autoComplete="email" />
+            </label>
+            <label className="form__row"><span>Password</span>
+              <input className="field-input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="current-password" />
+            </label>
+          </div>
+          {error && <p className="form__error">{error}</p>}
+          <button type="button" className="btn btn--accent btn--block" disabled={busy || !email.trim() || !pass} onClick={() => go('in')}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          <button type="button" className="btn btn--ghost btn--block" disabled={busy || !email.trim() || pass.length < 6} onClick={() => go('up')}>Create account</button>
+        </>
+      )}
+    </>
   )
 }

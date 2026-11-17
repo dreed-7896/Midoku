@@ -20,8 +20,8 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - `npm run build` renders the PWA icons from `public/icon.svg`, type-checks and builds to `dist/`.
 - Screens: Home feed, Library (tabs, filters, groups, collections), Entry details, Search, Sources, Source browse, Reader (webtoon by default, paged optional), Settings.
 - Navigation is a native-style screen stack: pushes slide in from the right over the darkened previous screen; back reverses it. In the installed app, swiping from the left edge drags the screen away and reveals the real previous one.
-- Library: tabs you can swipe between (Reading, All, your own tabs, saved filters). Your own tabs are Suwayomi categories; the tab order and saved filters stay on the device and survive reloads.
+- Library: tabs you can swipe between (Reading, All, your own tabs, saved filters).
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".
 - App lock: a device passkey (Face ID / Touch ID / fingerprint) guards the app on this device. Turn it on in Settings.
-- State lives in `src/data/store.tsx`; swapping the mock for Suwayomi only needs that layer to change.
+- State lives in `src/data/store.tsx`. Suwayomi is read-only (titles, chapters, pages, extensions). The library, tabs and reading progress are stored in Supabase (`src/data/db.ts`, schema in `supabase/migrations/`); sign in under **Settings → Account**.
 - Icons: Hugeicons (`@hugeicons/react` + `@hugeicons/core-free-icons`).
