@@ -129,7 +129,6 @@ export interface InsertedRow {
   number: number
   label: string
   from_title: string
-  mode: 'chapter' | 'version'
 }
 export interface TabRow {
   id: string
@@ -169,7 +168,7 @@ export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
     all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
-    all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title, mode').eq('entry_id', entryId)),
+    all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
   ])
   return { states, splits, inserts }
 }

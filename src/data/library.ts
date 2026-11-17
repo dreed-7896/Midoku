@@ -220,11 +220,11 @@ export const snapshotOf = (entries: Entry[], tabs: LibraryTab[]): LibrarySnapsho
 
 export const insertedFromRow = (r: InsertedRow): InsertedChapter => ({
   id: r.id, sourceId: r.source_id, mangaUrl: r.manga_url, chapterUrl: r.chapter_url, remoteId: r.server_chapter_id ?? undefined,
-  number: Number(r.number), label: r.label, fromTitle: r.from_title, mode: r.mode === 'version' ? 'version' : 'chapter',
+  number: Number(r.number), label: r.label, fromTitle: r.from_title,
 })
 export const insertedRow = (dbId: string, i: InsertedChapter): InsertedRow => ({
   id: i.id, entry_id: dbId, source_id: i.sourceId, manga_url: i.mangaUrl, chapter_url: i.chapterUrl,
-  server_chapter_id: i.remoteId ?? null, number: i.number, label: i.label, from_title: i.fromTitle, mode: i.mode ?? 'chapter',
+  server_chapter_id: i.remoteId ?? null, number: i.number, label: i.label, from_title: i.fromTitle,
 })
 
 const insertedChapter = (i: InsertedChapter): Chapter => ({
@@ -233,36 +233,11 @@ const insertedChapter = (i: InsertedChapter): Chapter => ({
   sourceId: i.sourceId, sourceUrl: i.chapterUrl, remoteId: i.remoteId, layout: Math.abs(Math.round(i.number * 7)) % 4,
 })
 
-const ownVersion = (c: Chapter): ChapterVersion => ({ sourceId: c.sourceId, url: c.sourceUrl ?? '', remoteId: c.remoteId ?? 0, name: c.sourceId, title: c.title })
-
-/**
- * Puts inserted chapters into a chapter list (keeping the state of ones already there). Pasted versions
- * join the chapter with the same number as another version; without one they are chapters of their own.
- */
+/** Puts inserted chapters into a chapter list (keeping the state of ones already there). */
 export function withInserted(chapters: Chapter[], inserted: InsertedChapter[] = []): Chapter[] {
-  const ids = new Set(inserted.map((i) => i.id))
-  const out = chapters.filter((c) => !c.insertId || ids.has(c.insertId)).map((c) => {
-    if (!c.alts?.some((a) => a.insertId && !ids.has(a.insertId))) return c
-    const alts = c.alts.filter((a) => !a.insertId || ids.has(a.insertId))
-    const reading = alts.find((a) => a.url === c.sourceUrl && a.sourceId === c.sourceId)
-    const back = reading ? c : showVersion(c, alts[0], false)
-    return { ...back, alts, versions: alts.length }
-  })
-  const have = new Set(out.flatMap((c) => [c.insertId, ...(c.alts?.map((a) => a.insertId) ?? [])]).filter(Boolean))
-  for (const i of inserted) {
-    if (have.has(i.id)) continue
-    if (i.mode === 'version' && i.remoteId) {
-      const k = out.findIndex((c) => !c.insertId && Math.abs(c.number - i.number) < 1e-6)
-      if (k >= 0) {
-        const c = out[k]
-        const alts = [...(c.alts ?? [ownVersion(c)]), { sourceId: i.sourceId, url: i.chapterUrl, remoteId: i.remoteId, name: i.fromTitle || i.sourceId, title: i.label, insertId: i.id }]
-        out[k] = { ...c, alts, versions: alts.length }
-        continue
-      }
-    }
-    out.push(insertedChapter(i))
-  }
-  return out
+  const kept = chapters.filter((c) => !c.insertId || inserted.some((i) => i.id === c.insertId))
+  const have = new Set(kept.map((c) => c.insertId).filter(Boolean))
+  return [...kept, ...inserted.filter((i) => !have.has(i.id)).map(insertedChapter)]
 }
 
 // Split chapters: shown as parts, while reading state stays on the whole (physical) chapter.

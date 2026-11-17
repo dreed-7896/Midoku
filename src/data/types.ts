@@ -85,7 +85,7 @@ export interface Chapter {
   sourceNumber?: number
 }
 
-export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string; insertId?: string }
+export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string }
 
 export interface InsertedChapter {
   id: string
@@ -96,8 +96,6 @@ export interface InsertedChapter {
   number: number
   label: string
   fromTitle: string
-  /** 'version': another version of the chapter with the same number, instead of its own chapter. */
-  mode?: 'chapter' | 'version'
 }
 
 export interface EntrySource {
