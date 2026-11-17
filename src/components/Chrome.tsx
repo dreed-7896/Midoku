@@ -86,7 +86,7 @@ export function ServerStatus() {
   if (server.status === 'loading') return <p className="hint pad-x pad-t">Loading your library…</p>
   if (server.status !== 'error' && server.status !== 'signin') return null
   const [title, detail] = server.status === 'signin'
-    ? ['Sign in to see your library', 'Your library, tabs and reading progress are kept in your Midoku account.']
+    ? ['Locked', 'Enter the app password to see your library.']
     : [server.where === 'library' ? "Couldn't load your library" : "Can't reach your server", server.error]
   return (
     <div className="pad-x pad-t">

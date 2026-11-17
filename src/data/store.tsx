@@ -184,7 +184,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       const st = get().server.status
       if (st === 'off') return false
       if (st === 'signin') {
-        if (!warned) toast('Sign in from Settings to keep your library')
+        if (!warned) toast('Enter the app password to keep your library')
         warned = true
         return false
       }

@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Route, useLocation } from 'react-router-dom'
 import { MiniPlayer, TabBar, Toast, UpdateCard } from './components/Chrome'
-import { LockGate } from './components/Lock'
+import { LockGate, PasswordGate } from './components/Lock'
 import { StackRoutes } from './components/Nav'
 import { StoreProvider } from './data/store'
 import { registerServiceWorker } from './data/update'
@@ -41,6 +41,7 @@ function App() {
       )}
       <Toast />
       <LockGate />
+      <PasswordGate />
     </div>
   )
 }

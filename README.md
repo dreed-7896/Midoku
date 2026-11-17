@@ -23,5 +23,5 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - Library: tabs you can swipe between (Reading, All, your own tabs, saved filters).
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".
 - App lock: a device passkey (Face ID / Touch ID / fingerprint) guards the app on this device. Turn it on in Settings.
-- State lives in `src/data/store.tsx`. Suwayomi is read-only (titles, chapters, pages, extensions). The library, tabs and reading progress are stored in Supabase (`src/data/db.ts`, schema in `supabase/migrations/`); sign in under **Settings → Account**.
+- State lives in `src/data/store.tsx`. Suwayomi is read-only (titles, chapters, pages, extensions). The library, tabs and reading progress are stored in Supabase (`src/data/db.ts`, schema in `supabase/migrations/`); the app opens with a password screen (asked every 10 days per device; change it in **Settings → Privacy**).
 - Icons: Hugeicons (`@hugeicons/react` + `@hugeicons/core-free-icons`).

@@ -17,7 +17,26 @@ export const db = createClient(URL, KEY, { auth: { persistSession: true, autoRef
 interface Auth { ready: boolean; userId: string | null; email: string | null }
 let auth: Auth = { ready: false, userId: null, email: null }
 const listeners = new Set<() => void>()
+/** The password is asked again this long after it was last entered on the device. */
+const PASSWORD_DAYS = 10
+const ENTERED_KEY = 'midoku.passwordAt'
+const readEntered = () => { try { return Number(localStorage.getItem(ENTERED_KEY)) || 0 } catch { return 0 } }
+const writeEntered = (t: number | null) => {
+  try {
+    if (t) localStorage.setItem(ENTERED_KEY, String(t))
+    else localStorage.removeItem(ENTERED_KEY)
+  } catch {
+    // Without storage the session still works; the password is then asked on the next launch.
+  }
+}
+const expired = () => Date.now() - readEntered() > PASSWORD_DAYS * 86_400_000
+
 const setSession = (s: Session | null) => {
+  // An old session counts as locked; it is signed out so the password is asked again.
+  if (s && expired()) {
+    s = null
+    db.auth.signOut({ scope: 'local' }).catch(() => {})
+  }
   const next = { ready: true, userId: s?.user.id ?? null, email: s?.user.email ?? null }
   if (next.ready === auth.ready && next.userId === auth.userId && next.email === auth.email) return
   auth = next
@@ -25,21 +44,34 @@ const setSession = (s: Session | null) => {
 }
 db.auth.getSession().then(({ data }) => setSession(data.session))
 db.auth.onAuthStateChange((_event, s) => setSession(s))
+// An app left open in the background is checked again when it comes back.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && auth.userId && expired()) db.auth.getSession().then(({ data }) => setSession(data.session))
+})
 
 export const useAuth = () => useSyncExternalStore((l) => { listeners.add(l); return () => listeners.delete(l) }, () => auth)
 
 const fail = (error: { message: string } | null) => { if (error) throw new Error(error.message) }
 
-export async function signIn(email: string, password: string) {
-  fail((await db.auth.signInWithPassword({ email, password })).error)
+/**
+ * Midoku has a single built-in user; the app password is that user's password.
+ * Signing in keeps the session on the device; the password is asked again every 10 days (or after "Lock now").
+ */
+const OWNER_EMAIL = 'owner@midoku.invalid'
+
+export async function enterPassword(password: string) {
+  writeEntered(Date.now())
+  const { error } = await db.auth.signInWithPassword({ email: OWNER_EMAIL, password })
+  if (error) {
+    writeEntered(null)
+    throw new Error(/invalid/i.test(error.message) ? 'Wrong password.' : error.message)
+  }
 }
-/** Returns true when the account still has to be confirmed from the email. */
-export async function signUp(email: string, password: string) {
-  const { data, error } = await db.auth.signUp({ email, password })
-  fail(error)
-  return !data.session
+export async function changePassword(password: string) {
+  fail((await db.auth.updateUser({ password })).error)
 }
-export async function signOut() {
+export async function lockApp() {
+  writeEntered(null)
   fail((await db.auth.signOut()).error)
 }
 

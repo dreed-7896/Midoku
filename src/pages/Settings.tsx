@@ -5,7 +5,7 @@ import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
 import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
-import { signIn, signOut, signUp, useAuth } from '../data/db'
+import { changePassword, lockApp } from '../data/db'
 import { testServer } from '../data/suwayomi'
 import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
@@ -26,6 +26,19 @@ export default function SettingsPage() {
   const lockOn = !!settings.lockCredential
 
   useEffect(() => { lockSupported().then(setSupported) }, [])
+
+  const newPassword = async () => {
+    const next = window.prompt('New app password (at least 6 characters)')
+    if (!next) return
+    if (next.length < 6) { store.toast('Use at least 6 characters'); return }
+    if (window.prompt('Type it again') !== next) { store.toast("The passwords didn't match"); return }
+    try {
+      await changePassword(next)
+      store.toast('Password changed')
+    } catch (e) {
+      store.toast((e as Error).message)
+    }
+  }
 
   const toggleLock = async () => {
     setBusy(true)
@@ -73,6 +86,17 @@ export default function SettingsPage() {
 
       <section className="section pad-x">
         <div className="label label--flush">Privacy</div>
+        <div className="setting">
+          <span className="setting__icon"><Icon name="shield" size={22} /></span>
+          <div className="setting__text">
+            <strong>App password</strong>
+            <span className="card-meta card-meta--wrap">Asked every 10 days on each device. It also protects your library in the database.</span>
+          </div>
+        </div>
+        <div className="row-btns">
+          <button type="button" className="btn btn--ghost" onClick={newPassword}>Change password</button>
+          <button type="button" className="btn btn--ghost" onClick={() => lockApp().catch((e: Error) => store.toast(e.message))}>Lock now</button>
+        </div>
         <div className="setting">
           <span className="setting__icon"><Icon name="faceId" size={22} /></span>
           <div className="setting__text">
@@ -170,7 +194,6 @@ function ServerSection() {
             </div>
           </div>
           <button type="button" className="btn btn--ghost btn--block" onClick={disconnect}>Disconnect</button>
-          <AccountSection />
         </>
       ) : (
         <>
@@ -195,62 +218,3 @@ function ServerSection() {
   )
 }
 
-/** Midoku's own account: the library, tabs and reading progress are kept here, never on the Suwayomi server. */
-function AccountSection() {
-  const auth = useAuth()
-  const store = useStore()
-  const [email, setEmail] = useState('')
-  const [pass, setPass] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-
-  const go = async (action: 'in' | 'up') => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      if (action === 'in') await signIn(email.trim(), pass)
-      else if (await signUp(email.trim(), pass)) store.toast('Check your email to confirm the account, then sign in')
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <div className="label">Account</div>
-      {!auth.ready ? <p className="hint">Checking…</p> : auth.userId ? (
-        <>
-          <div className="setting">
-            <span className="setting__icon"><Icon name="shield" size={22} /></span>
-            <div className="setting__text">
-              <strong>{auth.email}</strong>
-              <span className="card-meta card-meta--wrap">
-                {store.server.status === 'ready' || (store.server.status === 'error' && store.server.where === 'server')
-                  ? `${store.entries.filter((e) => e.inLibrary).length} titles in your library`
-                  : store.server.status === 'error' ? store.server.error : 'Loading…'}
-              </span>
-            </div>
-          </div>
-          <button type="button" className="btn btn--ghost btn--block" onClick={() => signOut().catch((e: Error) => store.toast(e.message))}>Sign out</button>
-        </>
-      ) : (
-        <>
-          <p className="hint">Your library, tabs and reading progress are kept in your Midoku account, not on the server.</p>
-          <div className="form">
-            <label className="form__row"><span>Email</span>
-              <input className="field-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" autoCorrect="off" autoComplete="email" />
-            </label>
-            <label className="form__row"><span>Password</span>
-              <input className="field-input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="current-password" />
-            </label>
-          </div>
-          {error && <p className="form__error">{error}</p>}
-          <button type="button" className="btn btn--accent btn--block" disabled={busy || !email.trim() || !pass} onClick={() => go('in')}>{busy ? 'Signing in…' : 'Sign in'}</button>
-          <button type="button" className="btn btn--ghost btn--block" disabled={busy || !email.trim() || pass.length < 6} onClick={() => go('up')}>Create account</button>
-        </>
-      )}
-    </>
-  )
-}
