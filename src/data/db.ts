@@ -111,6 +111,19 @@ export interface ChapterStateRow {
   read: boolean
   bookmarked: boolean
   removed: boolean
+  preferred: boolean
+}
+export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[] }
+export interface InsertedRow {
+  id: string
+  entry_id: string
+  source_id: string
+  manga_url: string
+  chapter_url: string
+  server_chapter_id: number | null
+  number: number
+  label: string
+  from_title: string
 }
 export interface TabRow {
   id: string
@@ -145,8 +158,15 @@ export async function loadLibrary(): Promise<DbLibrary> {
   return { entries, sources, tabs, entryTabs, progress }
 }
 
-export const loadChapterStates = (entryId: string) =>
-  all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed').eq('entry_id', entryId))
+/** A saved title's reading state, split chapters and inserted chapters. */
+export async function loadEntryExtras(entryId: string) {
+  const [states, splits, inserts] = await Promise.all([
+    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred').eq('entry_id', entryId)),
+    all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks').eq('entry_id', entryId)),
+    all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
+  ])
+  return { states, splits, inserts }
+}
 
 // Writes: an ordered outbox kept in localStorage. Each change is queued, then sent in order; without a
 // connection the queue waits and is sent when the device is back online, so nothing done offline is lost.
@@ -231,3 +251,8 @@ export const setEntryTab = (entryId: string, tabId: string, on: boolean) =>
     : { kind: 'delete', table: 'entry_tabs', match: { entry_id: entryId, tab_id: tabId } })
 export const saveChapterStates = (rows: ChapterStateRow[]) =>
   enqueue({ kind: 'upsert', table: 'chapter_states', rows: rows.map((r) => ({ ...r, updated_at: now() })), onConflict: 'entry_id,source_id,chapter_url' })
+export const saveSplit = (row: SplitRow) => enqueue({ kind: 'upsert', table: 'chapter_splits', rows: [row], onConflict: 'entry_id,source_id,chapter_url' })
+export const deleteSplit = (entryId: string, sourceId: string, chapterUrl: string) =>
+  enqueue({ kind: 'delete', table: 'chapter_splits', match: { entry_id: entryId, source_id: sourceId, chapter_url: chapterUrl } })
+export const saveInserted = (row: InsertedRow) => enqueue({ kind: 'upsert', table: 'inserted_chapters', rows: [row] })
+export const deleteInserted = (id: string) => enqueue({ kind: 'delete', table: 'inserted_chapters', match: { id } })

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { PageThumb, RemoteImage } from '../components/Art'
+import { Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
+import { Empty, Loading } from '../components/Status'
 import { useNav } from '../components/Nav'
 import { updateSettings, useSettings } from '../data/settings'
 import { useStore, visibleChapters } from '../data/store'
@@ -51,7 +53,9 @@ export default function Reader() {
   const nav = useNav()
   const { readerMode: mode } = useSettings()
   const entry = store.entry(entryId)
-  const chapter = entry?.chapters.find((c) => c.id === chapterId)
+  // Parts of split chapters and inserted chapters are found among the shown chapters.
+  const chapter = entry ? visibleChapters(entry).find((c) => c.id === chapterId) ?? entry.chapters.find((c) => c.id === chapterId) : undefined
+  const [versions, setVersions] = useState(false)
   const ordered = entry ? [...visibleChapters(entry)].sort((a, b) => a.number - b.number) : []
   const index = ordered.findIndex((c) => c.id === chapterId)
   // Measured page heights, so pages that leave the window keep their size (real images vary in height).
@@ -78,13 +82,16 @@ export default function Reader() {
     ;(saved ? Promise.resolve(saved.pages) : getPages(chapter.remoteId))
       .then((list) => {
         if (!alive) return
-        setUrls(list)
-        if (chapter.pages !== list.length) store.editChapters(entryId, new Set([chapter.id]), { pages: list.length })
+        // A part shows only its pages; the whole chapter's page count is kept on the whole chapter.
+        const whole = chapter.physicalId ?? chapter.id
+        const known = chapter.physicalId ? entry?.chapters.find((c) => c.id === whole)?.pages : chapter.pages
+        if (known !== list.length) store.editChapters(entryId, new Set([whole]), { pages: list.length })
+        setUrls(chapter.range ? list.slice(chapter.range[0] - 1, chapter.range[1]) : list)
       })
       .catch((e: Error) => alive && setPagesError(e.message))
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId, loadTry])
+  }, [chapterId, loadTry, chapter?.remoteId])
   const pages = isRemote ? urls?.length ?? 0 : chapter?.pages ?? 0
   const fromDevice = !!chapter?.downloaded
 
@@ -141,8 +148,12 @@ export default function Reader() {
       for (const it of items) if (it.isIntersecting) setPage(Number((it.target as HTMLElement).dataset.page))
     }, { root, rootMargin: mode === 'webtoon' ? '-50% 0px -50% 0px' : '0px -50% 0px -50%' })
     root.querySelectorAll('[data-page]').forEach((el) => io.observe(el))
-    return () => io.disconnect()
-  }, [chapterId, mode, pages])
+    // Reaching the "Finished" block counts as the last page, even after a fast fling past it.
+    const end = new IntersectionObserver((items) => { if (items.some((it) => it.isIntersecting) && pages) setPage(pages) }, { root, threshold: 0.5 })
+    const endEl = root.querySelector('.reader__end')
+    if (endEl) end.observe(endEl)
+    return () => { io.disconnect(); end.disconnect() }
+  }, [chapterId, mode, pages, urls])
 
   // Save progress shortly after the page settles; the last page marks the chapter read.
   useEffect(() => {
@@ -155,8 +166,7 @@ export default function Reader() {
   if (!entry || !chapter) {
     return (
       <div className="reader reader--empty">
-        <p>This chapter isn't available.</p>
-        <button type="button" className="btn btn--ghost" onClick={() => nav.back('/library')}>Go back</button>
+        <Empty icon="book" title="Chapter not available" detail="It may have been removed from the source, or the title isn't loaded yet." action={{ label: 'Go back', onClick: () => nav.back('/library') }} />
       </div>
     )
   }
@@ -182,12 +192,9 @@ export default function Reader() {
       <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => setUi((v) => !v)}>
         {isRemote && !urls && (
           <div className="reader__loading" onClick={(e) => e.stopPropagation()}>
-            {pagesError ? (
-              <>
-                <p>{pagesError}</p>
-                <button type="button" className="btn btn--ghost" onClick={() => setLoadTry((n) => n + 1)}>Try again</button>
-              </>
-            ) : <p className="hint">Loading pages…</p>}
+            {pagesError
+              ? <Empty icon="alert" tone="error" title="Couldn't load pages" detail={pagesError} action={{ label: 'Try again', onClick: () => setLoadTry((n) => n + 1) }} />
+              : <Loading label={`Loading ${chapter.label}`} shape="page" />}
           </div>
         )}
         {list.map((n) => {
@@ -223,7 +230,7 @@ export default function Reader() {
               Next: {next.label} <Icon name="arrowRight" size={18} />
             </button>
           ) : (
-            <p className="hint">You're caught up on {entry.title}.</p>
+            <Empty compact icon="check" tone="done" title="All caught up" detail={`That's the latest chapter of ${entry.title}.`} />
           )}
           <button type="button" className="btn btn--ghost" onClick={close}>Back to {entry.title}</button>
         </div>}
@@ -233,7 +240,11 @@ export default function Reader() {
         <button type="button" className="icon-btn icon-btn--glass" aria-label="Close reader" onClick={close}><Icon name="back" /></button>
         <div className="reader__titles">
           <span className="reader__entry">{entry.title}</span>
-          <span className="reader__chapter">{chapter.label} · {chapter.part ?? chapter.title}</span>
+          {(chapter.alts?.length ?? 0) > 1 ? (
+            <button type="button" className="reader__chapter reader__version" onClick={(e) => { e.stopPropagation(); setVersions(true) }}>
+              {chapter.label} · {chapter.alts!.find((a) => a.remoteId === chapter.remoteId)?.name ?? chapter.title}<Icon name="chevronDown" size={14} />
+            </button>
+          ) : <span className="reader__chapter">{chapter.label} · {chapter.part ?? chapter.title}</span>}
         </div>
         <button type="button" className="icon-btn icon-btn--glass" aria-label={mode === 'webtoon' ? 'Switch to paged mode' : 'Switch to webtoon mode'}
           onClick={() => updateSettings({ readerMode: mode === 'webtoon' ? 'paged' : 'webtoon' })}>
@@ -254,6 +265,16 @@ export default function Reader() {
           <Icon name="next" />
         </button>
       </footer>
+      <Sheet open={versions} title={`${chapter.label} · versions`} onClose={() => setVersions(false)}>
+        <div className="check-list">
+          {chapter.alts?.map((a, i) => (
+            <button key={`${a.sourceId}-${a.url}`} type="button" className="check-row" onClick={() => { setVersions(false); store.chooseVersion(entry.id, chapter.id, i) }}>
+              <span className="check-row__name">{a.name}<span className="card-meta"> · {a.title}</span></span>
+              {a.remoteId === chapter.remoteId && <Icon name="check" size={18} />}
+            </button>
+          ))}
+        </div>
+      </Sheet>
       <span className="reader__line" style={{ width: `${pages ? (Math.min(page, pages) / pages) * 100 : 0}%` }} aria-hidden="true" />
     </div>
   )

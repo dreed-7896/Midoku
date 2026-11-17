@@ -1,7 +1,7 @@
-import type { ChapterStateRow, DbLibrary, EntryRow, EntrySourceRow, TabRow } from './db'
+import type { ChapterStateRow, DbLibrary, EntryRow, EntrySourceRow, InsertedRow, SplitRow, TabRow } from './db'
 import { chapterKey, isSaved } from './downloads'
 import { artFor, assetUrl, hoursSince, SChapter, toChapter } from './suwayomi'
-import type { Chapter, Entry, EntrySource, LibraryTab } from './types'
+import type { Chapter, ChapterVersion, Entry, EntrySource, InsertedChapter, LibraryTab } from './types'
 
 /** Pure mapping between Midoku's database rows, Suwayomi data and the app's model. */
 
@@ -97,11 +97,16 @@ export const stateRow = (dbId: string, c: Chapter): ChapterStateRow => ({
   read: c.read,
   bookmarked: c.bookmarked,
   removed: !!c.removed,
+  preferred: !!c.preferred,
 })
 
-export type ChapterState = Pick<Chapter, 'page' | 'read' | 'bookmarked' | 'removed'> & { sourceId: string; sourceUrl?: string }
+export type ChapterState = Pick<Chapter, 'page' | 'read' | 'bookmarked' | 'removed' | 'preferred'> & { sourceId: string; sourceUrl?: string }
 export const rowState = (r: ChapterStateRow): ChapterState =>
-  ({ sourceId: r.source_id, sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed })
+  ({ sourceId: r.source_id, sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed, preferred: r.preferred })
+
+/** Shows a different version (physical chapter) of a slot. */
+export const showVersion = (c: Chapter, v: ChapterVersion, preferred: boolean): Chapter =>
+  ({ ...c, sourceId: v.sourceId, sourceUrl: v.url, remoteId: v.remoteId, title: v.title, preferred, pages: v.remoteId === c.remoteId ? c.pages : 0 })
 
 /**
  * Puts saved reading state onto chapters. A slot holds one chapter per linked source; a state saved for
@@ -112,13 +117,16 @@ export function applyStates(chapters: Chapter[], states: ChapterState[]): Chapte
   if (!byKey.size) return chapters
   return chapters.map((c) => {
     const keys = c.alts?.length ? c.alts.map((a) => chapterKey(a.sourceId, a.url)) : c.sourceUrl ? [chapterKey(c.sourceId, c.sourceUrl)] : []
-    const s = keys.map((k) => byKey.get(k)).find(Boolean)
-    return s ? { ...c, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined } : c
+    // A version picked by hand is the one shown; otherwise the state of whichever version has one.
+    const picked = c.alts?.find((a) => byKey.get(chapterKey(a.sourceId, a.url))?.preferred)
+    const shown = picked && (picked.sourceId !== c.sourceId || picked.url !== c.sourceUrl) ? showVersion(c, picked, true) : picked ? { ...c, preferred: true } : c
+    const s = (picked && byKey.get(chapterKey(picked.sourceId, picked.url))) || keys.map((k) => byKey.get(k)).find(Boolean)
+    return s ? { ...shown, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined } : shown
   })
 }
 
 export const statesOf = (chapters: Chapter[]): ChapterState[] =>
-  chapters.filter((c) => c.sourceUrl).map((c) => ({ sourceId: c.sourceId, sourceUrl: c.sourceUrl, page: c.page, read: c.read, bookmarked: c.bookmarked, removed: c.removed }))
+  chapters.filter((c) => c.sourceUrl).map((c) => ({ sourceId: c.sourceId, sourceUrl: c.sourceUrl, page: c.page, read: c.read, bookmarked: c.bookmarked, removed: c.removed, preferred: c.preferred }))
 
 /** Marks chapters saved on this device. */
 export const withDownloads = (chapters: Chapter[]): Chapter[] =>
@@ -133,13 +141,13 @@ const slotKey = (n: number) => n.toFixed(3)
  * Chapters from every linked source merged into one list: chapters with the same number share a slot
  * (shown as versions), and the main source's chapter is the one read. Sources earlier in the list win.
  */
-export function mergeChapters(lists: { sourceId: string; chapters: SChapter[] }[]): Chapter[] {
+export function mergeChapters(lists: { sourceId: string; name?: string; chapters: SChapter[] }[]): Chapter[] {
   const slots = new Map<string, Chapter>()
-  for (const { sourceId, chapters } of lists) {
+  for (const { sourceId, name, chapters } of lists) {
     for (const raw of chapters) {
       const c = toChapter(raw, sourceId)
       const key = raw.chapterNumber >= 0 ? slotKey(raw.chapterNumber) : `${sourceId}:${raw.id}`
-      const alt = { sourceId, url: raw.url, remoteId: raw.id }
+      const alt: ChapterVersion = { sourceId, url: raw.url, remoteId: raw.id, name: [name ?? sourceId, raw.scanlator].filter(Boolean).join(' · '), title: c.title }
       const slot = slots.get(key)
       if (slot) {
         slot.alts = [...(slot.alts ?? []), alt]
@@ -158,3 +166,59 @@ export const snapshotOf = (entries: Entry[], tabs: LibraryTab[]): LibrarySnapsho
   entries: entries.filter((e) => e.dbId).map((e) => ({ ...e, chapters: [], remote: e.remote && { ...e.remote, chaptersLoaded: false } })),
   tabs,
 })
+
+// Inserted chapters
+
+export const insertedFromRow = (r: InsertedRow): InsertedChapter => ({
+  id: r.id, sourceId: r.source_id, mangaUrl: r.manga_url, chapterUrl: r.chapter_url, remoteId: r.server_chapter_id ?? undefined,
+  number: Number(r.number), label: r.label, fromTitle: r.from_title,
+})
+export const insertedRow = (dbId: string, i: InsertedChapter): InsertedRow => ({
+  id: i.id, entry_id: dbId, source_id: i.sourceId, manga_url: i.mangaUrl, chapter_url: i.chapterUrl,
+  server_chapter_id: i.remoteId ?? null, number: i.number, label: i.label, from_title: i.fromTitle,
+})
+
+const insertedChapter = (i: InsertedChapter): Chapter => ({
+  id: `i${i.id}`, insertId: i.id, number: i.number, label: i.label, title: i.fromTitle, insertedFrom: i.fromTitle, date: '',
+  pages: 0, page: 0, read: false, bookmarked: false, downloaded: false, isNew: false, versions: 1,
+  sourceId: i.sourceId, sourceUrl: i.chapterUrl, remoteId: i.remoteId, layout: Math.abs(Math.round(i.number * 7)) % 4,
+})
+
+/** Puts inserted chapters into a chapter list (keeping the state of ones already there). */
+export function withInserted(chapters: Chapter[], inserted: InsertedChapter[] = []): Chapter[] {
+  const kept = chapters.filter((c) => !c.insertId || inserted.some((i) => i.id === c.insertId))
+  const have = new Set(kept.map((c) => c.insertId).filter(Boolean))
+  return [...kept, ...inserted.filter((i) => !have.has(i.id)).map(insertedChapter)]
+}
+
+// Split chapters: shown as parts, while reading state stays on the whole (physical) chapter.
+
+export const PART = '~'
+export const physicalIdOf = (id: string) => id.split(PART)[0]
+
+/** Page ranges of the parts, given the first page of every part after the first. */
+export function partRanges(pages: number, breaks: number[]): [number, number][] {
+  const starts = [1, ...breaks.filter((b) => b > 1 && (!pages || b <= pages)).sort((a, b) => a - b)]
+  return starts.map((s, i) => [s, (starts[i + 1] ?? (pages || Number.MAX_SAFE_INTEGER) + 1) - 1])
+}
+
+export function expandSplits(chapters: Chapter[], splits?: Record<string, number[]>): Chapter[] {
+  if (!splits || !Object.keys(splits).length) return chapters
+  return chapters.flatMap((c) => {
+    const breaks = c.sourceUrl ? splits[chapterKey(c.sourceId, c.sourceUrl)] : undefined
+    if (!breaks?.length) return [c]
+    const ranges = partRanges(c.pages, breaks)
+    return ranges.map(([a, b], i): Chapter => ({
+      ...c,
+      id: `${c.id}${PART}${i + 1}`,
+      physicalId: c.id,
+      range: [a, b],
+      number: c.number + i / 1000,
+      label: `${c.label} · ${i + 1}/${ranges.length}`,
+      part: c.pages ? `Pages ${a}–${b}` : `From page ${a}`,
+      pages: c.pages ? b - a + 1 : 0,
+      read: c.read || (c.page > 0 && c.page >= b),
+      page: c.read ? 0 : c.page >= a && c.page < b ? c.page - a + 1 : 0,
+    }))
+  })
+}

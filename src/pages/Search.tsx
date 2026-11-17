@@ -15,11 +15,9 @@ function SampleSearch() {
   const [query, setQuery] = useState('crown')
   const [debounced, setDebounced] = useState('crown')
   const [scope, setScope] = useState<'all' | 'pinned'>('all')
-  const [english, setEnglish] = useState(false)
-  const [hideNsfw, setHideNsfw] = useState(true)
   const [states, setStates] = useState<Record<string, SourceState>>({})
 
-  const sources = store.sources.filter((s) => s.installed && (scope === 'all' || s.pinned) && (!english || s.langs.includes('EN')) && (!hideNsfw || !s.nsfw))
+  const sources = store.sources.filter((s) => s.installed)
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 300)
@@ -58,12 +56,6 @@ function SampleSearch() {
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search titles everywhere" aria-label="Search all sources and your library" enterKeyHint="search" />
           {query && <button type="button" className="icon-btn icon-btn--sm" aria-label="Clear search" onClick={() => setQuery('')}><Icon name="x" size={16} /></button>}
         </label>
-      </div>
-      <div className="chips pad-x pad-t-sm">
-        <Chip on={scope === 'all'} onClick={() => setScope('all')}>All sources · {store.sources.filter((s) => s.installed).length}</Chip>
-        <Chip on={scope === 'pinned'} onClick={() => setScope('pinned')}>Pinned</Chip>
-        <Chip on={english} onClick={() => setEnglish((x) => !x)}>English</Chip>
-        <Chip on={hideNsfw} onClick={() => setHideNsfw((x) => !x)}>Hide 18+</Chip>
       </div>
 
       {!debounced ? (

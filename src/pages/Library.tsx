@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, ServerStatus, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
+import { Banner, Empty, Loading } from '../components/Status'
 import { EntryGrid } from '../components/LibraryCards'
 import { TLink as Link } from '../components/Nav'
 import { newCount, resumeChapter, statusOf, unreadCount, useStore } from '../data/store'
@@ -118,8 +119,8 @@ export default function Library() {
       </PageHead>
 
       <ServerStatus />
-      {store.offline && <p className="hint pad-x pad-t">Offline · showing your library as saved on this device. Changes are sent when you're back online.</p>}
-      {store.updating && <p className="hint pad-x pad-t">Checking for new chapters… {store.updating.done} of {store.updating.total}</p>}
+      {store.offline && <div className="pad-x pad-t"><Banner icon="info">Offline · showing your library as saved on this device. Changes sync when you're back online.</Banner></div>}
+      {store.updating && <div className="pad-x pad-t"><Banner tone="busy">Checking for new chapters… {store.updating.done} of {store.updating.total}</Banner></div>}
 
       {searching && (
         <div className="pad-x pad-t-sm">
@@ -153,7 +154,7 @@ export default function Library() {
 
       {q ? (
         <div className="pager__panel pager__panel--solo pad-x" data-scroll-active="true">
-          {search.length ? <EntryGrid entries={search} /> : <p className="empty">No titles match “{query}”.</p>}
+          {search.length ? <EntryGrid entries={search} /> : <Empty icon="search" title={`No titles match “${query}”`} detail="This searches titles and authors in your library. Use Search to find new titles." />}
         </div>
       ) : (
         <div className="pager" ref={pager} onScroll={onPagerScroll}>
@@ -222,10 +223,13 @@ function TabPanel({ tab, filters, sort, groupBy, roots }: { tab: LibraryTab; fil
   const list = base.filter((e) => matches(e, f)).sort(sorter(sort))
 
   if (list.length === 0) {
+    if (store.server.status === 'loading') return <div className="pad-x pad-t"><Loading label="Loading your library" /></div>
     return (
-      <p className="empty pad-x">
-        {tab.kind === 'tab' && base.length === 0 ? 'No titles here yet. Add titles to this tab from their details page.' : 'Nothing matches these filters.'}
-      </p>
+      <div className="pad-x pad-t">
+        {roots.length === 0 ? <Empty icon="library" title="Your library is empty" detail="Find titles in Search or Sources and tap the bookmark to add them." />
+          : tab.kind === 'tab' && base.length === 0 ? <Empty icon="folder" title={`Nothing in ${tab.name} yet`} detail="Open a title, tap ⋯ and choose Library tabs to file it here." />
+          : <Empty icon="filter" title="Nothing matches these filters" detail="Clear a filter to see more titles." />}
+      </div>
     )
   }
   if (tab.kind !== 'all' || groupBy === 'none') {
@@ -286,7 +290,7 @@ function ReadingQueue() {
   const list = store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
   return (
     <section className="section section--tight pad-x">
-      <p className="hint">Your next reads, in order.</p>
+      {list.length === 0 ? <Empty icon="book" title="Nothing in progress" detail="Titles you start reading show up here, most recent first." /> : <p className="hint">Your next reads, in order.</p>}
       <div className="grid3">
         {list.map((e, i) => {
           const ch = resumeChapter(e)

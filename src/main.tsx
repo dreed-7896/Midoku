@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { ComponentType, lazy, Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Route, useLocation } from 'react-router-dom'
 import { MiniPlayer, TabBar, Toast, UpdateCard } from './components/Chrome'
@@ -6,15 +6,26 @@ import { LockGate, PasswordGate } from './components/Lock'
 import { StackRoutes } from './components/Nav'
 import { StoreProvider } from './data/store'
 import { registerServiceWorker } from './data/update'
-import EntryPage from './pages/Entry'
+import { Loading } from './components/Status'
 import Home from './pages/Home'
 import Library from './pages/Library'
-import Reader from './pages/Reader'
-import Search from './pages/Search'
-import SettingsPage from './pages/Settings'
-import SourceBrowse from './pages/SourceBrowse'
-import Sources from './pages/Sources'
 import './styles.css'
+
+// Home and Library open with the app; the other screens load the first time they are opened.
+const EntryPage = lazy(() => import('./pages/Entry'))
+const Reader = lazy(() => import('./pages/Reader'))
+const Search = lazy(() => import('./pages/Search'))
+const SettingsPage = lazy(() => import('./pages/Settings'))
+const SourceBrowse = lazy(() => import('./pages/SourceBrowse'))
+const Sources = lazy(() => import('./pages/Sources'))
+
+function Screen({ page: Page }: { page: ComponentType }) {
+  return (
+    <Suspense fallback={<div className="page pad-x pad-t"><Loading label="Opening" shape="page" /></div>}>
+      <Page />
+    </Suspense>
+  )
+}
 
 function App() {
   const { pathname } = useLocation()
@@ -24,12 +35,12 @@ function App() {
       <StackRoutes>
         <Route path="/" element={<Home />} />
         <Route path="/library" element={<Library />} />
-        <Route path="/entry/:id" element={<EntryPage />} />
-        <Route path="/search" element={<Search />} />
-        <Route path="/sources" element={<Sources />} />
-        <Route path="/sources/:id" element={<SourceBrowse />} />
-        <Route path="/read/:entryId/:chapterId" element={<Reader />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/entry/:id" element={<Screen page={EntryPage} />} />
+        <Route path="/search" element={<Screen page={Search} />} />
+        <Route path="/sources" element={<Screen page={Sources} />} />
+        <Route path="/sources/:id" element={<Screen page={SourceBrowse} />} />
+        <Route path="/read/:entryId/:chapterId" element={<Screen page={Reader} />} />
+        <Route path="/settings" element={<Screen page={SettingsPage} />} />
         <Route path="*" element={<Home />} />
       </StackRoutes>
       {!reading && (

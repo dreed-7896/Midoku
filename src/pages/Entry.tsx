@@ -1,15 +1,41 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { TLink as Link, useNav } from '../components/Nav'
-import { Cover, PageThumb, SourceIcon } from '../components/Art'
-import { Chip, IconButton, SectionHead, Sheet } from '../components/Chrome'
+import { Cover, PageThumb } from '../components/Art'
+import { Chip, IconButton, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
-import { agoLabel, newCount, progressPct, readCount, resumeChapter, statusOf, unreadCount, useStore, visibleChapters } from '../data/store'
-import { chapterKey, useDownloads } from '../data/downloads'
-import { SourcePicker } from '../components/SourcePicker'
-import { Chapter, STATUS_LABEL } from '../data/types'
+import { TLink as Link, useNav } from '../components/Nav'
+import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
+import { Banner, Empty, Loading } from '../components/Status'
+import { chapterKey, getSaved, useDownloads } from '../data/downloads'
+import { partRanges, physicalIdOf } from '../data/library'
+import { agoLabel, newCount, progressPct, readCount, resumeChapter, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
+import { getChapters, getPages, SChapter, toChapter } from '../data/suwayomi'
+import type { Chapter } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
+type Panel = null | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert'
+
+/** Long press (or right click) on a chapter opens its sheet; the click that ends a long press is ignored. */
+function useLongPress(onLong: (c: Chapter) => void) {
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+  const fired = useRef(false)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const cancel = () => { clearTimeout(timer.current); start.current = null }
+  return (c: Chapter) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      fired.current = false
+      start.current = { x: e.clientX, y: e.clientY }
+      timer.current = setTimeout(() => { fired.current = true; navigator.vibrate?.(10); onLong(c) }, 450)
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 10) cancel()
+    },
+    onPointerUp: cancel,
+    onPointerLeave: cancel,
+    onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); cancel(); fired.current = true; onLong(c) },
+    wasLongPress: () => { const f = fired.current; fired.current = false; return f },
+  })
+}
 
 export default function EntryPage() {
   const { id = '' } = useParams()
@@ -22,9 +48,14 @@ export default function EntryPage() {
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showRemoved, setShowRemoved] = useState(false)
-  const [filing, setFiling] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [shown, setShown] = useState(24)
+  const [panel, setPanel] = useState<Panel>(null)
+  const [sheetFor, setSheetFor] = useState<string | null>(null)
+  const [insertAfter, setInsertAfter] = useState<Chapter | null>(null)
+  const [pickedTitle, setPickedTitle] = useState<PickedTitle | null>(null)
+  const downloads = useDownloads()
+  const longPress = useLongPress((c) => setSheetFor(c.id))
 
   // Titles from the server (ids like "s42") load their details and chapters here.
   const remoteId = /^s\d+$/.test(id) ? Number(id.slice(1)) : null
@@ -41,48 +72,44 @@ export default function EntryPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteId, id])
-  const [sourcesOpen, setSourcesOpen] = useState(false)
-  const [linking, setLinking] = useState(false)
-  const [nesting, setNesting] = useState(false)
-  const downloads = useDownloads()
   useEffect(() => {
     if (remoteId !== null && !entry?.remote?.chaptersLoaded) loadRemote()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteId])
 
+  const all = useMemo(() => (entry ? visibleChapters(entry) : []), [entry])
   const chapters = useMemo(() => {
-    if (!entry) return []
-    const list = visibleChapters(entry).filter((c) =>
+    const list = all.filter((c) =>
       filter === 'unread' ? !c.read : filter === 'bookmarked' ? c.bookmarked : filter === 'downloaded' ? c.downloaded : true)
     return list.sort((a, b) => (descending ? b.number - a.number : a.number - b.number))
-  }, [entry, filter, descending])
+  }, [all, filter, descending])
 
   if (!entry) {
     return (
       <div className="page">
         <div className="entry__top"><IconButton icon="back" label="Back" onClick={() => nav.back('/library')} /></div>
         <div className="pad-x pad-t">
-          {remoteId !== null && !remote.error ? <p className="hint">Loading…</p> : (
-            <>
-              <p className="empty">{remote.error ?? "This title isn't in your library."}</p>
-              {remoteId !== null && <button type="button" className="btn btn--ghost" onClick={() => loadRemote()}>Try again</button>}
-            </>
+          {remoteId !== null && !remote.error ? <Loading label="Loading title" shape="rows" count={3} /> : (
+            <Empty icon="alert" tone="error" title={remote.error ? "Couldn't open this title" : 'Not in your library'}
+              detail={remote.error ?? 'It may have been removed.'} action={remoteId !== null ? { label: 'Try again', onClick: () => loadRemote() } : undefined} />
           )}
         </div>
       </div>
     )
   }
 
-  const all = visibleChapters(entry)
+  const loaded = !entry.remote || entry.remote.chaptersLoaded
   const userTabs = store.tabs.filter((t) => t.kind === 'tab')
   const removed = entry.chapters.filter((c) => c.removed)
   const kids = store.children(entry.id)
+  const parent = entry.parentId ? store.entry(entry.parentId) : undefined
+  const nestable = store.entries.filter((e) => e.inLibrary && e.id !== entry.id && !e.parentId && !store.children(e.id).length)
   const resume = resumeChapter(entry)
-  const counts = {
-    unread: unreadCount(entry),
-    bookmarked: all.filter((c) => c.bookmarked).length,
-    downloaded: all.filter((c) => c.downloaded).length,
-  }
+  const main = entry.sources.find((s) => s.main) ?? entry.sources[0]
+  const unread = unreadCount(entry)
+  const downloaded = all.filter((c) => c.downloaded).length
+  const bookmarked = all.filter((c) => c.bookmarked).length
+  const sheetChapter = sheetFor ? all.find((c) => c.id === sheetFor) ?? entry.chapters.find((c) => c.id === sheetFor) : undefined
 
   const openChapter = (c: Chapter) => {
     if (selecting) {
@@ -104,7 +131,7 @@ export default function EntryPage() {
   }
   // Saves the selected chapters on the device, or removes them when all are saved already.
   const saveSelected = () => {
-    const picked = entry.chapters.filter((c) => selected.has(c.id))
+    const picked = all.filter((c) => selected.has(c.id))
     if (picked.length && picked.every((c) => c.downloaded)) store.removeDownloads(entry.id, selected)
     else if (entry.remote) store.downloadChapters(entry.id, selected)
     else act({ downloaded: true }, 'Downloaded')
@@ -112,8 +139,10 @@ export default function EntryPage() {
     setSelecting(false)
   }
   const downloadUnread = () => {
-    if (!entry.remote) { store.toast(`Queued ${counts.unread} chapters`); return }
-    store.downloadChapters(entry.id, new Set(all.filter((c) => !c.read && !c.downloaded).map((c) => c.id)))
+    if (!entry.remote) { store.toast(`Queued ${unread} chapters`); return }
+    const ids = all.filter((c) => !c.read && !c.downloaded).map((c) => c.id)
+    if (!ids.length) { store.toast(unread ? 'Unread chapters are downloaded' : 'Nothing unread to download'); return }
+    store.downloadChapters(entry.id, new Set(ids))
   }
   const progressOf = (c: Chapter) => {
     if (!c.sourceUrl) return undefined
@@ -121,14 +150,25 @@ export default function EntryPage() {
     if (downloads.active?.key === key) return downloads.active.progress
     return downloads.queued.has(key) ? 0 : undefined
   }
-  const library = store.entries.filter((e) => e.inLibrary && e.id !== entry.id && !e.parentId && !store.children(e.id).length)
-  const parent = entry.parentId ? store.entry(entry.parentId) : undefined
-
   const refresh = async () => {
     setRefreshing(true)
     if (entry.remote) await loadRemote(true)
-    else await new Promise((r) => setTimeout(r, 1200)).then(() => store.toast('Up to date'))
+    else await new Promise((r) => setTimeout(r, 900)).then(() => store.toast('Up to date'))
     setRefreshing(false)
+  }
+  const openWebsite = () => (entry.remote?.url ? window.open(entry.remote.url, '_blank', 'noopener') : store.toast('No web page for this title'))
+
+  // Number for a chapter inserted after another: halfway to the next one.
+  const insertNumber = (after: Chapter) => {
+    const next = [...all].sort((a, b) => a.number - b.number).find((c) => c.number > after.number)
+    return next ? Number(((after.number + next.number) / 2).toFixed(3)) : after.number + 0.5
+  }
+
+  const emptyFor: Record<ChapterFilter, { title: string; detail: string; icon: 'check' | 'bookmark' | 'download' | 'book'; done?: boolean }> = {
+    all: { title: 'No chapters yet', detail: 'The source has not published any chapters for this title.', icon: 'book' },
+    unread: { title: 'All caught up', detail: 'Every chapter is read. New ones show up here.', icon: 'check', done: true },
+    bookmarked: { title: 'No bookmarks', detail: 'Long-press a chapter to bookmark it.', icon: 'bookmark' },
+    downloaded: { title: 'Nothing downloaded', detail: 'Download chapters to read them offline.', icon: 'download' },
   }
 
   return (
@@ -140,28 +180,26 @@ export default function EntryPage() {
       <div className="entry__top">
         <IconButton icon="back" label="Back" glass onClick={() => nav.back('/library')} />
         <div className="row-gap">
-          <IconButton icon="globe" label="Open source website" glass onClick={() => (entry.remote?.url ? window.open(entry.remote.url, '_blank', 'noopener') : store.toast('No web page for this title'))} />
-          <IconButton icon="more" label="Entry options" glass onClick={() => store.toast('Edit, migrate and sources menu comes later')} />
+          <IconButton icon="globe" label="Open source website" glass onClick={openWebsite} />
+          <IconButton icon="more" label="Title options" glass onClick={() => setPanel('options')} />
         </div>
       </div>
 
       <div className="entry__hero">
         <button type="button" className="entry__cover" aria-label="View cover"><Cover art={entry.art} title={entry.title} url={entry.coverUrl} /></button>
         <h1 className="entry__title">{entry.title}</h1>
-        <div className="entry__author">{entry.author}</div>
-        <div className="entry__meta">
-          <span className="tag tag--glass"><span className={`dot dot--${entry.publishing.toLowerCase()}`} />{entry.publishing}</span>
-          <span className="tag tag--glass">{all.length} chapters</span>
-          <span className="tag tag--glass">{entry.sources.length} source{entry.sources.length === 1 ? '' : 's'}</span>
+        <div className="entry__author">
+          {entry.author}
+          {parent && <> · <Link to={`/entry/${parent.id}`} className="accent-text">in {parent.title}</Link></>}
         </div>
       </div>
 
       <div className="entry__actions pad-x">
         <button type="button" className="btn btn--accent btn--xl grow" disabled={!resume} onClick={() => resume && openChapter(resume)}>
-          <Icon name="play" size={16} />
+          <Icon name={resume ? 'play' : 'check'} size={16} />
           <span className="btn__stack">
-            <span>{readCount(entry) ? 'Resume' : 'Start reading'}</span>
-            <small>{resume ? `${resume.label}${resume.page ? ` · page ${resume.page}` : ''}` : 'All caught up'}</small>
+            <span>{!resume ? 'All caught up' : readCount(entry) ? 'Resume' : 'Start reading'}</span>
+            <small>{resume ? `${resume.label}${resume.page ? ` · page ${resume.page}` : ''}` : `${totalCount(entry)} chapters read`}</small>
           </span>
         </button>
         <button type="button" className={`icon-btn icon-btn--xl${entry.inLibrary ? ' is-accent' : ''}`} aria-pressed={entry.inLibrary}
@@ -169,99 +207,38 @@ export default function EntryPage() {
           <Icon name={entry.inLibrary ? 'bookmarkFill' : 'bookmark'} />
         </button>
         <IconButton icon="download" label="Download unread chapters" onClick={downloadUnread} />
-        <button type="button" className={`icon-btn icon-btn--xl${refreshing ? ' is-spinning' : ''}`} aria-label="Refresh entry" onClick={refresh}>
+        <button type="button" className={`icon-btn icon-btn--xl${refreshing ? ' is-spinning' : ''}`} aria-label="Refresh title" onClick={refresh}>
           <Icon name="refresh" />
         </button>
       </div>
 
-      {remote.saved && <p className="hint pad-x pad-t">Offline · showing the copy saved on this device.</p>}
+      {remote.saved && <div className="pad-x pad-t-sm"><Banner icon="info">Offline · showing the copy saved on this device</Banner></div>}
 
-      <div className="chips pad-x pad-t">
-        {parent && <Link to={`/entry/${parent.id}`} className="chip"><Icon name="library" size={14} />{parent.title}</Link>}
-        <span className="chip chip--static" title="Set automatically from your reading progress">
-          <span className={`dot dot--status-${statusOf(entry)}`} />{STATUS_LABEL[statusOf(entry)]}
-        </span>
-        {userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => (
-          <button key={t.id} type="button" className="chip" onClick={() => setFiling(true)}>{t.name}</button>
-        ))}
-        <button type="button" className="chip chip--dashed" onClick={() => setFiling(true)}>
-          <Icon name="plus" size={15} />{entry.tabs.length ? '' : 'Add to tab'}
+      <div className="facts pad-x pad-t">
+        <div className="fact"><span>Chapters</span><strong>{loaded ? totalCount(entry) : '…'}</strong></div>
+        <div className="fact"><span>Unread</span><strong className={unread ? 'accent-text' : ''}>{loaded || entry.counts ? unread : '…'}</strong></div>
+        <div className="fact"><span>Read</span><strong>{progressPct(entry)}%</strong><span className="bar"><span style={{ width: `${progressPct(entry)}%` }} /></span></div>
+        <button type="button" className="fact fact--btn" onClick={() => setPanel('sources')}>
+          <span>Source</span><strong className="ellipsis">{main?.name ?? store.source(main?.sourceId ?? '')?.name ?? '—'}</strong>
+          {entry.sources.length > 1 && <em>+{entry.sources.length - 1} more</em>}
         </button>
+        <div className="fact"><span>Status</span><strong><span className={`dot dot--${entry.publishing.toLowerCase()}`} />{entry.publishing}</strong></div>
+        <div className="fact"><span>Last read</span><strong>{entry.lastReadAgo !== undefined ? `${agoLabel(entry.lastReadAgo)} ago` : 'Never'}</strong></div>
       </div>
 
-      <div className="pad-x pad-t">
-        <div className="panel panel--flush">
-          <div className="split">
-            <strong>{readCount(entry)} of {all.length} read</strong>
-            <span className="accent-text">{counts.unread} unread</span>
-          </div>
-          <span className="bar bar--thick"><span style={{ width: `${progressPct(entry)}%` }} /></span>
-          <div className="card-meta">
-            {entry.lastReadAgo !== undefined ? `Last read ${agoLabel(entry.lastReadAgo)} ago` : 'Not started'} · {counts.bookmarked} bookmarks · {counts.downloaded} downloaded
-          </div>
+      {(entry.description || entry.tags.length > 0) && (
+        <div className="pad-x pad-t">
+          {entry.description && <>
+            <p className={`desc${expanded ? ' is-open' : ''}`}>{entry.description}</p>
+            <button type="button" className="link-btn" onClick={() => setExpanded((x) => !x)}>{expanded ? 'Less' : 'More'}</button>
+          </>}
+          {entry.tags.length > 0 && <div className="chips pad-t-sm">{entry.tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
         </div>
-      </div>
-
-      <div className="pad-x pad-t">
-        <p className={`desc${expanded ? ' is-open' : ''}`}>{entry.description}</p>
-        <button type="button" className="link-btn" onClick={() => setExpanded((x) => !x)}>{expanded ? 'Less' : 'More'}</button>
-      </div>
-
-      <div className="chips pad-x pad-t-sm">
-        {entry.tags.map((t) => <span key={t} className="tag">{t}</span>)}
-      </div>
-
-      <section className="section pad-x">
-        <SectionHead title="Sources" count={entry.sources.length} action="Manage"
-          onAction={() => (entry.remote ? setSourcesOpen(true) : store.toast('Linking sources needs a server'))} />
-        <div className="grid3">
-          {entry.sources.map((s, i) => {
-            // Server sources are not in the local list; their name and icon travel with the title.
-            const src = store.source(s.sourceId) ?? (s.name ? { name: s.name, letter: s.name[0], color: '#22222A', lang: '' } : undefined)
-            if (!src) return null
-            return (
-              <div key={`${s.sourceId}-${s.mangaUrl ?? i}`} className={`tile${s.main ? ' tile--main' : ''}`}>
-                <div className="split">
-                  <SourceIcon letter={src.letter} color={src.color} size={38} url={s.iconUrl} />
-                  {s.main && <span className="tag tag--accent">Main</span>}
-                </div>
-                <div className="tile__name">{src.name}</div>
-                <div className="card-meta">{s.chapters} ch{src.lang ? ` · ${src.lang}` : ''}</div>
-                <label className="switch-row">
-                  <input type="checkbox" role="switch" className="switch" checked={s.following} onChange={() => store.toggleFollow(entry.id, s.sourceId, s.mangaUrl)}
-                    aria-label={`Follow new chapters from ${src.name}`} />
-                  <span>{s.following ? 'Following' : 'Paused'}</span>
-                </label>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      {(kids.length > 0 || !entry.parentId) && (
-        <section className="section pad-x">
-          <SectionHead title="Titles in this entry" count={kids.length} />
-          <div className="grid3">
-            {kids.map((k) => (
-              <Link key={k.id} to={`/entry/${k.id}`} className="card">
-                <div className="thumb">
-                  <Cover art={k.art} title={k.title} url={k.coverUrl} />
-                  {newCount(k) > 0 && <span className="badge badge--tr">{newCount(k)}</span>}
-                </div>
-                <div className="card-title card-title--2">{k.title}</div>
-                <div className="card-meta">{visibleChapters(k).length} ch · {unreadCount(k)} unread</div>
-              </Link>
-            ))}
-            <button type="button" className="add-tile" onClick={() => (entry.remote || !store.entries.some((e) => e.remote) ? setNesting(true) : store.toast('Nesting needs a server title'))}>
-              <Icon name="plus" size={22} />Add title
-            </button>
-          </div>
-        </section>
       )}
 
       <section className="section pad-x">
         <div className="section-head">
-          <h2 className="h2">Chapters<span className="h2__count">{entry.remote && !entry.remote.chaptersLoaded ? '…' : all.length}</span></h2>
+          <h2 className="h2">Chapters<span className="h2__count">{loaded ? all.length : '…'}</span></h2>
           <div className="row-gap">
             <IconButton icon="sort" label={descending ? 'Show oldest first' : 'Show newest first'} onClick={() => setDescending((d) => !d)} />
             <IconButton icon="select" label={selecting ? 'Done selecting' : 'Select chapters'} active={selecting}
@@ -270,37 +247,53 @@ export default function EntryPage() {
         </div>
         <div className="chips">
           <Chip on={filter === 'all'} onClick={() => setFilter('all')}>All</Chip>
-          <Chip on={filter === 'unread'} onClick={() => setFilter('unread')}>Unread {counts.unread}</Chip>
-          <Chip on={filter === 'bookmarked'} onClick={() => setFilter('bookmarked')}>Bookmarked {counts.bookmarked}</Chip>
-          <Chip on={filter === 'downloaded'} onClick={() => setFilter('downloaded')}>Downloaded {counts.downloaded}</Chip>
+          <Chip on={filter === 'unread'} onClick={() => setFilter('unread')}>Unread {unread}</Chip>
+          <Chip on={filter === 'bookmarked'} onClick={() => setFilter('bookmarked')}>Bookmarked {bookmarked}</Chip>
+          <Chip on={filter === 'downloaded'} onClick={() => setFilter('downloaded')}>Downloaded {downloaded}</Chip>
         </div>
 
-        {entry.remote && !entry.remote.chaptersLoaded && <p className="hint pad-t">{remote.error ? `Couldn't load chapters: ${remote.error}` : 'Loading chapters…'}</p>}
-        {entry.remote && remote.error && entry.remote.chaptersLoaded && <p className="hint pad-t">Refresh failed: {remote.error}</p>}
+        {!loaded && (remote.error
+          ? <div className="pad-t"><Empty icon="alert" tone="error" title="Couldn't load chapters" detail={remote.error} action={{ label: 'Try again', onClick: () => loadRemote() }} /></div>
+          : <div className="pad-t"><Loading label="Loading chapters" /></div>)}
+        {loaded && remote.error && <div className="pad-t"><Banner icon="alert" tone="error">Refresh failed: {remote.error}</Banner></div>}
+        {loaded && chapters.length === 0 && (
+          <div className="pad-t"><Empty icon={emptyFor[filter].icon} tone={emptyFor[filter].done ? 'done' : 'neutral'} title={emptyFor[filter].title} detail={emptyFor[filter].detail} /></div>
+        )}
+
         <div className="grid3 pad-t">
           {chapters.slice(0, shown).map((c) => {
             const current = resume?.id === c.id
             const isSelected = selected.has(c.id)
+            const lp = longPress(c)
+            const progress = !c.downloaded ? progressOf(c) : undefined
             return (
               <button key={c.id} type="button" className={`chapter${current ? ' is-current' : ''}${isSelected ? ' is-selected' : ''}`}
-                aria-pressed={selecting ? isSelected : undefined} onClick={() => openChapter(c)}>
+                aria-pressed={selecting ? isSelected : undefined} onClick={() => { if (!lp.wasLongPress()) openChapter(c) }}
+                onPointerDown={lp.onPointerDown} onPointerMove={lp.onPointerMove} onPointerUp={lp.onPointerUp} onPointerLeave={lp.onPointerLeave} onContextMenu={lp.onContextMenu}>
                 <div className={`chapter__thumb${c.read ? ' is-read' : ''}`}>
                   <PageThumb layout={c.layout} />
-                  {c.isNew && !c.read && <span className="badge badge--tl">New</span>}
-                  {!c.isNew && c.versions > 1 && <span className="badge badge--tl badge--glass">{c.versions} versions</span>}
-                  {c.insertedFrom && <span className="badge badge--tl badge--glass">Added</span>}
-                  {c.part && <span className="badge badge--tl badge--glass">Split</span>}
+                  <span className="chapter__badges">
+                    {c.isNew && !c.read && <span className="badge">New</span>}
+                    {c.insertedFrom && <span className="badge badge--glass">Added</span>}
+                    {c.range && <span className="badge badge--glass">Part</span>}
+                  </span>
+                  {c.versions > 1 && (
+                    <span role="button" tabIndex={0} className="badge badge--glass chapter__versions" aria-label={`${c.versions} versions, choose one`}
+                      onClick={(e) => { e.stopPropagation(); setSheetFor(c.id) }}>
+                      <Icon name="layers" size={11} />{c.versions}
+                    </span>
+                  )}
                   <span className="chapter__flags">
                     {c.bookmarked && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
                     {c.downloaded && <span className="flag"><Icon name="download" size={12} stroke={2.2} label="Downloaded" /></span>}
-                    {!c.downloaded && progressOf(c) !== undefined && <span className="flag">{Math.round(progressOf(c)! * 100)}%</span>}
+                    {progress !== undefined && <span className="flag">{Math.round(progress * 100)}%</span>}
                   </span>
                   {c.read && <span className="badge badge--bl badge--glass"><Icon name="check" size={11} stroke={2.6} />Read</span>}
-                  {current && c.page > 0 && <span className="chapter__progress"><span style={{ width: `${(c.page / c.pages) * 100}%` }} /></span>}
+                  {current && c.page > 0 && c.pages > 0 && <span className="chapter__progress"><span style={{ width: `${(c.page / c.pages) * 100}%` }} /></span>}
                   {selecting && <span className={`chapter__check${isSelected ? ' is-on' : ''}`}>{isSelected && <Icon name="check" size={14} stroke={2.6} />}</span>}
                 </div>
                 <div className="card-title">{c.label}</div>
-                <div className="card-meta">{c.part ?? (c.insertedFrom ? `${c.title} · from ${c.insertedFrom}` : current && c.page ? `${c.title} · p. ${c.page}` : `${c.title} · ${c.date}`)}</div>
+                <div className="card-meta">{c.part ?? (c.insertedFrom ? `from ${c.insertedFrom}` : current && c.page ? `${c.title} · p. ${c.page}` : `${c.title}${c.date ? ` · ${c.date}` : ''}`)}</div>
               </button>
             )
           })}
@@ -310,11 +303,12 @@ export default function EntryPage() {
             <button type="button" className="btn btn--ghost" onClick={() => setShown((n) => n + 24)}>Show more · {chapters.length - shown} left</button>
           </div>
         )}
+        {loaded && all.length > 0 && <p className="hint pad-t">Long-press a chapter for versions, splitting and more.</p>}
 
         {removed.length > 0 && (
           <div className="center pad-t">
             <button type="button" className="btn btn--ghost" onClick={() => setShowRemoved((x) => !x)}>
-              <Icon name="undo" size={15} /> {removed.length} removed chapters · {showRemoved ? 'Hide' : 'Restore'}
+              <Icon name="undo" size={15} /> {removed.length} removed chapter{removed.length === 1 ? '' : 's'} · {showRemoved ? 'Hide' : 'Restore'}
             </button>
             {showRemoved && (
               <div className="chips wrap pad-t-sm" style={{ justifyContent: 'center' }}>
@@ -329,8 +323,18 @@ export default function EntryPage() {
         )}
       </section>
 
-      <Sheet open={filing} title="Library tabs" onClose={() => setFiling(false)}>
+      <Sheet open={panel === 'options'} title={entry.title} onClose={() => setPanel(null)}>
+        <div className="menu">
+          <MenuRow icon="folder" title="Library tabs" detail={userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => t.name).join(', ') || 'Not in any tab'} onClick={() => setPanel('tabs')} />
+          <MenuRow icon="sources" title="Sources" detail={`${entry.sources.length} linked · main: ${main?.name ?? '—'}`} onClick={() => setPanel('sources')} />
+          <MenuRow icon="books" title="Series" detail={kids.length ? `${kids.length} title${kids.length === 1 ? '' : 's'} inside` : parent ? `Part of ${parent.title}` : 'Group volumes or seasons together'} onClick={() => setPanel('series')} />
+          <MenuRow icon="globe" title="Open website" detail={entry.remote?.url ? new URL(entry.remote.url).hostname : 'Not available'} onClick={() => { setPanel(null); openWebsite() }} />
+        </div>
+      </Sheet>
+
+      <Sheet open={panel === 'tabs'} title="Library tabs" onClose={() => setPanel(null)}>
         <p className="hint">Pick the tabs this title shows in. A title can be in more than one.</p>
+        {userTabs.length === 0 && <Empty compact icon="folder" title="No tabs yet" detail="Create one to sort your library." />}
         <div className="check-list">
           {userTabs.map((t) => (
             <label key={t.id} className="check-row">
@@ -345,39 +349,84 @@ export default function EntryPage() {
         }}><Icon name="plus" size={16} />New tab</button>
       </Sheet>
 
-      <Sheet open={sourcesOpen} title="Sources" onClose={() => setSourcesOpen(false)}>
-        <p className="hint">Chapters from every source are merged; the main source is the one read and supplies the details.</p>
+      <Sheet open={panel === 'sources'} title="Sources" onClose={() => setPanel(null)}>
+        <p className="hint">Chapters from every source are merged; numbers that match become versions. The main source supplies the details and is read first.</p>
         <div className="check-list">
           {entry.sources.map((s, i) => (
             <div key={`${s.sourceId}-${s.mangaUrl ?? i}`} className="check-row">
-              <span className="check-row__name">{s.name ?? s.sourceId}<span className="card-meta"> · {s.chapters} ch{s.following ? '' : ' · paused'}</span></span>
-              {s.main ? <span className="tag tag--accent">Main</span> : (
-                <span className="row-gap">
-                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => store.setMainSource(entry.id, s.sourceId, s.mangaUrl)}>Make main</button>
-                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => store.unlinkSource(entry.id, s.sourceId, s.mangaUrl)}>Unlink</button>
-                </span>
-              )}
+              <span className="check-row__name check-row__name--stack">
+                <strong>{s.name ?? store.source(s.sourceId)?.name ?? s.sourceId}</strong>
+                <span className="card-meta">{s.chapters} chapters · {s.following ? 'checked for new chapters' : 'not checked'}</span>
+              </span>
+              <span className="row-gap">
+                <input type="checkbox" role="switch" className="switch" checked={s.following} aria-label="Check this source for new chapters"
+                  onChange={() => store.toggleFollow(entry.id, s.sourceId, s.mangaUrl)} />
+                {s.main ? <span className="tag tag--accent">Main</span> : (
+                  <button type="button" className="icon-btn icon-btn--sm" aria-label="Source actions" onClick={() => {
+                    if (window.confirm(`Make ${s.name ?? 'this source'} the main source? Choose Cancel to unlink it instead.`)) void store.setMainSource(entry.id, s.sourceId, s.mangaUrl)
+                    else if (window.confirm(`Unlink ${s.name ?? 'this source'}?`)) void store.unlinkSource(entry.id, s.sourceId, s.mangaUrl)
+                  }}><Icon name="more" size={16} /></button>
+                )}
+              </span>
             </div>
           ))}
         </div>
-        <button type="button" className="btn btn--ghost btn--block" onClick={() => { setSourcesOpen(false); setLinking(true) }}><Icon name="plus" size={16} />Link another source</button>
+        {entry.remote
+          ? <button type="button" className="btn btn--ghost btn--block" onClick={() => setPanel('link')}><Icon name="plus" size={16} />Link another source</button>
+          : <p className="hint">Linking sources needs a server.</p>}
       </Sheet>
 
-      {linking && <SourcePicker query={entry.title} onClose={() => setLinking(false)}
-        onPick={(m) => { setLinking(false); void store.linkSource(entry.id, m) }} />}
+      {panel === 'link' && <SourcePicker query={entry.title} title="Link a source" onClose={() => setPanel(null)}
+        onPick={(m) => { setPanel(null); void store.linkSource(entry.id, m) }} />}
 
-      <Sheet open={nesting} title="Titles in this entry" onClose={() => setNesting(false)}>
-        <p className="hint">Pick library titles to show inside “{entry.title}”, like volumes or seasons of a series.</p>
-        <div className="check-list">
-          {[...kids, ...library].map((t) => (
-            <label key={t.id} className="check-row">
-              <span className="check-row__name">{t.title}</span>
-              <input type="checkbox" checked={t.parentId === entry.id} onChange={() => store.setParent(t.id, t.parentId === entry.id ? undefined : entry.id)} />
-            </label>
+      <Sheet open={panel === 'series'} title="Series" onClose={() => setPanel(null)}>
+        {parent && (
+          <div className="pad-b">
+            <Empty compact icon="books" title={`Part of ${parent.title}`} action={{ label: 'Take out', onClick: () => store.setParent(entry.id, undefined) }} />
+          </div>
+        )}
+        {kids.length > 0 && <div className="grid3 pad-b">
+          {kids.map((k) => (
+            <Link key={k.id} to={`/entry/${k.id}`} className="card" onClick={() => setPanel(null)}>
+              <div className="thumb"><Cover art={k.art} title={k.title} url={k.coverUrl} />{newCount(k) > 0 && <span className="badge badge--tr">{newCount(k)}</span>}</div>
+              <div className="card-title card-title--2">{k.title}</div>
+            </Link>
           ))}
-          {!kids.length && !library.length && <p className="hint">No other library titles to nest.</p>}
-        </div>
+        </div>}
+        {!parent && <>
+          <p className="hint">Titles inside “{entry.title}” show as one series in your library.</p>
+          <div className="check-list">
+            {[...kids, ...nestable].map((t) => (
+              <label key={t.id} className="check-row">
+                <span className="check-row__name">{t.title}</span>
+                <input type="checkbox" checked={t.parentId === entry.id} onChange={() => store.setParent(t.id, t.parentId === entry.id ? undefined : entry.id)} />
+              </label>
+            ))}
+          </div>
+          {!kids.length && !nestable.length && <Empty compact icon="books" title="Nothing to group" detail="Add more titles to your library first." />}
+        </>}
       </Sheet>
+
+      {sheetChapter && (
+        <ChapterSheet entryId={entry.id} chapter={sheetChapter} onClose={() => setSheetFor(null)}
+          onInsert={() => { setInsertAfter(sheetChapter); setSheetFor(null); setPanel('insert') }} canEdit={!!entry.remote} />
+      )}
+
+      {panel === 'insert' && insertAfter && !pickedTitle && (
+        <SourcePicker query={entry.title} title={`Insert after ${insertAfter.label}`} onClose={() => { setPanel(null); setInsertAfter(null) }}
+          onPick={(m) => setPickedTitle(m)} />
+      )}
+      {panel === 'insert' && insertAfter && pickedTitle && (
+        <ChapterPicker title={pickedTitle} onClose={() => { setPanel(null); setPickedTitle(null); setInsertAfter(null) }}
+          onPick={(raw) => {
+            const c = toChapter(raw, pickedTitle.sourceId)
+            store.insertChapter(entry.id, {
+              sourceId: pickedTitle.sourceId, mangaUrl: pickedTitle.mangaUrl, chapterUrl: raw.url, remoteId: raw.id,
+              number: insertNumber(insertAfter), label: c.label, fromTitle: pickedTitle.title ?? pickedTitle.name ?? '',
+            })
+            setPanel(null); setPickedTitle(null); setInsertAfter(null)
+          }} />
+      )}
 
       {selecting && (
         <div className="action-bar" role="toolbar" aria-label="Chapter actions">
@@ -390,5 +439,125 @@ export default function EntryPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function MenuRow({ icon, title, detail, onClick }: { icon: Parameters<typeof Icon>[0]['name']; title: string; detail?: string; onClick: () => void }) {
+  return (
+    <button type="button" className="menu__row" onClick={onClick}>
+      <span className="menu__icon"><Icon name={icon} size={20} /></span>
+      <span className="menu__text"><strong>{title}</strong>{detail && <span>{detail}</span>}</span>
+      <Icon name="chevronRight" size={18} />
+    </button>
+  )
+}
+
+/** Everything for one chapter: which version to read, marks, download, splitting and inserting after it. */
+function ChapterSheet({ entryId, chapter, onClose, onInsert, canEdit }: { entryId: string; chapter: Chapter; onClose: () => void; onInsert: () => void; canEdit: boolean }) {
+  const store = useStore()
+  const entry = store.entry(entryId)!
+  const whole = entry.chapters.find((c) => c.id === physicalIdOf(chapter.id)) ?? chapter
+  const splitKey = whole.sourceUrl ? chapterKey(whole.sourceId, whole.sourceUrl) : ''
+  const breaks = entry.splits?.[splitKey] ?? []
+  const [splitting, setSplitting] = useState(false)
+  const [pages, setPages] = useState(whole.pages)
+  const [pagesError, setPagesError] = useState<string>()
+  const ids = new Set([chapter.id])
+  const done = (fn: () => void) => { fn(); onClose() }
+
+  // Splitting needs the page count; fetch it if the chapter was never opened.
+  useEffect(() => {
+    if (!splitting || pages || !whole.remoteId) return
+    const saved = whole.sourceUrl ? getSaved(chapterKey(whole.sourceId, whole.sourceUrl)) : undefined
+    ;(saved ? Promise.resolve(saved.pages) : getPages(whole.remoteId))
+      .then((list) => { setPages(list.length); store.editChapters(entryId, new Set([whole.id]), { pages: list.length }) })
+      .catch((e: Error) => setPagesError(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitting])
+
+  const evenly = (parts: number) => Array.from({ length: parts - 1 }, (_, i) => Math.round(((i + 1) * pages) / parts) + 1)
+
+  return (
+    <Sheet open title={chapter.label} onClose={onClose}>
+      <p className="hint">{chapter.insertedFrom ? `From ${chapter.insertedFrom}` : chapter.part ?? chapter.title}</p>
+
+      {(whole.alts?.length ?? 0) > 1 && <>
+        <div className="label label--flush">Read from</div>
+        <div className="check-list">
+          {whole.alts!.map((a, i) => (
+            <button key={`${a.sourceId}-${a.url}`} type="button" className="check-row" onClick={() => done(() => store.chooseVersion(entryId, whole.id, i))}>
+              <span className="check-row__name check-row__name--stack"><strong>{a.name}</strong><span className="card-meta">{a.title}</span></span>
+              {a.remoteId === whole.remoteId && <span className="tag tag--accent">Reading</span>}
+            </button>
+          ))}
+        </div>
+      </>}
+
+      <div className="sheet-actions">
+        <button type="button" onClick={() => done(() => store.editChapters(entryId, ids, chapter.read ? { read: false } : { read: true, isNew: false }))}>
+          <Icon name={chapter.read ? 'undo' : 'check'} size={18} />{chapter.read ? 'Mark unread' : 'Mark read'}
+        </button>
+        <button type="button" onClick={() => done(() => store.editChapters(entryId, ids, { bookmarked: !chapter.bookmarked }))}>
+          <Icon name={chapter.bookmarked ? 'bookmarkFill' : 'bookmark'} size={18} />{chapter.bookmarked ? 'Remove bookmark' : 'Bookmark'}
+        </button>
+        {canEdit && (
+          <button type="button" onClick={() => done(() => (chapter.downloaded ? store.removeDownloads(entryId, ids) : store.downloadChapters(entryId, ids)))}>
+            <Icon name={chapter.downloaded ? 'trash' : 'download'} size={18} />{chapter.downloaded ? 'Remove download' : 'Download'}
+          </button>
+        )}
+        {canEdit && !chapter.insertId && (
+          <button type="button" onClick={() => (breaks.length ? done(() => store.splitChapter(entryId, whole.id, [])) : setSplitting((x) => !x))}>
+            <Icon name="layers" size={18} />{breaks.length ? 'Join parts' : 'Split into parts'}
+          </button>
+        )}
+        {canEdit && <button type="button" onClick={onInsert}><Icon name="plus" size={18} />Insert after</button>}
+        <button type="button" onClick={() => done(() => store.editChapters(entryId, ids, { removed: true }))}>
+          <Icon name="trash" size={18} />{chapter.insertId ? 'Remove insert' : 'Hide chapter'}
+        </button>
+      </div>
+
+      {splitting && (
+        <div className="pad-t">
+          <div className="label label--flush">Split {whole.label}</div>
+          {pagesError ? <Empty compact tone="error" icon="alert" title="Couldn't count the pages" detail={pagesError} />
+            : !pages ? <Loading label="Counting pages" shape="page" />
+            : <>
+              {pages < 4 && <Empty compact icon="info" title="Too short to split" detail={`This chapter has ${pages} page${pages === 1 ? '' : 's'}.`} />}
+              {pages >= 4 && <p className="hint">{pages} pages. Each part shows as its own chapter; progress carries across.</p>}
+              <div className="split-grid">
+                {[2, 3, 4, 5, 6].filter((n) => pages >= n * 2).map((n) => (
+                  <button key={n} type="button" className="btn btn--ghost" onClick={() => done(() => store.splitChapter(entryId, whole.id, evenly(n)))}>
+                    <strong>{n} parts</strong><small>{partRanges(pages, evenly(n)).map(([a, b]) => b - a + 1).join(' · ')} pages</small>
+                  </button>
+                ))}
+              </div>
+            </>}
+        </div>
+      )}
+    </Sheet>
+  )
+}
+
+/** Lists a title's chapters on its source, to insert one into an entry. */
+function ChapterPicker({ title, onPick, onClose }: { title: PickedTitle; onPick: (c: SChapter) => void; onClose: () => void }) {
+  const [list, setList] = useState<SChapter[] | null>(null)
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    getChapters(title.mangaId).then((l) => setList([...l].sort((a, b) => b.chapterNumber - a.chapterNumber))).catch((e: Error) => setError(e.message))
+  }, [title.mangaId])
+  return (
+    <Sheet open title={title.title ?? 'Pick a chapter'} onClose={onClose}>
+      {error && <Empty tone="error" icon="alert" title="Couldn't load chapters" detail={error} />}
+      {!list && !error && <Loading label="Loading chapters" shape="rows" />}
+      {list && !list.length && <Empty icon="book" title="No chapters" detail="This source has no chapters for the title." />}
+      <div className="check-list">
+        {list?.map((c) => (
+          <button key={c.id} type="button" className="check-row" onClick={() => onPick(c)}>
+            <span className="check-row__name check-row__name--stack"><strong>{toChapter(c, title.sourceId).label}</strong><span className="card-meta">{c.name}{c.scanlator ? ` · ${c.scanlator}` : ''}</span></span>
+            <Icon name="plus" size={18} />
+          </button>
+        ))}
+      </div>
+    </Sheet>
   )
 }

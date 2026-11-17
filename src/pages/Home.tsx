@@ -3,6 +3,7 @@ import { TLink as Link, useNav } from '../components/Nav'
 import { Cover } from '../components/Art'
 import { IconButton, PageHead, SectionHead, ServerStatus } from '../components/Chrome'
 import { Icon } from '../components/Icon'
+import { Empty } from '../components/Status'
 import { catalogFor } from '../data/mock'
 import { agoLabel, newCount, resumeChapter, useStore } from '../data/store'
 
@@ -90,7 +91,7 @@ export default function Home() {
           <h2 className="h2">New chapters<span className="h2__count">{totalNew}</span></h2>
           {updates.length > 0 && <button type="button" className="link-btn" onClick={store.markUpdatesSeen}>Mark all seen</button>}
         </div>
-        {updates.length === 0 && <p className="empty">You're all caught up.</p>}
+        {updates.length === 0 && <Empty icon="check" tone="done" title="All caught up" detail="New chapters from your library show up here." />}
         {[{ label: 'Today', list: today }, { label: 'Earlier', list: earlier }].filter((g) => g.list.length).map((g) => (
           <div key={g.label}>
             <div className="label">{g.label}</div>

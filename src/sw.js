@@ -2,7 +2,7 @@
 // __VERSION__ is replaced at build time, so every deploy ships a changed worker the app can offer as an update.
 const VERSION = '__VERSION__'
 const CACHE = `midoku-${VERSION}`
-const SHELL = ['/', '/manifest.webmanifest', '/icon.svg']
+const SHELL = ['/', '/manifest.webmanifest', '/icon.svg', ...[] /* __ASSETS__ */]
 // Kept across deploys: downloaded chapters, cached covers/icons, and the app's offline data (cache.ts).
 const DOWNLOADS = 'midoku-downloads'
 const IMAGES = 'midoku-images'

@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react'
+import { Empty } from '../components/Status'
 import { useSettings } from '../data/settings'
 import { RemoteBrowse } from './Remote'
 import { useParams } from 'react-router-dom'
@@ -30,7 +31,7 @@ function SampleSourceBrowse() {
   }, [id, mode, query, pages])
 
   if (!source) {
-    return <div className="page pad-x"><p className="empty">Unknown source.</p><Link to="/sources" className="btn btn--ghost">Back to sources</Link></div>
+    return <div className="page pad-x"><Empty icon="sources" title="Source not found" detail="It may have been uninstalled." /><Link to="/sources" className="btn btn--ghost">Back to sources</Link></div>
   }
 
   const submit = (e: FormEvent) => {
@@ -99,7 +100,7 @@ function SampleSourceBrowse() {
           )
         })}
       </div>
-      {items.length === 0 && <p className="empty pad-x">No results.</p>}
+      {items.length === 0 && <div className="pad-x pad-t"><Empty icon="search" title="No results" detail="Try another search on this source." /></div>}
       {items.length > 0 && pages < 4 && (
         <div className="center pad-t"><button type="button" className="btn btn--ghost" onClick={() => setPages((p) => p + 1)}>Load more</button></div>
       )}

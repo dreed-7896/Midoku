@@ -1,17 +1,18 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
-  DbLibrary, deleteEntrySource, deleteTabRow, flushWrites, loadChapterStates, loadLibrary, onWriteError, saveChapterStates,
-  saveEntry, saveEntrySource, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
+  DbLibrary, deleteEntrySource, deleteInserted, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
+  saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
 import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
 import {
-  applyStates, entriesFromDb, entryRow, LibrarySnapshot, mergeChapters, rowState, sourceRow, stateRow, statesOf, tabRow, toTab, withDownloads,
+  applyStates, entriesFromDb, entryRow, expandSplits, insertedFromRow, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
+  sourceRow, stateRow, statesOf, tabRow, toTab, withDownloads, withInserted,
 } from './library'
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
 import { useSettings } from './settings'
 import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
-import type { Chapter, Entry, EntrySource, LibraryFilters, LibraryTab, Source, Status } from './types'
+import type { Chapter, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, Source, Status } from './types'
 
 /*
  * Where things live:
@@ -178,13 +179,44 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
     }
     const newTabId = (prefix: string) => (get().server.status !== 'off' ? crypto.randomUUID() : `${prefix}-${Date.now().toString(36)}`)
 
-    /** Reading state from the database for a saved title whose chapters are loaded. */
+    /** Reading state, split chapters and inserted chapters from the database, for a saved title whose chapters are loaded. */
     const loadStates = (id: string) => {
       const dbId = find(id)?.dbId
       if (!dbId || get().server.status === 'signin') return
-      loadChapterStates(dbId)
-        .then((rows) => editEntry(id, (e) => ({ ...e, chapters: applyStates(e.chapters, rows.map(rowState)) })))
+      loadEntryExtras(dbId)
+        .then(({ states, splits, inserts }) => editEntry(id, (e) => {
+          const inserted = inserts.map(insertedFromRow)
+          return {
+            ...e,
+            inserted,
+            splits: Object.fromEntries(splits.map((r) => [chapterKey(r.source_id, r.chapter_url), r.breaks])),
+            chapters: withDownloads(applyStates(withInserted(e.chapters, inserted), states.map(rowState))),
+          }
+        }))
         .catch((e: Error) => { if (!isOffline(e)) toast(`Couldn't load reading progress: ${e.message}`) })
+    }
+
+    /**
+     * Turns a change on shown chapters (which may be parts of a split chapter) into changes on the whole
+     * chapters, where reading state lives. Reading part 1 moves the whole chapter's page past it;
+     * only the last part marks the whole chapter read.
+     */
+    const toPhysical = (e: Entry, ids: Set<string>, patch: Partial<Chapter>) => {
+      const shown = visibleChapters(e)
+      const out = new Map<string, Partial<Chapter>>()
+      for (const id of ids) {
+        const part = shown.find((c) => c.id === id)
+        if (!part?.range || !part.physicalId) { out.set(physicalIdOf(id), { ...out.get(physicalIdOf(id)), ...patch }); continue }
+        const whole = e.chapters.find((c) => c.id === part.physicalId)
+        if (!whole) continue
+        const parts = shown.filter((c) => c.physicalId === whole.id)
+        const last = parts[parts.length - 1]?.id === part.id
+        const p: Partial<Chapter> = { ...patch }
+        if (patch.read === true && !last) { delete p.read; p.page = Math.max(whole.page, part.range[1]) }
+        if (patch.read === false) { p.read = false; p.page = Math.min(whole.page, part.range[0] - 1) }
+        out.set(whole.id, { ...out.get(whole.id), ...p })
+      }
+      return out
     }
 
     /** Merges fresh server data into a title, keeping everything Midoku knows about it. */
@@ -210,7 +242,9 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           counts: fresh.counts && prev.counts
             ? { total: fresh.counts.total, unread: Math.max(0, fresh.counts.total - (prev.counts.total - prev.counts.unread)) }
             : fresh.counts,
-          chapters: fresh.remote?.chaptersLoaded ? withDownloads(applyStates(fresh.chapters, statesOf(prev.chapters))) : prev.chapters,
+          splits: prev.splits ?? fresh.splits,
+          inserted: prev.inserted ?? fresh.inserted,
+          chapters: fresh.remote?.chaptersLoaded ? withDownloads(applyStates(withInserted(fresh.chapters, prev.inserted ?? fresh.inserted), statesOf(prev.chapters))) : prev.chapters,
         }
         return { ...s, entries: s.entries.map((e) => (e === prev ? next : e)) }
       })
@@ -231,7 +265,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.mangaId != null)
         const lists = await Promise.all(sources.map((s, i) =>
           getChapters(s.mangaId!, refresh)
-            .then((chapters) => ({ sourceId: s.sourceId, mangaUrl: s.mangaUrl, chapters }))
+            .then((chapters) => ({ sourceId: s.sourceId, mangaUrl: s.mangaUrl, name: s.name, chapters }))
             // Only the main source has to answer; another source failing just leaves its versions out.
             .catch((err) => { if (i === 0) throw err; return null })))
         const ok = lists.filter((l): l is NonNullable<typeof l> => !!l)
@@ -276,7 +310,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           try {
             const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.following && s.mangaId != null)
             if (!sources.length) throw new Error('No followed source')
-            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, chapters }))))
+            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, name: s.name, chapters }))))
             const merged = mergeChapters(lists)
             const cur = find(e.id)
             if (cur) {
@@ -286,7 +320,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
               editEntry(cur.id, (x) => ({
                 ...x,
                 updatedAgo: hoursSince(newestUpload(lists)) ?? x.updatedAgo,
-                chapters: x.remote?.chaptersLoaded ? withDownloads(applyStates(merged, statesOf(x.chapters))) : x.chapters,
+                chapters: x.remote?.chaptersLoaded ? withDownloads(applyStates(withInserted(merged, x.inserted), statesOf(x.chapters))) : x.chapters,
                 counts: { total: Math.max(merged.length, read), unread: Math.max(0, merged.length - read) },
               }))
             }
@@ -382,15 +416,72 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       editChapters: (id: string, chapterIds: Set<string>, patch: Partial<Chapter>) => {
         const e = find(id)
         if (!e) return
-        editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (chapterIds.has(c.id) ? { ...c, ...patch } : c)) }))
-        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined) saveChapters(e.id, chapterIds)
+        const changes = toPhysical(e, chapterIds, patch)
+        // Removing an inserted chapter takes the insertion away rather than hiding it.
+        const dropped = patch.removed ? e.chapters.filter((c) => changes.has(c.id) && c.insertId) : []
+        if (dropped.length) {
+          editEntry(e.id, (x) => ({
+            ...x,
+            inserted: x.inserted?.filter((i) => !dropped.some((c) => c.insertId === i.id)),
+            chapters: x.chapters.filter((c) => !dropped.includes(c)),
+          }))
+          if (e.dbId && canSave()) dropped.forEach((c) => deleteInserted(c.insertId!))
+          dropped.forEach((c) => changes.delete(c.id))
+        }
+        editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (changes.has(c.id) ? { ...c, ...changes.get(c.id) } : c)) }))
+        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined) saveChapters(e.id, new Set(changes.keys()))
+      },
+      /** Reads another version (linked source) of a chapter from now on. */
+      chooseVersion: (id: string, chapterId: string, versionIndex: number) => {
+        const e = find(id)
+        const c = e?.chapters.find((x) => x.id === physicalIdOf(chapterId))
+        const v = c?.alts?.[versionIndex]
+        if (!e || !c || !v) return
+        const chosen = showVersion(c, v, true)
+        editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((y) => (y.id === c.id ? chosen : y)) }))
+        const dbId = ensureEntry(e.id)
+        // The pick is saved on the chosen version; the others lose theirs. Reading state goes with it.
+        if (dbId) saveChapterStates(c.alts!.map((a) => stateRow(dbId, { ...chosen, sourceId: a.sourceId, sourceUrl: a.url, preferred: a === v })))
+        toast(`Reading ${v.name}`)
+      },
+      /** Cuts a chapter into parts at the given pages (first page of every part after the first). */
+      splitChapter: (id: string, chapterId: string, breaks: number[]) => {
+        const e = find(id)
+        const c = e?.chapters.find((x) => x.id === physicalIdOf(chapterId))
+        if (!e || !c?.sourceUrl) return
+        const key = chapterKey(c.sourceId, c.sourceUrl)
+        const clean = [...new Set(breaks)].filter((b) => b > 1).sort((a, b) => a - b)
+        editEntry(e.id, (x) => {
+          const { [key]: _old, ...rest } = x.splits ?? {}
+          return { ...x, splits: clean.length ? { ...rest, [key]: clean } : rest }
+        })
+        const dbId = ensureEntry(e.id)
+        if (dbId) {
+          if (clean.length) saveSplit({ entry_id: dbId, source_id: c.sourceId, chapter_url: c.sourceUrl, breaks: clean })
+          else deleteSplit(dbId, c.sourceId, c.sourceUrl)
+        }
+        toast(clean.length ? `${c.label} split into ${clean.length + 1} parts` : `${c.label} is whole again`)
+      },
+      /** Places a chapter from another title or source into this entry. */
+      insertChapter: (id: string, chapter: Omit<InsertedChapter, 'id'>) => {
+        const e = find(id)
+        if (!e) return
+        const ins: InsertedChapter = { ...chapter, id: crypto.randomUUID() }
+        editEntry(e.id, (x) => {
+          const inserted = [...(x.inserted ?? []), ins]
+          return { ...x, inserted, chapters: withDownloads(withInserted(x.chapters, inserted)) }
+        })
+        const dbId = ensureEntry(e.id)
+        if (dbId) saveInserted(insertedRow(dbId, ins))
+        toast(`Added ${ins.label}`)
       },
       /** Saves chapters on this device for offline reading. */
       downloadChapters: (id: string, chapterIds: Set<string>) => {
         const e = find(id)
         if (!e) return
+        const ids = new Set([...chapterIds].map(physicalIdOf))
         const jobs: DownloadJob[] = e.chapters
-          .filter((c) => chapterIds.has(c.id) && c.sourceUrl && c.remoteId)
+          .filter((c) => ids.has(c.id) && c.sourceUrl && c.remoteId)
           .map((c) => ({ key: chapterKey(c.sourceId, c.sourceUrl!), entryId: e.id, title: e.title, label: c.label, remoteId: c.remoteId! }))
         if (!jobs.length) { toast(e.remote ? 'Nothing to download' : 'Downloads need a server'); return }
         const n = download(jobs)
@@ -399,7 +490,8 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       removeDownloads: (id: string, chapterIds: Set<string>) => {
         const e = find(id)
         if (!e) return
-        const keys = e.chapters.filter((c) => chapterIds.has(c.id) && c.sourceUrl).map((c) => chapterKey(c.sourceId, c.sourceUrl!))
+        const ids = new Set([...chapterIds].map(physicalIdOf))
+        const keys = e.chapters.filter((c) => ids.has(c.id) && c.sourceUrl).map((c) => chapterKey(c.sourceId, c.sourceUrl!))
         keys.forEach((k) => void removeDownload(k))
         toast(`Removed ${keys.length} download${keys.length === 1 ? '' : 's'}`)
       },
@@ -413,9 +505,15 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       markUpdatesSeen: () => set((s) => ({ ...s, updatesSeen: true })),
       dismissMini: () => set((s) => ({ ...s, miniHidden: true })),
       /** Saves the reader position; reaching the last page marks the chapter read. */
-      setProgress: (entryId: string, chapterId: string, page: number) => {
+      setProgress: (entryId: string, chapterId: string, pageIn: number) => {
         const e = find(entryId)
         if (!e) return
+        // A part of a split chapter saves its position on the whole chapter.
+        const part = chapterId.includes('~') ? visibleChapters(e).find((c) => c.id === chapterId) : undefined
+        const parts = part ? visibleChapters(e).filter((c) => c.physicalId === part.physicalId) : []
+        const lastPart = !part || parts[parts.length - 1]?.id === part.id
+        if (part?.range) chapterId = part.physicalId!
+        const page = part?.range ? part.range[0] - 1 + pageIn : pageIn
         set((s) => ({
           ...s,
           miniHidden: false,
@@ -424,7 +522,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
             lastReadAgo: 0,
             chapters: x.chapters.map((c) => {
               if (c.id !== chapterId) return c
-              const done = page >= c.pages
+              const done = part ? lastPart && part.pages > 0 && pageIn >= part.pages : page >= c.pages
               return { ...c, page: done ? 0 : page, read: c.read || done, isNew: done ? false : c.isNew }
             }),
           }),
@@ -552,7 +650,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const open = new Map(latest.current.entries.filter((e) => e.remote && (!e.dbId || e.remote.chaptersLoaded)).map((e) => [e.id, e]))
       const merged = entries.map((e) => {
         const o = open.get(e.id)
-        return o?.remote?.chaptersLoaded ? { ...e, chapters: withDownloads(o.chapters), remote: { ...e.remote!, chaptersLoaded: true, url: o.remote.url } } : e
+        // Keep what the open copy already loaded (chapters, inserted and split chapters).
+        return o?.remote?.chaptersLoaded
+          ? { ...e, chapters: withDownloads(o.chapters), inserted: o.inserted, splits: o.splits, remote: { ...e.remote!, chaptersLoaded: true, url: o.remote.url } }
+          : o ? { ...e, inserted: o.inserted ?? e.inserted, splits: o.splits ?? e.splits } : e
       })
       const ids = new Set(entries.map((e) => e.id))
       set((s) => ({ ...s, entries: [...merged, ...[...open.values()].filter((e) => !ids.has(e.id))], tabs, offline, server: { status: 'ready' } }))
@@ -684,7 +785,8 @@ export function useStore(): Store {
 }
 
 // Derived helpers shared by pages.
-export const visibleChapters = (e: Entry) => e.chapters.filter((c) => !c.removed)
+/** Chapters as shown: removed ones hidden, split chapters as their parts. */
+export const visibleChapters = (e: Entry) => expandSplits(e.chapters.filter((c) => !c.removed), e.splits)
 /** Server titles in the library list carry totals until their chapters are loaded. */
 const summaryOnly = (e: Entry) => e.chapters.length === 0 && !!e.counts
 export const totalCount = (e: Entry) => (summaryOnly(e) ? e.counts!.total : visibleChapters(e).length)

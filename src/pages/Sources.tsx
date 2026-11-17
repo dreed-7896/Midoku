@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Empty } from '../components/Status'
 import { useSettings } from '../data/settings'
 import { RemoteSources } from './Remote'
 import { TLink as Link } from '../components/Nav'
@@ -98,7 +99,7 @@ function SampleSources() {
                 </Link>
               ))}
             </div>
-            {rest.length === 0 && pinned.length === 0 && <p className="empty">No extensions match.</p>}
+            {rest.length === 0 && pinned.length === 0 && <Empty icon="search" title="No extensions match" detail="Try another name." />}
           </section>
         </>
       ) : (
@@ -119,7 +120,7 @@ function SampleSources() {
               </div>
             ))}
           </div>
-          {available.filter(match).length === 0 && <p className="empty">Everything here is installed.</p>}
+          {available.filter(match).length === 0 && <Empty icon="check" tone="done" title="Everything is installed" />}
         </section>
       )}
 

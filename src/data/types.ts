@@ -53,8 +53,29 @@ export interface Chapter {
   remoteId?: number
   /** The source's chapter url; reading state in Midoku's database is keyed by it. */
   sourceUrl?: string
-  /** Every physical chapter (one per linked source) stacked in this slot, the shown one first. */
-  alts?: { sourceId: string; url: string; remoteId: number }[]
+  /** Every physical chapter (one per linked source) stacked in this slot. */
+  alts?: ChapterVersion[]
+  /** This version was picked by hand instead of the main source's. */
+  preferred?: boolean
+  /** A part of a split chapter: its pages within the physical chapter (1-based, inclusive). */
+  range?: [number, number]
+  /** For parts: the id of the whole chapter they come from. */
+  physicalId?: string
+  /** A chapter inserted from another title or source (row id in Midoku's database). */
+  insertId?: string
+}
+
+export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string }
+
+export interface InsertedChapter {
+  id: string
+  sourceId: string
+  mangaUrl: string
+  chapterUrl: string
+  remoteId?: number
+  number: number
+  label: string
+  fromTitle: string
 }
 
 export interface EntrySource {
@@ -97,6 +118,10 @@ export interface Entry {
   remote?: { mangaId: number; sourceId: string; mangaUrl: string; url?: string; chaptersLoaded: boolean }
   /** Row id in Midoku's database once the title has been saved there. */
   dbId?: string
+  /** Split chapters: chapter key (source + url) → first page of every part after the first. */
+  splits?: Record<string, number[]>
+  /** Chapters placed in from other titles or sources. */
+  inserted?: InsertedChapter[]
   /** Chapter totals from the library list, used before the chapters themselves are loaded. */
   counts?: { total: number; unread: number }
 }

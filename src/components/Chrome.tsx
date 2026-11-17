@@ -4,6 +4,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { resumeChapter, useStore } from '../data/store'
 import { Cover } from './Art'
 import { Icon, IconName } from './Icon'
+import { Banner } from './Status'
 import { currentScroller, TLink, useNav } from './Nav'
 import { restartToUpdate, useUpdateReady } from '../data/update'
 
@@ -83,7 +84,7 @@ export function UpdateCard() {
 export function ServerStatus() {
   const { server } = useStore()
   const nav = useNav()
-  if (server.status === 'loading') return <p className="hint pad-x pad-t">Loading your library…</p>
+  if (server.status === 'loading') return <div className="pad-x pad-t"><Banner tone="busy">Loading your library…</Banner></div>
   if (server.status !== 'error' && server.status !== 'signin') return null
   const [title, detail] = server.status === 'signin'
     ? ['Locked', 'Enter the app password to see your library.']
@@ -92,7 +93,7 @@ export function ServerStatus() {
     <div className="pad-x pad-t">
       <div className="notice">
         <span className="notice__icon"><Icon name="alert" /></span>
-        <span className="grow"><strong>{title}</strong><span className="card-meta card-meta--wrap">{detail}</span></span>
+        <span className="grow"><strong>{title}</strong><span className="card-meta card-meta--wrap">{detail.length > 140 ? `${detail.slice(0, 140)}…` : detail}</span></span>
         <button type="button" className="btn btn--light btn--sm" onClick={() => nav.go('/settings')}>Settings</button>
       </div>
     </div>

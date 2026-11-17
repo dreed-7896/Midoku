@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Cover, SourceIcon } from '../components/Art'
 import { Chip, IconButton, PageHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'
+import { Banner, Empty, Loading } from '../components/Status'
 import { TLink as Link, useNav } from '../components/Nav'
 import { useStore } from '../data/store'
 import {
@@ -25,13 +26,7 @@ export function sourceError(message: string): { title: string; detail: string } 
 }
 
 function Notice({ title, detail, onRetry }: { title: string; detail: string; onRetry?: () => void }) {
-  return (
-    <div className="notice">
-      <span className="notice__icon"><Icon name="shield" /></span>
-      <span className="grow"><strong>{title}</strong><span className="card-meta card-meta--wrap">{detail}</span></span>
-      {onRetry && <button type="button" className="btn btn--light btn--sm" onClick={onRetry}>Retry</button>}
-    </div>
-  )
+  return <Empty icon="alert" tone="error" title={title} detail={detail} action={onRetry ? { label: 'Retry', onClick: onRetry } : undefined} />
 }
 
 const langLabel = (lang: string) => (lang === 'all' ? 'Multi' : lang.toUpperCase())
@@ -136,10 +131,10 @@ export function RemoteSources() {
 
       <section className="section pad-x">
         {error && <Notice title="Couldn't load extensions" detail={error} onRetry={() => load()} />}
-        {!exts && !error && <p className="hint">Loading extensions…</p>}
-        {exts && list.length === 0 && (
-          <p className="empty">{tab === 'installed' ? 'No extensions installed yet. Open Available to add some.' : 'Nothing matches. Add an extension repository in Suwayomi to see more.'}</p>
-        )}
+        {!exts && !error && <Loading label="Loading extensions" />}
+        {exts && list.length === 0 && (tab === 'installed'
+          ? <Empty icon="sources" title="No extensions yet" detail="Open Available to install sources." />
+          : <Empty icon="search" title="Nothing matches" detail="Try another language or name, or add an extension repository in Suwayomi." />)}
         <div className="grid3">
           {list.slice(0, limit).map((e) => {
             const icon = <SourceIcon letter={e.name[0] ?? '?'} color={ICON_BG} size={42} url={assetUrl(e.iconUrl)} />
@@ -265,10 +260,12 @@ export function RemoteBrowse() {
       <div className="grid3 pad-x pad-t">
         {items.map((m, i) => <MangaCard key={`${m.id}-${i}`} m={m} />)}
       </div>
-      {loading && <p className="hint center pad-t">Loading…</p>}
-      {!loading && !error && items.length === 0 && sourceId && <p className="empty pad-x">No results.</p>}
+      {loading && <div className="pad-x pad-t"><Loading label={query ? `Searching for “${query}”` : 'Loading titles'} count={items.length ? 3 : 6} /></div>}
+      {!loading && !error && items.length === 0 && sourceId && (
+        <div className="pad-x pad-t"><Empty icon="search" title="No results" detail={query ? `Nothing for “${query}” on this source. Try fewer words.` : 'This source returned no titles.'} /></div>
+      )}
       {!loading && hasNext && <div className="center pad-t"><button type="button" className="btn btn--ghost" onClick={() => setPage((p) => p + 1)}>Load more</button></div>}
-      {store.server.status === 'error' && store.server.where === 'server' && <p className="hint pad-x">{store.server.error}</p>}
+      {store.server.status === 'error' && store.server.where === 'server' && <div className="pad-x pad-t"><Banner icon="alert" tone="error">{store.server.error}</Banner></div>}
     </div>
   )
 }
@@ -284,8 +281,6 @@ export function RemoteSearch() {
   const store = useStore()
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [english, setEnglish] = useState(false)
-  const [hideNsfw, setHideNsfw] = useState(true)
   const [sources, setSources] = useState<SearchSource[] | null>(null)
   const [error, setError] = useState<string>()
   const [results, setResults] = useState<Record<string, SearchResult>>({})
@@ -298,11 +293,10 @@ export function RemoteSearch() {
   }, [query])
 
   // An extension's "All" source covers every language in one search; only extensions without one
-  // fall back to searching each language. "English only" uses the English source instead.
+  // fall back to searching each language, so every result comes up.
   const groups = useMemo(() => {
     const map = new Map<string, SearchGroup>()
     for (const s of sources ?? []) {
-      if (hideNsfw && s.isNsfw) continue
       const key = s.extension?.pkgName ?? s.id
       const g = map.get(key) ?? { key, pkg: s.extension?.pkgName ?? '', name: s.name, iconUrl: s.iconUrl, sources: [] }
       g.sources.push(s)
@@ -310,11 +304,10 @@ export function RemoteSearch() {
     }
     const pick = (list: SearchSource[]) => {
       const of = (lang: string) => list.filter((s) => s.lang === lang)
-      if (english) return of('en').length ? of('en') : of('all')
       return of('all').length ? of('all') : byLanguage(list)
     }
     return [...map.values()].map((g) => ({ ...g, sources: pick(g.sources) })).filter((g) => g.sources.length)
-  }, [sources, english, hideNsfw])
+  }, [sources])
   const groupsKey = groups.map((g) => g.sources.map((s) => s.id).join()).join('|')
 
   // One request per extension first so each section fills in quickly; extra languages (for
@@ -373,14 +366,14 @@ export function RemoteSearch() {
           {query && <button type="button" className="icon-btn icon-btn--sm" aria-label="Clear search" onClick={() => setQuery('')}><Icon name="x" size={16} /></button>}
         </label>
       </div>
-      <div className="chips pad-x pad-t-sm">
-        <Chip on={english} onClick={() => setEnglish((x) => !x)}>English only</Chip>
-        <Chip on={hideNsfw} onClick={() => setHideNsfw((x) => !x)}>Hide 18+</Chip>
-      </div>
 
       {error && <div className="pad-x pad-t"><Notice title="Couldn't load sources" detail={error} /></div>}
       {!debounced ? (
-        <p className="hint pad-x pad-t">{sources && !sources.length ? 'Install an extension in Sources first.' : `Searches your library and ${groups.length} sources, in every language${english ? ' you picked' : ''}.`}</p>
+        <div className="pad-x pad-t">
+          {!sources && !error ? <Loading label="Loading sources" shape="rows" count={2} />
+            : sources && !sources.length ? <Empty icon="sources" title="No sources yet" detail="Install an extension in Sources to search titles." />
+            : <Empty icon="search" title="Search everywhere" detail={`Your library and ${groups.length} source${groups.length === 1 ? '' : 's'}, in every language.`} />}
+        </div>
       ) : (
         <>
           <section className="section pad-x">
@@ -388,7 +381,7 @@ export function RemoteSearch() {
               <h2 className="h3"><Icon name="library" size={18} /> In your library</h2>
               <span className="card-meta">{local.length} match{local.length === 1 ? '' : 'es'}</span>
             </div>
-            {local.length === 0 ? <p className="hint">No matches in your library.</p> : (
+            {local.length === 0 ? <Empty compact icon="library" title="Not in your library" detail="Results from your sources are below." /> : (
               <div className="grid2">
                 {local.map((e) => (
                   <Link key={e.id} to={`/entry/${e.id}`} className="tile tile--row">
@@ -400,6 +393,13 @@ export function RemoteSearch() {
             )}
           </section>
 
+          {(() => {
+            const pending = groups.filter((g) => resultFor(g).done < resultFor(g).total).length
+            const found = groups.reduce((n, g) => n + resultFor(g).items.length, 0)
+            if (pending) return <div className="pad-x pad-t"><Banner tone="busy">Searching {pending} of {groups.length} source{groups.length === 1 ? '' : 's'}… {found ? `${found} found so far` : ''}</Banner></div>
+            if (!found) return <div className="pad-x pad-t"><Empty icon="search" title={`No results for “${debounced}”`} detail="No source has a title by that name. Try fewer or different words." /></div>
+            return null
+          })()}
           {[...groups].sort((a, b) => order(a) - order(b)).map((g) => {
             const r = resultFor(g)
             const searching = r.done < r.total
@@ -414,7 +414,7 @@ export function RemoteSearch() {
                   </span>
                   <Icon name="chevronRight" size={18} />
                 </Link>
-                {!r.items.length && searching && <div className="rail" aria-hidden="true">{[0, 1, 2].map((i) => <div key={i} className="rail__item skeleton" />)}</div>}
+                {!r.items.length && searching && <div className="pad-x"><Loading label={`Searching ${g.name}`} shape="rail" /></div>}
                 {failed && <div className="pad-x"><Notice {...sourceError(r.errors[0] ?? '')} /></div>}
                 {r.items.length > 0 && <div className="rail">{r.items.map((m) => <MangaCard key={m.id} m={m} rail />)}</div>}
               </section>
