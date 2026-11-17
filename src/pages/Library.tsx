@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
-import { TLink as Link } from '../components/Nav'
 import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
-import { newCount, progressPct, readCount, resumeChapter, unreadCount, useStore, visibleChapters } from '../data/store'
+import { EntryGrid, FolderTile } from '../components/LibraryCards'
+import { TLink as Link } from '../components/Nav'
+import { newCount, readCount, resumeChapter, unreadCount, useStore, visibleChapters } from '../data/store'
 import { Entry, GroupBy, LibraryFilters, SortBy, Status, STATUS_LABEL } from '../data/types'
 
 const EMPTY: LibraryFilters = { statuses: [], newOnly: false, progress: 'any' }
-const SORT_LABEL: Record<SortBy, string> = { recent: 'Recently read', title: 'Title', added: 'Recently added', updated: 'Recently updated' }
-const GROUP_LABEL: Record<GroupBy, string> = { category: 'Category', status: 'Status', source: 'Source', none: 'None' }
+export const SORT_LABEL: Record<SortBy, string> = { recent: 'Recently read', title: 'Title', added: 'Recently added', updated: 'Recently updated' }
+const GROUP_LABEL: Record<GroupBy, string> = { none: 'None', collection: 'Collection', status: 'Status', source: 'Source' }
 const PROGRESS_LABEL: Record<LibraryFilters['progress'], string> = { any: 'Any', notStarted: 'Not started', inProgress: 'In progress', completed: 'Fully read' }
 
 function matches(e: Entry, f: LibraryFilters) {
@@ -22,7 +23,7 @@ function matches(e: Entry, f: LibraryFilters) {
   return true
 }
 
-function sorter(sort: SortBy) {
+export function sorter(sort: SortBy) {
   return (a: Entry, b: Entry) => {
     switch (sort) {
       case 'title': return a.title.localeCompare(b.title)
@@ -33,33 +34,37 @@ function sorter(sort: SortBy) {
   }
 }
 
+export function nextSort(s: SortBy): SortBy {
+  const order: SortBy[] = ['recent', 'updated', 'added', 'title']
+  return order[(order.indexOf(s) + 1) % order.length]
+}
+
 export default function Library() {
   const store = useStore()
-  const [tabId, setTabId] = useState('all')
+  const [tabId, setTabId] = useState('collections')
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY)
-  const [groupBy, setGroupBy] = useState<GroupBy>('category')
+  const [groupBy, setGroupBy] = useState<GroupBy>('none')
   const [sort, setSort] = useState<SortBy>('recent')
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [sheet, setSheet] = useState(false)
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ 'Slice of life': true, Romance: true })
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const tab = store.tabs.find((t) => t.id === tabId) ?? store.tabs[1]
   const roots = store.entries.filter((e) => e.inLibrary && !e.parentId)
   const activeFilters = tab.kind === 'smart' ? { ...tab.filters, ...mergeUser(filters) } : filters
   const filterCount = filters.statuses.length + (filters.newOnly ? 1 : 0) + (filters.progress !== 'any' ? 1 : 0)
+  const q = query.trim().toLowerCase()
 
-  const list = useMemo(() => {
-    let base = roots
-    if (tab.kind === 'group') base = roots.filter((e) => tab.entryIds.includes(e.id))
-    const q = query.trim().toLowerCase()
-    return base
-      .filter((e) => matches(e, activeFilters))
-      .filter((e) => !q || e.title.toLowerCase().includes(q) || e.author.toLowerCase().includes(q))
-      .sort(sorter(sort))
-  }, [roots, tab, activeFilters, query, sort])
+  const list = useMemo(() => roots
+    .filter((e) => matches(e, activeFilters))
+    .filter((e) => !q || e.title.toLowerCase().includes(q) || e.author.toLowerCase().includes(q))
+    .sort(sorter(sort)), [roots, activeFilters, q, sort])
 
-  const sections = useMemo(() => group(list, groupBy, (id) => store.source(id)?.name ?? id), [list, groupBy, store])
+  const sections = useMemo(
+    () => group(list, groupBy, (id) => store.source(id)?.name ?? id, (id) => store.collection(id)?.name ?? id),
+    [list, groupBy, store],
+  )
   const unreadTotal = roots.reduce((n, e) => n + unreadCount(e), 0)
 
   const toggleStatus = (s: Status) =>
@@ -73,6 +78,17 @@ export default function Library() {
       store.toast(`Saved “${name.trim()}”`)
     }
   }
+
+  const newCollection = () => {
+    const name = window.prompt('Name the new collection')
+    if (name?.trim()) {
+      store.createCollection(name.trim())
+      store.toast(`Created “${name.trim()}”`)
+    }
+  }
+
+  // A search always shows a flat list across the whole library.
+  const view = q ? 'search' : tab.kind
 
   return (
     <div className="page">
@@ -94,35 +110,62 @@ export default function Library() {
         {store.tabs.map((t) => (
           <button key={t.id} type="button" role="tab" aria-selected={t.id === tab.id} className={`chip chip--lg${t.id === tab.id ? ' is-on' : ''}`} onClick={() => setTabId(t.id)}>
             {t.kind === 'reading' && <Icon name="book" size={15} stroke={2} />}
+            {t.kind === 'collections' && <Icon name="folder" size={15} stroke={2} />}
             {t.kind === 'smart' && <Icon name="sparkle" size={15} stroke={2} />}
-            {t.kind === 'group' && <Icon name="folder" size={15} stroke={2} />}
             {t.name}
             {t.kind === 'reading' && <span className="chip__count">{store.queue.length}</span>}
+            {t.kind === 'collections' && <span className="chip__count">{store.collections.length}</span>}
             {t.kind === 'all' && <span className="chip__count">{roots.length}</span>}
           </button>
         ))}
         <button type="button" className="chip chip--lg chip--dashed" aria-label="Save current filters as a tab" onClick={saveTab}><Icon name="plus" size={16} /></button>
       </div>
 
-      {tab.kind !== 'reading' && (
+      {view !== 'reading' && view !== 'collections' && (
         <div className="chips pad-x pad-t-sm">
           {filters.statuses.map((s) => <Chip key={s} removable onClick={() => toggleStatus(s)}>Status: {STATUS_LABEL[s]}</Chip>)}
           {filters.newOnly && <Chip removable onClick={() => setFilters((f) => ({ ...f, newOnly: false }))}>New chapters</Chip>}
           {filters.progress !== 'any' && <Chip removable onClick={() => setFilters((f) => ({ ...f, progress: 'any' }))}>{PROGRESS_LABEL[filters.progress]}</Chip>}
           <button type="button" className="chip" onClick={() => setSort(nextSort(sort))}><Icon name="sort" size={14} stroke={2} />{SORT_LABEL[sort]}</button>
-          <button type="button" className="chip" onClick={() => setSheet(true)}><Icon name="layers" size={14} stroke={2} />{GROUP_LABEL[groupBy]}</button>
+          <button type="button" className="chip" onClick={() => setSheet(true)}><Icon name="layers" size={14} stroke={2} />Group: {GROUP_LABEL[groupBy]}</button>
         </div>
       )}
 
-      {tab.kind === 'reading' ? (
-        <ReadingQueue />
-      ) : list.length === 0 ? (
-        <p className="empty pad-x">Nothing matches these filters.</p>
-      ) : (
-        sections.map((sec) => {
+      {view === 'reading' && <ReadingQueue />}
+
+      {view === 'collections' && (
+        <>
+          <section className="section pad-x">
+            <div className="section-head">
+              <h2 className="h2">Collections<span className="h2__count">{store.collections.length}</span></h2>
+              <button type="button" className="link-btn" onClick={newCollection}>New</button>
+            </div>
+            <div className="grid2">
+              {store.collections.map((c) => (
+                <FolderTile key={c.id} collection={c} entries={roots.filter((e) => e.collections.includes(c.id)).sort(sorter(sort))} />
+              ))}
+              <button type="button" className="folder folder--new" onClick={newCollection}>
+                <Icon name="plus" size={22} />New collection
+              </button>
+            </div>
+          </section>
+          {(() => {
+            const loose = roots.filter((e) => e.collections.length === 0).sort(sorter(sort))
+            return loose.length > 0 && (
+              <section className="section pad-x">
+                <div className="section-head">
+                  <h2 className="h2">Not in a collection<span className="h2__count">{loose.length}</span></h2>
+                </div>
+                <EntryGrid entries={loose} />
+              </section>
+            )
+          })()}
+        </>
+      )}
+
+      {(view === 'all' || view === 'smart' || view === 'search') && (
+        list.length === 0 ? <p className="empty pad-x">Nothing matches.</p> : sections.map((sec) => {
           const isCollapsed = !!collapsed[sec.name]
-          const collections = sec.entries.filter((e) => store.children(e.id).length > 0)
-          const singles = sec.entries.filter((e) => store.children(e.id).length === 0)
           return (
             <section key={sec.name} className="section pad-x">
               {groupBy !== 'none' && (
@@ -139,12 +182,7 @@ export default function Library() {
                   <span className="card-meta">{sec.entries.filter((e) => newCount(e) > 0).length || 'No'} with new chapters</span>
                 </div>
               ) : (
-                <>
-                  {collections.map((e) => <CollectionCard key={e.id} entry={e} />)}
-                  <div className="grid3">
-                    {singles.map((e) => <LibraryCard key={e.id} entry={e} />)}
-                  </div>
-                </>
+                <EntryGrid entries={sec.entries} />
               )}
             </section>
           )
@@ -166,7 +204,7 @@ export default function Library() {
           <span><Icon name="sparkle" size={16} stroke={2} /> Only titles with new chapters</span>
           <input type="checkbox" checked={filters.newOnly} onChange={(e) => setFilters((f) => ({ ...f, newOnly: e.target.checked }))} />
         </label>
-        <div className="label">Group by</div>
+        <div className="label">Group the All tab by</div>
         <div className="segmented">
           {(Object.keys(GROUP_LABEL) as GroupBy[]).map((g) => (
             <button key={g} type="button" className={groupBy === g ? 'is-on' : ''} onClick={() => setGroupBy(g)}>{GROUP_LABEL[g]}</button>
@@ -180,7 +218,7 @@ export default function Library() {
         </div>
         <div className="sheet__actions">
           <button type="button" className="btn btn--ghost" onClick={() => setFilters(EMPTY)}>Clear filters</button>
-          <button type="button" className="btn btn--accent" onClick={saveTab}>Save as tab</button>
+          <button type="button" className="btn btn--accent" onClick={() => { setTabId('all'); saveTab() }}>Save as tab</button>
         </div>
       </Sheet>
     </div>
@@ -195,69 +233,18 @@ function mergeUser(f: LibraryFilters): Partial<LibraryFilters> {
   return out
 }
 
-function nextSort(s: SortBy): SortBy {
-  const order: SortBy[] = ['recent', 'updated', 'added', 'title']
-  return order[(order.indexOf(s) + 1) % order.length]
-}
-
-function group(list: Entry[], by: GroupBy, sourceName: (id: string) => string) {
+function group(list: Entry[], by: GroupBy, sourceName: (id: string) => string, collectionName: (id: string) => string) {
   if (by === 'none') return [{ name: 'All', entries: list }]
   const map = new Map<string, Entry[]>()
   const add = (k: string, e: Entry) => map.set(k, [...(map.get(k) ?? []), e])
   for (const e of list) {
     if (by === 'status') add(STATUS_LABEL[e.status], e)
     else if (by === 'source') add(sourceName(e.sources.find((s) => s.main)?.sourceId ?? ''), e)
-    else if (e.categories.filter((c) => c !== 'Favourites').length === 0) add('Uncategorized', e)
-    else e.categories.filter((c) => c !== 'Favourites').forEach((c) => add(c, e))
+    else if (e.collections.length === 0) add('Not in a collection', e)
+    else e.collections.forEach((c) => add(collectionName(c), e))
   }
   return [...map.entries()].map(([name, entries]) => ({ name, entries })).sort((a, b) =>
-    a.name === 'Uncategorized' ? 1 : b.name === 'Uncategorized' ? -1 : b.entries.length - a.entries.length)
-}
-
-function LibraryCard({ entry: e }: { entry: Entry }) {
-  const store = useStore()
-  const unread = newCount(e)
-  const nested = store.children(e.id).length
-  const ch = resumeChapter(e)
-  return (
-    <Link to={`/entry/${e.id}`} className="card">
-      <div className="thumb">
-        <Cover art={e.art} title={e.title} />
-        {unread > 0 && <span className="badge badge--tr">{unread}</span>}
-        {nested > 0 && <span className="badge badge--tl badge--glass"><Icon name="layers" size={11} stroke={2.4} />{nested}</span>}
-        <span className="thumb__bar"><span style={{ width: `${progressPct(e)}%` }} /></span>
-      </div>
-      <div className="card-title">{e.title}</div>
-      <div className="card-meta">{ch ? `${ch.label} / ${visibleChapters(e).length}` : `${visibleChapters(e).length} ch · done`}</div>
-    </Link>
-  )
-}
-
-function CollectionCard({ entry: e }: { entry: Entry }) {
-  const store = useStore()
-  const kids = store.children(e.id)
-  const versions = e.chapters.filter((c) => c.versions > 1).length
-  const total = visibleChapters(e).length
-  return (
-    <Link to={`/entry/${e.id}`} className="collection">
-      <div className="collection__stack">
-        {kids.slice(0, 2).reverse().map((k, i) => (
-          <div key={k.id} className={`collection__back collection__back--${i}`}><Cover art={k.art} title={k.title} /></div>
-        ))}
-        <div className="collection__front"><Cover art={e.art} title={e.title} /></div>
-      </div>
-      <div className="grow">
-        <div className="eyebrow"><Icon name="layers" size={13} stroke={2.2} /> Collection</div>
-        <div className="collection__title">{e.title}</div>
-        <div className="card-meta">{kids.length + 1} titles · {e.sources.length} source{e.sources.length === 1 ? '' : 's'}{versions ? ` · ${versions} merged versions` : ''}</div>
-        <div className="row-progress">
-          <span className="bar"><span style={{ width: `${progressPct(e)}%` }} /></span>
-          <span>{readCount(e)}/{total}</span>
-        </div>
-      </div>
-      {newCount(e) > 0 && <span className="badge badge--tr">{newCount(e)}</span>}
-    </Link>
-  )
+    a.name === 'Not in a collection' ? 1 : b.name === 'Not in a collection' ? -1 : b.entries.length - a.entries.length)
 }
 
 function ReadingQueue() {
@@ -265,7 +252,7 @@ function ReadingQueue() {
   const list = store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
   return (
     <section className="section pad-x">
-      <p className="hint">Your next reads, in order. Hold a title anywhere to add it.</p>
+      <p className="hint">Your next reads, in order.</p>
       <div className="grid3">
         {list.map((e, i) => {
           const ch = resumeChapter(e)

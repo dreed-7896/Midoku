@@ -7,8 +7,14 @@ import { updateSettings, useSettings } from '../data/settings'
 import { useStore, visibleChapters } from '../data/store'
 import type { Chapter, CoverArt } from '../data/types'
 
+/**
+ * Only pages within this distance of the current page are rendered; the rest are empty boxes that keep
+ * the scroll length. Long chapters (hundreds of pages) then hold a handful of images in memory, not all.
+ */
+const WINDOW = 3
+
 /** Placeholder webtoon strip: two panels with a figure and an occasional speech bubble. */
-function WebtoonPage({ n, art }: { n: number; art: CoverArt }) {
+function WebtoonContent({ n, art }: { n: number; art: CoverArt }) {
   const a = (n * 37) % 100
   const split = 38 + (a % 24)
   const panels = [
@@ -16,7 +22,7 @@ function WebtoonPage({ n, art }: { n: number; art: CoverArt }) {
     { top: split + 8, h: 88 - split, fill: n % 3 === 0 ? art.c2 : '#DCD7CC', shape: art.c1 },
   ]
   return (
-    <div className="wt-page" data-page={n}>
+    <>
       {panels.map((p, i) => (
         <div key={i} className="wt-panel" style={{ top: `${p.top}%`, height: `${p.h}%`, background: p.fill }}>
           <span className="wt-shape" style={{ background: p.shape, left: `${(a + i * 30) % 55}%`, top: `${18 + (a % 30)}%` }} />
@@ -24,16 +30,16 @@ function WebtoonPage({ n, art }: { n: number; art: CoverArt }) {
         </div>
       ))}
       <span className="wt-num">{n}</span>
-    </div>
+    </>
   )
 }
 
-function PagedPage({ n }: { n: number }) {
+function PagedContent({ n }: { n: number }) {
   return (
-    <div className="pg-page" data-page={n}>
+    <>
       <div className="pg-sheet"><PageThumb layout={n} /></div>
       <span className="wt-num">{n}</span>
-    </div>
+    </>
   )
 }
 
@@ -56,6 +62,26 @@ export default function Reader() {
   const startPage = useRef(1)
   const [page, setPage] = useState(1)
   const [ui, setUi] = useState(true)
+  // Measured page heights, so pages that leave the window keep their size (real images vary in height).
+  const heights = useRef(new Map<number, number>())
+
+  // When a page above the viewport changes height, shift the scroll so the visible page stays put.
+  useEffect(() => {
+    const root = scroller.current
+    if (!root || mode !== 'webtoon') return
+    const ro = new ResizeObserver((items) => {
+      for (const it of items) {
+        const el = it.target as HTMLElement
+        const n = Number(el.dataset.page)
+        const before = heights.current.get(n)
+        const after = el.offsetHeight
+        heights.current.set(n, after)
+        if (before !== undefined && before !== after && el.offsetTop + before <= root.scrollTop) root.scrollTop += after - before
+      }
+    })
+    root.querySelectorAll('[data-page]').forEach((el) => ro.observe(el))
+    return () => ro.disconnect()
+  }, [chapterId, mode, pages])
 
   // Jumps (opening at a saved page, the slider) must not count as reading-scroll that hides the controls.
   const scrollToPage = useCallback((n: number, behavior: ScrollBehavior = 'auto') => {
@@ -106,7 +132,9 @@ export default function Reader() {
   }
 
   const close = () => nav.back(`/entry/${entry.id}`)
-  const goChapter = (c: Chapter) => nav.go(`/read/${entry.id}/${c.id}`, { replace: true })
+  // Previous chapter slides in from the left like going back; next comes from the right.
+  const goChapter = (c: Chapter) =>
+    nav.go(`/read/${entry.id}/${c.id}`, { replace: true, direction: c.number < chapter.number ? 'back' : 'forward' })
 
   const onScroll = () => {
     const el = scroller.current
@@ -122,7 +150,17 @@ export default function Reader() {
   return (
     <div className={`reader reader--${mode}`}>
       <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => setUi((v) => !v)}>
-        {list.map((n) => (mode === 'webtoon' ? <WebtoonPage key={n} n={n} art={entry.art} /> : <PagedPage key={n} n={n} />))}
+        {list.map((n) => {
+          const near = Math.abs(n - page) <= WINDOW
+          const known = heights.current.get(n)
+          return mode === 'webtoon' ? (
+            <div key={n} className="wt-page" data-page={n} style={!near && known ? { height: known, aspectRatio: 'auto' } : undefined}>
+              {near && <WebtoonContent n={n} art={entry.art} />}
+            </div>
+          ) : (
+            <div key={n} className="pg-page" data-page={n}>{near && <PagedContent n={n} />}</div>
+          )
+        })}
         <div className="reader__end" onClick={(e) => e.stopPropagation()}>
           <div className="label label--flush">Finished</div>
           <div className="reader__end-title">{chapter.label}</div>

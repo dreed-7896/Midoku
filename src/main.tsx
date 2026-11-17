@@ -1,10 +1,12 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { MiniPlayer, TabBar, Toast } from './components/Chrome'
 import { LockGate } from './components/Lock'
-import { useNavEffects } from './components/Nav'
+import { useEdgeSwipeBack, useNavEffects } from './components/Nav'
+import { useSettings } from './data/settings'
 import { StoreProvider } from './data/store'
+import CollectionPage from './pages/CollectionPage'
 import EntryPage from './pages/Entry'
 import Home from './pages/Home'
 import Library from './pages/Library'
@@ -15,15 +17,23 @@ import SourceBrowse from './pages/SourceBrowse'
 import Sources from './pages/Sources'
 import './styles.css'
 
+const TAB_ROOTS = ['/', '/library', '/search', '/sources']
+
 function App() {
   useNavEffects()
   const { pathname } = useLocation()
+  const { readerMode } = useSettings()
+  const screen = useRef<HTMLDivElement>(null)
   const reading = pathname.startsWith('/read/')
+  // Paged reading swipes sideways, so the edge-back gesture stays off there.
+  useEdgeSwipeBack(screen, !TAB_ROOTS.includes(pathname) && !(reading && readerMode === 'paged'), '/library')
   return (
     <div className="app">
+      <div className="screen" ref={screen}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/library" element={<Library />} />
+        <Route path="/library/c/:id" element={<CollectionPage />} />
         <Route path="/entry/:id" element={<EntryPage />} />
         <Route path="/search" element={<Search />} />
         <Route path="/sources" element={<Sources />} />
@@ -32,6 +42,7 @@ function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Home />} />
       </Routes>
+      </div>
       {!reading && (
         <div className="dock">
           <MiniPlayer />

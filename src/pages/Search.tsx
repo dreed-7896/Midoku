@@ -86,7 +86,7 @@ export default function Search() {
                     <span className="grow">
                       <span className="card-title card-title--2">{e.title}</span>
                       <span className="card-meta">
-                        {store.children(e.id).length ? `Collection · ${e.sources.length} sources` : e.parentId ? `In ${store.entry(e.parentId)?.title}` : `${visibleChapters(e).length} chapters`}
+                        {store.children(e.id).length ? `Series · ${e.sources.length} sources` : e.parentId ? `In ${store.entry(e.parentId)?.title}` : `${visibleChapters(e).length} chapters`}
                       </span>
                     </span>
                   </Link>

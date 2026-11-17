@@ -1,10 +1,11 @@
 import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react'
-import { ENTRIES, SOURCES } from './mock'
-import type { Chapter, Entry, LibraryFilters, LibraryTab, Source, Status } from './types'
+import { COLLECTIONS, ENTRIES, SOURCES } from './mock'
+import type { Chapter, Collection, Entry, LibraryFilters, LibraryTab, Source, Status } from './types'
 
 interface State {
   entries: Entry[]
   sources: Source[]
+  collections: Collection[]
   queue: string[]
   tabs: LibraryTab[]
   updatesSeen: boolean
@@ -15,12 +16,13 @@ interface State {
 const initial: State = {
   entries: ENTRIES,
   sources: SOURCES,
+  collections: COLLECTIONS,
   queue: ['salt-static', 'paper-tigers', 'night-bus', 'quiet-tide', 'low-orbit', 'glasswing'],
   tabs: [
     { id: 'reading', kind: 'reading', name: 'Reading' },
+    { id: 'collections', kind: 'collections', name: 'Collections' },
     { id: 'all', kind: 'all', name: 'All' },
     { id: 'webtoons', kind: 'smart', name: 'Webtoons', filters: { statuses: [], newOnly: false, progress: 'any', tag: 'Webtoon' } },
-    { id: 'favourites', kind: 'group', name: 'Favourites', entryIds: ['hollow-crown', 'paper-tigers', 'vapor-hearts'] },
   ],
   updatesSeen: false,
   toastMessage: null,
@@ -64,6 +66,26 @@ function useActions(set: (fn: (s: State) => State) => void) {
             }),
           }),
         })),
+      /** Creates a root folder and returns its id. */
+      createCollection: (name: string) => {
+        const id = `col-${Date.now().toString(36)}`
+        set((s) => ({ ...s, collections: [...s.collections, { id, name }] }))
+        return id
+      },
+      renameCollection: (id: string, name: string) =>
+        set((s) => ({ ...s, collections: s.collections.map((c) => (c.id === id ? { ...c, name } : c)) })),
+      /** Deleting a collection keeps its titles in the library. */
+      deleteCollection: (id: string) =>
+        set((s) => ({
+          ...s,
+          collections: s.collections.filter((c) => c.id !== id),
+          entries: s.entries.map((e) => (e.collections.includes(id) ? { ...e, collections: e.collections.filter((c) => c !== id) } : e)),
+        })),
+      toggleInCollection: (entryId: string, collectionId: string) =>
+        editEntry(entryId, (e) => ({
+          ...e,
+          collections: e.collections.includes(collectionId) ? e.collections.filter((c) => c !== collectionId) : [...e.collections, collectionId],
+        })),
       addTab: (name: string, filters: LibraryFilters) =>
         set((s) => ({ ...s, tabs: [...s.tabs, { id: `tab-${Date.now()}`, kind: 'smart', name, filters }] })),
       toast: (message: string) => {
@@ -78,6 +100,7 @@ function useActions(set: (fn: (s: State) => State) => void) {
 type Store = State & ReturnType<typeof useActions> & {
   entry: (id: string) => Entry | undefined
   source: (id: string) => Source | undefined
+  collection: (id: string) => Collection | undefined
   children: (id: string) => Entry[]
 }
 
@@ -92,6 +115,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...actions,
     entry: (id) => state.entries.find((e) => e.id === id),
     source: (id) => state.sources.find((s) => s.id === id),
+    collection: (id) => state.collections.find((c) => c.id === id),
     children: (id) => state.entries.filter((e) => e.parentId === id && e.inLibrary),
   }), [state, actions])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

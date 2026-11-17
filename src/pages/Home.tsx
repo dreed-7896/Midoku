@@ -3,10 +3,8 @@ import { TLink as Link, useNav } from '../components/Nav'
 import { Cover } from '../components/Art'
 import { IconButton, PageHead, SectionHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'
-import { catalogFor, WEEK } from '../data/mock'
+import { catalogFor } from '../data/mock'
 import { agoLabel, newCount, resumeChapter, useStore } from '../data/store'
-
-const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
 export default function Home() {
   const store = useStore()
@@ -24,7 +22,6 @@ export default function Home() {
   const totalNew = updates.reduce((n, e) => n + newCount(e), 0)
   const trending = useMemo(() => catalogFor('mangadex').slice(0, 3), [])
   const weekday = new Date().toLocaleDateString('en', { weekday: 'long' })
-  const todayIndex = (new Date().getDay() + 6) % 7
 
   const onScroll = () => {
     const el = rail.current
@@ -115,22 +112,6 @@ export default function Home() {
             </div>
           </div>
         ))}
-
-        <div className="panel stats">
-          <div>
-            <div className="label label--flush">This week</div>
-            <div className="stats__big">46 chapters</div>
-            <div className="stats__sub">5 h 12 m reading · 4 titles</div>
-          </div>
-          <div className="stats__bars" aria-label="Chapters read per day this week">
-            {WEEK.map((h, i) => (
-              <div key={i} className="stats__bar">
-                <span style={{ height: h, background: i === todayIndex ? 'var(--accent)' : 'var(--line-2)' }} />
-                <small>{DAYS[i]}</small>
-              </div>
-            ))}
-          </div>
-        </div>
 
         <div className="panel">
           <div className="panel__head">
