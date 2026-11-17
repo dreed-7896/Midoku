@@ -95,6 +95,7 @@ export interface EntryRow {
   custom: CustomDetails
   position: number
   renumber: boolean
+  reading_pos?: number | null
 }
 export interface EntrySourceRow {
   entry_id: string
@@ -165,7 +166,7 @@ async function all<T>(q: PromiseLike<{ data: T[] | null; error: { message: strin
 
 export async function loadLibrary(): Promise<DbLibrary> {
   const [entries, sources, tabs, entryTabs, progress] = await Promise.all([
-    all<EntryRow>(db.from('entries').select('id, title, author, cover_path, description, tags, publishing, parent_id, in_library, added_at, last_read_at, custom, position, renumber')),
+    all<EntryRow>(db.from('entries').select('id, title, author, cover_path, description, tags, publishing, parent_id, in_library, added_at, last_read_at, custom, position, renumber, reading_pos')),
     all<EntrySourceRow>(db.from('entry_sources').select('entry_id, source_id, manga_url, server_manga_id, source_name, following, is_main, segment')),
     all<TabRow>(db.from('tabs').select('id, kind, name, filters, position').order('position')),
     all<{ entry_id: string; tab_id: string }>(db.from('entry_tabs').select('entry_id, tab_id')),
@@ -294,6 +295,14 @@ export const loadPageUpdates = (limit = 100) =>
   all<HistoryRow & { pages: number; pages_before: number; pages_grew_at: string }>(db.from('chapter_states')
     .select('entry_id, source_id, chapter_url, chapter_label, chapter_number, page, read, read_at, pages, pages_before, pages_grew_at')
     .not('pages_grew_at', 'is', null).order('pages_grew_at', { ascending: false }).limit(limit))
+
+/** Every page bookmark in the library. */
+export interface MarkRow { entry_id: string; source_id: string; chapter_url: string; chapter_number: number | null; chapter_label: string | null; marks: number[]; updated_at: string }
+export async function loadPageMarks() {
+  await flushWrites()
+  return all<MarkRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, chapter_label, marks, updated_at')
+    .not('marks', 'is', null).order('updated_at', { ascending: false }))
+}
 
 /** Read marks for these source chapters. */
 export const loadReadMarks = (urls: string[]) =>

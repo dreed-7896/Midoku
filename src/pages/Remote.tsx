@@ -8,10 +8,11 @@ import { Banner, Empty, Loading } from '../components/Status'
 import { TLink as Link, useNav } from '../components/Nav'
 import { useStore } from '../data/store'
 import {
-  artFor, assetUrl, browseSource, byLanguage, changeExtension, getExtensions, getExtensionSources, getSources, refreshExtensions,
+  artFor, assetUrl, browseSource, byLanguage, changeExtension, getExtensions, getExtensionSources, getRepos, getSources, refreshExtensions, setRepos,
   SExtension, SMangaCard, SSource, webviewUrl, type FilterChange, type SFilter,
 } from '../data/suwayomi'
 import { SourceFilters } from '../components/SourceFilters'
+import { SourceSettings } from '../components/SourceSettings'
 
 const PAGE_SIZE = 60
 
@@ -70,6 +71,7 @@ export function RemoteSources() {
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState<string | null>(null)
   const [limit, setLimit] = useState(PAGE_SIZE)
+  const [reposOpen, setReposOpen] = useState(false)
 
   const load = useCallback(async (refresh = false) => {
     setError(undefined)
@@ -113,8 +115,10 @@ export function RemoteSources() {
   return (
     <div className="page">
       <PageHead kicker={`${installed.length} installed · Suwayomi`} title="Sources">
+        <IconButton icon="database" label="Extension repositories" onClick={() => setReposOpen(true)} />
         <IconButton icon="refresh" label="Check repositories for new extensions" onClick={async () => { await load(true); store.toast('Extension list refreshed') }} />
       </PageHead>
+      {reposOpen && <ReposSheet onClose={() => setReposOpen(false)} onChanged={() => void load(true)} />}
 
       <div className="pad-x pad-t">
         <div className="segmented segmented--lg" role="tablist">
@@ -208,6 +212,7 @@ export function RemoteBrowse() {
   const [filterSet, setFilterSet] = useState<SFilter[] | null>(null)
   const [changes, setChanges] = useState<FilterChange[]>([])
   const [filtering, setFiltering] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const extAction = async (action: 'update' | 'uninstall') => {
     if (!ext) return
@@ -266,6 +271,7 @@ export function RemoteBrowse() {
         <IconButton icon="back" label="Back" glass onClick={() => nav.back('/sources')} />
         {ext && (
           <span className="row-gap">
+            {source?.isConfigurable && <IconButton icon="settings" label="Source settings" glass onClick={() => setSettingsOpen(true)} />}
             {source?.baseUrl && <IconButton icon="globe" label="Open in WebView" glass onClick={() => openWebview(source.baseUrl!)} />}
             <IconButton icon="more" label="Extension actions" glass onClick={() => setActions(true)} />
           </span>
@@ -277,6 +283,12 @@ export function RemoteBrowse() {
             <button type="button" className="menu__row" onClick={() => { setActions(false); openWebview(source.baseUrl!) }}>
               <span className="menu__icon"><Icon name="globe" size={20} /></span>
               <span className="menu__text"><strong>Open in WebView</strong><span>Solve Cloudflare checks or log in to the site</span></span>
+            </button>
+          )}
+          {source?.isConfigurable && (
+            <button type="button" className="menu__row" onClick={() => { setActions(false); setSettingsOpen(true) }}>
+              <span className="menu__icon"><Icon name="settings" size={20} /></span>
+              <span className="menu__text"><strong>Source settings</strong><span>{sources.length > 1 ? `For ${langLabel(source.lang)}` : "The extension's own options"}</span></span>
             </button>
           )}
           {ext?.hasUpdate && (
@@ -291,6 +303,7 @@ export function RemoteBrowse() {
           </button>
         </div>
       </Sheet>
+      {settingsOpen && source && <SourceSettings sourceId={source.id} title={source.displayName} onClose={() => { setSettingsOpen(false); reset(() => setAttempt((n) => n + 1)) }} />}
       <div className="source-head pad-x">
         <SourceIcon letter={(ext?.name ?? pkg)[0] ?? '?'} color={ICON_BG} size={68} url={ext ? assetUrl(ext.iconUrl) : undefined} />
         <div>
@@ -505,5 +518,65 @@ export function RemoteSearch() {
         </>
       )}
     </div>
+  )
+}
+
+/** Extension repositories on the server: add one by its index address, or remove one. */
+function ReposSheet({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const store = useStore()
+  const [list, setList] = useState<string[] | null>(null)
+  const [error, setError] = useState<string>()
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { getRepos().then(setList).catch((e: Error) => setError(e.message)) }, [])
+
+  const save = async (next: string[], message: string) => {
+    setBusy(true)
+    try {
+      setList(await setRepos(next))
+      store.toast(message)
+      onChanged()
+    } catch (e) {
+      store.toast(`Couldn't save: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const add = (e: FormEvent) => {
+    e.preventDefault()
+    let url = input.trim()
+    if (!url || !list) return
+    // A GitHub repo page ("github.com/owner/repo") becomes its index the way Mihon-style repos publish it.
+    const gh = url.match(/^(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+?)\/?$/)
+    if (gh) url = `https://github.com/${gh[1]}/${gh[2]}/raw/repo/index.min.json`
+    if (!/^https?:\/\//.test(url)) url = `https://${url}`
+    if (list.includes(url)) { store.toast('Already added'); return }
+    setInput('')
+    void save([...list, url], 'Repository added · extension list refreshed')
+  }
+  const name = (u: string) => u.replace(/^https?:\/\//, '').replace(/\/raw\/repo\/index(\.min)?\.(json|pb)$/, '').replace(/^github\.com\//, '')
+
+  return (
+    <Sheet open title="Extension repositories" onClose={onClose}>
+      <p className="hint">The server installs extensions from these. Add a repository's index address (or its GitHub page).</p>
+      {error && <Empty compact tone="error" icon="alert" title="Couldn't load repositories" detail={error} />}
+      {!list && !error && <Loading label="Loading repositories" shape="rows" count={2} />}
+      {list && !list.length && <Empty compact icon="database" title="No repositories" detail="Add one to see extensions to install." />}
+      <div className="check-list">
+        {list?.map((u) => (
+          <div key={u} className="check-row">
+            <span className="check-row__name check-row__name--stack grow"><strong className="ellipsis">{name(u)}</strong><span className="card-meta ellipsis">{u}</span></span>
+            <button type="button" className="icon-btn icon-btn--sm" aria-label={`Remove ${name(u)}`} disabled={busy}
+              onClick={() => { if (window.confirm(`Remove ${name(u)}? Installed extensions stay installed.`)) void save(list.filter((x) => x !== u), 'Repository removed') }}>
+              <Icon name="trash" size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <form className="row-gap pad-t" onSubmit={add}>
+        <label className="field grow"><Icon name="plus" size={18} /><input value={input} onChange={(e) => setInput(e.target.value)} placeholder="https://…/index.min.json" aria-label="Repository address" inputMode="url" autoCapitalize="off" /></label>
+        <button type="submit" className="btn btn--accent" disabled={!input.trim() || busy || !list}>Add</button>
+      </form>
+    </Sheet>
   )
 }

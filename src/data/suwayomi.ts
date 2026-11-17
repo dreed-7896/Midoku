@@ -24,6 +24,7 @@ export interface SSource {
   supportsLatest: boolean
   isNsfw: boolean
   baseUrl?: string | null
+  isConfigurable?: boolean
 }
 
 export interface SMangaCard {
@@ -59,7 +60,7 @@ export interface SChapter {
 }
 
 const EXT = 'pkgName name lang iconUrl versionName isInstalled hasUpdate isNsfw'
-const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw baseUrl'
+const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw baseUrl isConfigurable'
 const CARD = 'id url title thumbnailUrl'
 const MANGA = `${CARD} author artist description genre status realUrl sourceId initialized source { id displayName iconUrl lang }`
 // Only what the source says. Reading state on the server is ignored; Midoku keeps its own.
@@ -131,6 +132,35 @@ export const getExtensions = () =>
 export const refreshExtensions = () =>
   gql<{ fetchExtensions: { extensions: SExtension[] } }>(`mutation { fetchExtensions(input: {}) { extensions { ${EXT} } } }`)
     .then((d) => d.fetchExtensions.extensions)
+
+/** An extension's own settings for one source (image quality, languages, blocked groups…). */
+export type SPreference =
+  | { type: 'CheckBoxPreference' | 'SwitchPreference'; key: string; title: string; summary: string | null; visible: boolean; enabled: boolean; on: boolean | null; onDefault: boolean | null }
+  | { type: 'ListPreference'; key: string; title: string; summary: string | null; visible: boolean; enabled: boolean; entries: string[]; entryValues: string[]; value: string | null; valueDefault: string | null }
+  | { type: 'MultiSelectListPreference'; key: string; title: string; summary: string | null; visible: boolean; enabled: boolean; entries: string[]; entryValues: string[]; values: string[] | null; valuesDefault: string[] | null }
+  | { type: 'EditTextPreference'; key: string; title: string; summary: string | null; visible: boolean; enabled: boolean; text: string | null; textDefault: string | null; dialogMessage: string | null }
+const PREF = `type: __typename
+  ... on CheckBoxPreference { key title summary visible enabled on: currentValue onDefault: default }
+  ... on SwitchPreference { key title summary visible enabled on: currentValue onDefault: default }
+  ... on ListPreference { key title summary visible enabled entries entryValues value: currentValue valueDefault: default }
+  ... on MultiSelectListPreference { key title summary visible enabled entries entryValues values: currentValue valuesDefault: default }
+  ... on EditTextPreference { key title summary visible enabled text: currentValue textDefault: default dialogMessage }`
+export const getSourcePreferences = (source: string) =>
+  gql<{ source: { preferences: SPreference[] } }>(`query($id: LongString!) { source(id: $id) { preferences { ${PREF} } } }`, { id: source })
+    .then((d) => d.source.preferences)
+export interface PreferenceChange { position: number; checkBoxState?: boolean; switchState?: boolean; listState?: string; multiSelectState?: string[]; editTextState?: string }
+export const setSourcePreference = (source: string, change: PreferenceChange) =>
+  gql<{ updateSourcePreference: { source: { preferences: SPreference[] } } }>(
+    `mutation($source: LongString!, $change: SourcePreferenceChangeInput!) { updateSourcePreference(input: { source: $source, change: $change }) { source { preferences { ${PREF} } } } }`,
+    { source, change },
+  ).then((d) => d.updateSourcePreference.source.preferences)
+
+/** Extension repositories the server installs extensions from. */
+export const getRepos = () => gql<{ settings: { extensionRepos: string[] } }>('{ settings { extensionRepos } }').then((d) => d.settings.extensionRepos)
+export const setRepos = (repos: string[]) =>
+  gql<{ setSettings: { settings: { extensionRepos: string[] } } }>(
+    'mutation($repos: [String!]!) { setSettings(input: { settings: { extensionRepos: $repos } }) { settings { extensionRepos } } }', { repos },
+  ).then((d) => d.setSettings.settings.extensionRepos)
 
 export const changeExtension = (pkgName: string, action: 'install' | 'uninstall' | 'update') =>
   gql(`mutation($id: String!) { updateExtension(input: { id: $id, patch: { ${action}: true } }) { extension { pkgName } } }`, { id: pkgName })
@@ -330,7 +360,7 @@ export function toEntry(m: SManga, chapters?: SChapter[]): Entry {
     tags: m.genre ?? [],
     description: m.description ?? '',
     sources: [{
-      sourceId: m.sourceId, mangaId: m.id, mangaUrl: m.url, chapters: total, following: true, main: true,
+      sourceId: m.sourceId, mangaId: m.id, mangaUrl: m.url, chapters: total, following: false, main: true,
       name: m.source?.displayName, iconUrl: m.source?.iconUrl ? assetUrl(m.source.iconUrl) : undefined,
     }],
     chapters: (chapters ?? []).map((c) => toChapter(c, m.sourceId)),

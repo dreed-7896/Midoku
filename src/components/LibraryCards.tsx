@@ -48,14 +48,15 @@ export function CoverCorner({ entry: e }: { entry: Entry }) {
   )
 }
 
-export function LibraryCard({ entry: e, pick }: { entry: Entry; pick?: Pick }) {
+export function LibraryCard({ entry: e, pick, index }: { entry: Entry; pick?: Pick; index?: number }) {
   const store = useStore()
   const nested = store.children(e.id).length
   const ch = resumeChapter(e)
   return (
     <CardShell entry={e} className="card" pick={pick}>
       <div className="thumb">
-        <Cover art={e.art} title={e.title} url={e.coverUrl ?? store.children(e.id)[0]?.coverUrl} />
+        <Cover art={e.art} title={e.title} url={e.coverUrl} />
+        {index !== undefined && <span className="badge badge--tl badge--light">{index}</span>}
         <CoverCorner entry={e} />
         <span className="thumb__bar"><span style={{ width: `${progressPct(e)}%` }} /></span>
       </div>

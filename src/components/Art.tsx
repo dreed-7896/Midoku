@@ -1,4 +1,6 @@
 import { CSSProperties, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Icon } from './Icon'
 import { savedPageUrl } from '../data/downloads'
 import { fetchImage, needsAuthForImages } from '../data/suwayomi'
 import { cachedThumb, chapterThumb } from '../data/thumbs'
@@ -165,5 +167,43 @@ export function SourceIcon({ letter, color, size = 40, url }: { letter: string; 
       {letter}
       {url && <RemoteImage src={url} className="source-icon__img" />}
     </span>
+  )
+}
+
+/** The cover full screen (tap the cover on a title page), with Save (share sheet on iOS) and Edit. */
+export function CoverViewer({ url, art, title, onEdit, onClose }: { url?: string; art: CoverArt; title: string; onEdit: () => void; onClose: () => void }) {
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    if (!url) return
+    setSaving(true)
+    try {
+      const blob = url.startsWith('data:') ? await (await fetch(url)).blob() : await fetchImage(url)
+      const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'
+      const file = new File([blob], `${title.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'cover'}.${ext}`, { type: blob.type || 'image/jpeg' })
+      // iOS saves pictures from the share sheet ("Save Image"); elsewhere the file downloads.
+      if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title })
+      else {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(file); a.download = file.name; a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+      }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') alert(`Couldn't save the cover: ${(e as Error).message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return createPortal(
+    <div className="cover-viewer" role="dialog" aria-modal="true" aria-label={`${title} cover`} onClick={onClose}>
+      <div className="cover-viewer__img" onClick={(e) => e.stopPropagation()}>
+        <Cover art={art} title={title} url={url} />
+      </div>
+      <div className="cover-viewer__bar" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="btn btn--ghost" onClick={onClose}><Icon name="x" size={16} />Close</button>
+        <button type="button" className="btn btn--ghost" onClick={onEdit}><Icon name="settings" size={16} />Edit</button>
+        <button type="button" className="btn btn--accent" disabled={!url || saving} onClick={() => void save()}><Icon name="download" size={16} />{saving ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>,
+    document.body,
   )
 }

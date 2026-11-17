@@ -164,6 +164,8 @@ export interface Entry {
   custom?: CustomDetails
   /** Order inside a series. */
   position?: number
+  /** Place in the Reading list (a list the person keeps by hand); none = not in it. */
+  readingPos?: number
   /** Merged titles: chapters numbered 1, 2, 3… */
   renumber?: boolean
   /** The details as the server gives them, before edits. */

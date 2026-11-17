@@ -36,7 +36,8 @@ export function applyCustom(e: Entry, custom: CustomDetails | undefined = e.cust
     title: c.title || o.title,
     author: c.author ?? o.author,
     description: c.description ?? o.description,
-    coverUrl: c.cover || o.coverUrl,
+    // A series made in Midoku has no cover of its own besides the one picked for it.
+    coverUrl: c.cover || (e.sources.length ? o.coverUrl : undefined),
   }
 }
 
@@ -72,6 +73,7 @@ export function entriesFromDb(lib: DbLibrary): Entry[] {
       addedOrder: r.added_at ? Date.parse(r.added_at) : 0,
       position: r.position ?? 0,
       renumber: !!r.renumber,
+      readingPos: r.reading_pos ?? undefined,
     }
     if (!rows.length) {
       // A series made in Midoku: it has titles inside it but no source of its own.
@@ -106,6 +108,7 @@ export const entryRow = (e: Entry, dbId: string, parentDbId: string | null = nul
   custom: e.custom ?? {},
   position: e.position ?? 0,
   renumber: !!e.renumber,
+  reading_pos: e.readingPos ?? null,
   tags: e.tags,
   publishing: e.publishing,
   parent_id: parentDbId,

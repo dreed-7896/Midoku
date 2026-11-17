@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Cover } from '../components/Art'
 import { IconButton, Sheet } from '../components/Chrome'
 import { Icon, type IconName } from '../components/Icon'
 import { useLongPress } from '../components/LongPress'
@@ -17,10 +18,12 @@ export default function Updates() {
   const { items, error, loading, seenAt } = useUpdates(store)
   const [opening, setOpening] = useState<string>()
   const [sheet, setSheet] = useState<Update | null>(null)
+  const [following, setFollowing] = useState(false)
   // What was new when the screen opened stays marked while it's open; leaving clears the badge.
   const [newSince] = useState(seenAt)
   useEffect(() => { markUpdatesSeen(); return () => markUpdatesSeen() }, [])
 
+  const followedCount = store.entries.filter((e) => e.inLibrary && e.remote && e.sources.some((s) => s.following)).length
   const groups = useMemo(() => byDay(items ?? [], (u) => u.at), [items])
   const check = async () => { await store.checkUpdates(); await reloadUpdates(store) }
   const press = useLongPress<Update>((u) => setSheet(u))
@@ -54,7 +57,10 @@ export default function Updates() {
     <div className="page">
       <div className="entry__top">
         <IconButton icon="back" label="Back" onClick={() => nav.back('/')} />
-        {server && <IconButton icon="refresh" label="Check for new chapters" active={!!store.updating} onClick={() => void check()} />}
+        {server && <span className="row-gap">
+          <IconButton icon="bell" label="Titles that get new chapters" badge={followedCount || undefined} onClick={() => setFollowing(true)} />
+          <IconButton icon="refresh" label="Check for new chapters" active={!!store.updating} onClick={() => void check()} />
+        </span>}
       </div>
       <header className="pad-x pad-t">
         <h1 className="h1">Updates</h1>
@@ -63,7 +69,8 @@ export default function Updates() {
 
       {error && <div className="pad-x pad-t"><Empty icon="alert" tone="error" title="Couldn't load updates" detail={error} action={{ label: 'Try again', onClick: () => void reloadUpdates(store) }} /></div>}
       {!items && !error && <div className="pad-x pad-t"><Loading label="Loading updates" shape="rows" /></div>}
-      {items && !items.length && !loading && <div className="pad-x pad-t"><Empty icon="bell" title="No updates" detail="New chapters, and new pages in recent chapters, from your library show up here." /></div>}
+      {server && !followedCount && <div className="pad-x pad-t-sm"><Empty compact icon="bell" title="No titles get new chapters" detail="Pick the titles to check for new chapters and pages." action={{ label: 'Pick titles', onClick: () => setFollowing(true) }} /></div>}
+      {items && !items.length && !loading && followedCount > 0 && <div className="pad-x pad-t"><Empty icon="bell" title="No updates" detail="New chapters, and new pages in recent chapters, of the titles you picked show up here." /></div>}
       {items && items.length > 0 && <p className="hint pad-x">Long-press a chapter for more.</p>}
 
       {groups.map(([day, list]) => {
@@ -81,6 +88,7 @@ export default function Updates() {
         )
       })}
 
+      {following && <FollowSheet onClose={() => { setFollowing(false); void reloadUpdates(store) }} />}
       <Sheet open={!!sheet} title={sheet ? `${store.entry(sheet.entryId)?.title ?? ''} · ${sheet.label}` : ''} onClose={() => setSheet(null)}>
         {sheet && (
           <div className="menu">
@@ -101,5 +109,69 @@ function MenuRow({ icon, title, detail, onClick }: { icon: IconName; title: stri
       <span className="menu__icon"><Icon name={icon} size={20} /></span>
       <span className="menu__text"><strong>{title}</strong>{detail && <span>{detail}</span>}</span>
     </button>
+  )
+}
+
+/**
+ * "Get new chapters" (like native Midoku): only the titles picked here are checked for new chapters and
+ * pages. New titles start unpicked. Tap Add titles to pick more from the library.
+ */
+function FollowSheet({ onClose }: { onClose: () => void }) {
+  const store = useStore()
+  const [adding, setAdding] = useState(false)
+  const [q, setQ] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const lib = store.entries.filter((e) => e.inLibrary && e.remote)
+  const isOn = (id: string) => !!store.entry(id)?.sources.some((s) => s.following)
+  const needle = q.trim().toLowerCase()
+  const match = (t: string) => !needle || t.toLowerCase().includes(needle)
+  const on = lib.filter((e) => isOn(e.id) && match(e.title)).sort((a, b) => a.title.localeCompare(b.title))
+  const off = lib.filter((e) => !isOn(e.id) && match(e.title)).sort((a, b) => a.title.localeCompare(b.title))
+  const total = lib.filter((e) => isOn(e.id)).length
+  const row = (e: (typeof lib)[number], end: React.ReactNode) => (
+    <div key={e.id} className="order-row">
+      <Cover art={e.art} title={e.title} url={e.coverUrl} className="order-row__cover" />
+      <span className="check-row__name check-row__name--stack grow"><strong className="ellipsis">{e.title}</strong>
+        <span className="card-meta ellipsis">{e.parentId ? `in ${store.entry(e.parentId)?.title ?? 'a series'} · ` : ''}{e.sources.find((s) => s.main)?.name ?? ''}</span></span>
+      {end}
+    </div>
+  )
+
+  if (adding) return (
+    <Sheet open tall title="Add titles" onClose={() => setAdding(false)}>
+      <label className="field"><Icon name="search" size={18} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your library" aria-label="Search your library" /></label>
+      {off.length > 1 && <button type="button" className="link-btn" onClick={() => setPicked(picked.length === off.length ? [] : off.map((e) => e.id))}>{picked.length === off.length ? 'Pick none' : 'Pick all'}</button>}
+      {!off.length && <Empty compact icon="check" title={needle ? 'No matches' : 'Every title gets new chapters'} />}
+      <div className="check-list pad-t-sm">
+        {off.map((e) => row(e, <input type="checkbox" className="check-input" checked={picked.includes(e.id)} aria-label={`Pick ${e.title}`}
+          onChange={() => setPicked((p) => (p.includes(e.id) ? p.filter((x) => x !== e.id) : [...p, e.id]))} />))}
+      </div>
+      <div className="sheet__actions sheet__actions--sticky">
+        <button type="button" className="btn btn--ghost" onClick={() => setAdding(false)}>Back</button>
+        <button type="button" className="btn btn--accent" disabled={!picked.length} onClick={() => {
+          store.setFollow(picked, true)
+          store.toast(`${picked.length} title${picked.length === 1 ? '' : 's'} will get new chapters`)
+          setPicked([]); setQ(''); setAdding(false)
+        }}>Add{picked.length ? ` ${picked.length}` : ''}</button>
+      </div>
+    </Sheet>
+  )
+
+  return (
+    <Sheet open tall title="Get new chapters" onClose={onClose}>
+      <p className="hint">Only these titles are checked for new chapters and pages. Titles you add to the library start off.</p>
+      <div className="sheet__actions sheet__actions--flush">
+        <button type="button" className="btn btn--ghost" disabled={!total} onClick={() => {
+          if (!window.confirm(`Stop new chapters for all ${total} titles?`)) return
+          store.setFollow(lib.map((e) => e.id), false)
+        }}><Icon name="x" size={15} />Stop all</button>
+        <button type="button" className="btn btn--accent" onClick={() => { setQ(''); setAdding(true) }}><Icon name="plus" size={15} />Add titles</button>
+      </div>
+      {total > 8 && <label className="field pad-t-sm"><Icon name="search" size={18} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search followed titles" aria-label="Search followed titles" /></label>}
+      {!on.length && <div className="pad-t"><Empty compact icon="bell" title={needle ? 'No matches' : 'No titles yet'} detail={needle ? undefined : 'Add the titles you want new chapters for.'} /></div>}
+      <div className="check-list pad-t-sm">
+        {on.map((e) => row(e, <button type="button" className="icon-btn icon-btn--sm" aria-label={`Stop new chapters for ${e.title}`} onClick={() => store.setFollow([e.id], false)}><Icon name="x" size={16} /></button>))}
+      </div>
+    </Sheet>
   )
 }

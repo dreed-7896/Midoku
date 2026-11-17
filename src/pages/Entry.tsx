@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { ChapterThumb, Cover } from '../components/Art'
+import { ChapterThumb, Cover, CoverViewer } from '../components/Art'
 import { Chip, IconButton, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { TLink as Link, useNav } from '../components/Nav'
@@ -45,6 +45,7 @@ export default function EntryPage() {
   const [moving, setMoving] = useState<Chapter | null>(null)
   const [adding, setAdding] = useState<Set<string>>(new Set())
   const [migrating, setMigrating] = useState(false)
+  const [viewing, setViewing] = useState(false)
   const downloads = useDownloads()
   const longPress = useLongPress<Chapter>((c) => setSheetFor(c.id))
   const libraryPress = useLongPress<void>(() => setPanel('tabs'))
@@ -210,7 +211,7 @@ export default function EntryPage() {
       </div>
 
       <div className="entry__hero">
-        <button type="button" className="entry__cover" aria-label="Edit details" onClick={() => setPanel('edit')}><Cover art={entry.art} title={entry.title} url={entry.coverUrl} /></button>
+        <button type="button" className="entry__cover" aria-label="View cover" onClick={() => setViewing(true)}><Cover art={entry.art} title={entry.title} url={entry.coverUrl} /></button>
         <h1 className="entry__title">{entry.title}</h1>
         <div className="entry__author">
           {entry.author}
@@ -313,6 +314,27 @@ export default function EntryPage() {
           <Chip on={filter === 'downloaded'} onClick={() => setFilter('downloaded')}>Downloaded {downloaded}</Chip>
         </div>
 
+        {pageMarks.length > 0 && filter !== 'bookmarked' && (
+          <button type="button" className="mark-strip" onClick={() => setFilter('bookmarked')}>
+            <Icon name="bookmarkFill" size={14} />{pageMarks.length} bookmarked page{pageMarks.length === 1 ? '' : 's'}<span className="grow" /><Icon name="chevronRight" size={14} />
+          </button>
+        )}
+        {filter === 'bookmarked' && pageMarks.length > 0 && (
+          <div className="pad-t-sm">
+            <div className="label label--flush">Bookmarked pages</div>
+            <div className="check-list">
+              {pageMarks.map(({ c, n, open }) => (
+                <div key={`${c.id}-${n}`} className="check-row">
+                  <button type="button" className="check-row__name grow plain-btn" onClick={() => nav.go(`/read/${entry.id}/${open.id}?page=${n}`)}>
+                    <Icon name="bookmarkFill" size={14} /><span className="ellipsis">{open.label} · page {open.range ? n - open.range[0] + 1 : n}</span>
+                  </button>
+                  <button type="button" className="icon-btn icon-btn--sm" aria-label={`Remove bookmark on ${c.label} page ${n}`} onClick={() => store.toggleMark(entry.id, c.id, n)}><Icon name="x" size={16} /></button>
+                </div>
+              ))}
+            </div>
+            <div className="label">Bookmarked chapters</div>
+          </div>
+        )}
         {!loaded && (remote.error
           ? <div className="pad-t"><Empty icon="alert" tone="error" title="Couldn't load chapters" detail={remote.error} action={{ label: 'Try again', onClick: () => loadRemote() }} /></div>
           : <div className="pad-t"><Loading label="Loading chapters" /></div>)}
@@ -461,6 +483,9 @@ export default function EntryPage() {
           {!ownSeries && statusOf(entry) !== 'unread' && <MenuRow icon="undo" title="Mark all unread" detail="Clears read marks and page progress" onClick={() => { setPanel(null); if (window.confirm(`Mark every chapter of ${entry.title} unread?`)) void store.markEntry(entry.id, false) }} />}
           {thumbs && <MenuRow icon="image" title="Reset thumbnails" detail="Clears picked and made chapter thumbnails" onClick={() => { setPanel(null); void resetAllThumbs() }} />}
           <MenuRow icon="bookmark" title="Bookmarks" detail={pageMarks.length ? `${pageMarks.length} bookmarked page${pageMarks.length === 1 ? '' : 's'}` : 'Bookmark pages from the reader'} onClick={() => setPanel('marks')} />
+          {store.queue.includes(entry.id)
+            ? <MenuRow icon="undo" title="Remove from Reading" detail="Your hand-kept reading list" onClick={() => { setPanel(null); store.removeFromReading([entry.id]); store.toast(`Removed ${entry.title} from Reading`) }} />
+            : <MenuRow icon="book" title="Add to Reading" detail="Your hand-kept reading list" onClick={() => { setPanel(null); store.addToReading([entry.id]) }} />}
           <MenuRow icon="folder" title="Library tabs" detail={userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => t.name).join(', ') || 'Not in any tab'} onClick={() => setPanel('tabs')} />
           <MenuRow icon="sources" title="Sources" detail={`${entry.sources.length} linked · main: ${main?.name ?? '—'}`} onClick={() => setPanel('sources')} />
           {entry.remote && <MenuRow icon="migrate" title="Migrate" detail={`Move to another source · progress comes along`} onClick={() => setPanel('migrate')} />}
@@ -551,6 +576,7 @@ export default function EntryPage() {
         </>}
       </Sheet>
 
+      {viewing && <CoverViewer url={entry.coverUrl} art={entry.art} title={entry.title} onClose={() => setViewing(false)} onEdit={() => { setViewing(false); setPanel('edit') }} />}
       {panel === 'edit' && <EditDetailsSheet entry={entry} onClose={() => setPanel(null)} />}
       {panel === 'addTo' && adding.size > 0 && <AddToEntrySheet entry={entry} chapterIds={adding} onClose={() => { setPanel(null); setAdding(new Set()) }} />}
       {panel === 'move' && moving && <MoveSheet entry={entry} chapter={moving} onClose={() => { setPanel(null); setMoving(null) }} />}

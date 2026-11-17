@@ -20,7 +20,7 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - `npm run build` renders the PWA icons from `public/icon.svg`, type-checks and builds to `dist/`.
 - Screens: Home feed, Library (tabs, filters, groups, collections), Entry details, Search, Sources, Source browse, Reader (webtoon by default, paged optional), Settings.
 - Navigation is a native-style screen stack: pushes slide in from the right over the darkened previous screen; back reverses it. In the installed app, swiping from the left edge drags the screen away and reveals the real previous one.
-- Library: tabs you can swipe between (Reading, All, your own tabs, saved filters).
+- Library: tabs you can swipe between (Reading — your hand-kept list with a shuffle button, All, your own tabs, saved filters).
 - Offline: download chapters from a title (or select chapters → Save); the library and titles opened in the last 3 days stay available offline, and changes made offline sync when back online. Settings → Storage shows what is kept.
 - Chapters: long-press a chapter to pick which version (source) to read, split a long chapter into parts, insert a chapter from another title or source, bookmark, download or hide it.
 - Titles: edit the title, author, description, cover and reading status (⋯ → Edit details, or tap the cover).
@@ -31,6 +31,9 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - History: recently read titles by day, with resume and remove (Home's clock button or Library ⋯).
 - Reader: Webtoon, Paged or Right to left, as a device default or per title (reader top bar). Pinch or double-tap to zoom (all modes); in paged modes tap the left or right edge to turn the page.
 - Not planned: trackers (AniList, MyAnimeList).
+- Get new chapters: only titles picked on Updates → bell are checked; new titles start off.
+- Sources: an extension's gear opens its settings; the Sources screen's database button manages extension repositories.
+- Bookmarks (Library ⋯): every bookmarked page; a title page shows its own. Tap a title's cover to view it full screen and save it.
 - Chapter thumbnails: the chapter list is a plain list; the grid button by the chapters shows thumbnails. Long-press a chapter → Edit thumbnail to pick a page or a picture; title ⋯ → Reset thumbnails.
 - Reader bottom bar: Chapters list, previous/next, Bookmark (bookmarks the page; title ⋯ → Bookmarks lists them), and Pages (page grid; long-press a page to make it the thumbnail).
 - Migrate (title ⋯ → Migrate, or Library → Select → Migrate for several): move titles to another source; read chapters, pages, bookmarks and thumbnails come along by chapter number.

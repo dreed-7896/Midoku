@@ -303,12 +303,14 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       }
     }
 
-    /** Asks the server to look for new chapters on every library title (followed sources only). */
+    /** A title gets new chapters when one of its sources is followed (picked in Updates → Get new chapters). */
+    const isFollowed = (e: Entry) => e.sources.some((s) => s.following && s.mangaId != null)
+    /** Asks the server to look for new chapters on the library titles picked for it (followed sources only). */
     let checking = false
     const checkUpdates = async (quiet = false) => {
       if (checking || get().server.status === 'off') return
-      const list = get().entries.filter((e) => e.inLibrary && e.dbId && e.remote)
-      if (!list.length) { if (!quiet) toast('Nothing to check yet'); return }
+      const list = get().entries.filter((e) => e.inLibrary && e.dbId && e.remote && isFollowed(e))
+      if (!list.length) { if (!quiet) toast('No titles get new chapters yet · pick them in Updates'); return }
       checking = true
       set((s) => ({ ...s, updating: { done: 0, total: list.length } }))
       let found = 0
@@ -319,9 +321,9 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         while (jobs.length) {
           const e = jobs.shift()!
           try {
-            const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.following && s.mangaId != null)
-            if (!sources.length) throw new Error('No followed source')
-            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, name: s.name, segment: s.segment, chapters }))))
+            // Followed sources are asked for new chapters; the others keep the chapters the server has.
+            const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.mangaId != null)
+            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, s.following).then((chapters) => ({ sourceId: s.sourceId, name: s.name, segment: s.segment, chapters }))))
             const merged = mergeChapters(lists, e.renumber)
             // The newest chapter can gain pages after it comes out. When the server has fetched its pages
             // before, they are fetched again and compared; more pages are noted for Updates.
@@ -381,6 +383,71 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         // A title saved for the first time is written with its new library state.
         if (e.dbId) { if (canSave()) updateEntry(e.dbId, { in_library: !e.inLibrary }) } else ensureEntry(e.id)
       },
+      /** Adds titles to the end of the Reading list. */
+      addToReading: (ids: string[]) => {
+        const st = get()
+        const fresh = ids.filter((id) => { const e = find(id); return e && (st.server.status === 'off' ? !st.queue.includes(e.id) : e.readingPos == null) })
+        if (!fresh.length) { toast('Already in Reading'); return }
+        if (st.server.status === 'off') set((s) => ({ ...s, queue: [...s.queue, ...fresh.map((id) => find(id)!.id)] }))
+        else {
+          let pos = Math.max(0, ...st.entries.map((e) => e.readingPos ?? 0))
+          for (const id of fresh) {
+            const e = find(id)!
+            pos += 1
+            const p = pos
+            editEntry(e.id, (x) => ({ ...x, readingPos: p }))
+            const dbId = ensureEntry(e.id)
+            if (dbId && e.dbId) updateEntry(dbId, { reading_pos: p })
+          }
+        }
+        toast(fresh.length === 1 ? `Added ${find(fresh[0])!.title} to Reading` : `Added ${fresh.length} titles to Reading`)
+      },
+      /** Takes titles out of the Reading list (all of them when no ids are given). */
+      removeFromReading: (ids?: string[]) => {
+        const st = get()
+        const list = ids ?? (st.server.status === 'off' ? st.queue : st.entries.filter((e) => e.readingPos != null).map((e) => e.id))
+        if (st.server.status === 'off') { set((s) => ({ ...s, queue: s.queue.filter((q) => !list.includes(q)) })); return }
+        for (const id of list) {
+          const e = find(id)
+          if (!e || e.readingPos == null) continue
+          editEntry(e.id, (x) => ({ ...x, readingPos: undefined }))
+          if (e.dbId && canSave()) updateEntry(e.dbId, { reading_pos: null })
+        }
+      },
+      /** Moves a title earlier (-1) or later (+1) in the Reading list. */
+      moveInReading: (id: string, by: -1 | 1) => {
+        const st = get()
+        if (st.server.status === 'off') {
+          set((s) => {
+            const q = [...s.queue], i = q.indexOf(id), j = i + by
+            if (i < 0 || j < 0 || j >= q.length) return s
+            ;[q[i], q[j]] = [q[j], q[i]]
+            return { ...s, queue: q }
+          })
+          return
+        }
+        const list = st.entries.filter((e) => e.readingPos != null).sort((a, b) => a.readingPos! - b.readingPos!)
+        const i = list.findIndex((e) => e.id === id), j = i + by
+        if (i < 0 || j < 0 || j >= list.length) return
+        const a = list[i], b = list[j]
+        editEntry(a.id, (x) => ({ ...x, readingPos: b.readingPos }))
+        editEntry(b.id, (x) => ({ ...x, readingPos: a.readingPos }))
+        if (canSave()) { if (a.dbId) updateEntry(a.dbId, { reading_pos: b.readingPos }); if (b.dbId) updateEntry(b.dbId, { reading_pos: a.readingPos }) }
+      },
+      /** Picks titles to get new chapters (their main source is followed), or stops all their sources. */
+      setFollow: (ids: string[], on: boolean) => {
+        for (const id of ids) {
+          const e = find(id)
+          if (!e?.remote) continue
+          const main = e.sources.find((s) => s.main) ?? e.sources[0]
+          const want = (s: EntrySource) => (on ? (s === main ? true : s.following) : false)
+          const changed = e.sources.filter((s) => s.mangaUrl && want(s) !== s.following)
+          if (!changed.length) continue
+          editEntry(e.id, (x) => ({ ...x, sources: x.sources.map((s) => (changed.includes(s) ? { ...s, following: want(s) } : s)) }))
+          const dbId = ensureEntry(e.id)
+          if (dbId) changed.forEach((s) => updateEntrySource({ entry_id: dbId, source_id: s.sourceId, manga_url: s.mangaUrl! }, { following: want(s) }))
+        }
+      },
       toggleFollow: (id: string, sourceId: string, mangaUrl?: string) => {
         const e = find(id)
         if (!e) return
@@ -395,7 +462,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const e = find(id)
         if (!e) return
         if (e.sources.some((s) => s.sourceId === link.sourceId && s.mangaUrl === link.mangaUrl)) { toast('Already linked'); return }
-        const source: EntrySource = { sourceId: link.sourceId, mangaId: link.mangaId, mangaUrl: link.mangaUrl, name: link.name, iconUrl: link.iconUrl, chapters: 0, following: true, main: false }
+        const source: EntrySource = { sourceId: link.sourceId, mangaId: link.mangaId, mangaUrl: link.mangaUrl, name: link.name, iconUrl: link.iconUrl, chapters: 0, following: false, main: false }
         const hadRow = !!e.dbId
         editEntry(e.id, (x) => ({ ...x, sources: [...x.sources, source] }))
         const dbId = ensureEntry(e.id)
@@ -444,7 +511,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const before = new Set(e.chapters.flatMap(keysOf))
         const already = e.sources.some((s) => s.sourceId === to.sourceId && s.mangaUrl === to.mangaUrl)
         if (!already) {
-          const source: EntrySource = { sourceId: to.sourceId, mangaId: to.mangaId, mangaUrl: to.mangaUrl, name: to.name, iconUrl: to.iconUrl, chapters: 0, following: true, main: false }
+          const source: EntrySource = { sourceId: to.sourceId, mangaId: to.mangaId, mangaUrl: to.mangaUrl, name: to.name, iconUrl: to.iconUrl, chapters: 0, following: !!from.following, main: false }
           const hadRow = !!e.dbId
           editEntry(e.id, (x) => ({ ...x, sources: [...x.sources, source] }))
           const db0 = ensureEntry(e.id)
@@ -1045,10 +1112,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(t)
   }, [server, entries, tabs])
 
-  // With a server, the Reading tab lists titles started and not finished, most recently read first.
+  // The Reading list is kept by hand (like native Midoku): titles added to it, in their order.
   const queue = useMemo(() => (server.status === 'off' ? state.queue : entries
-    .filter((e) => e.inLibrary && !e.parentId && e.lastReadAgo !== undefined && unreadCount(e) > 0)
-    .sort((a, b) => a.lastReadAgo! - b.lastReadAgo!)
+    .filter((e) => e.readingPos != null)
+    .sort((a, b) => a.readingPos! - b.readingPos!)
     .map((e) => e.id)), [server.status, state.queue, entries])
 
   const value = useMemo<Store>(() => ({

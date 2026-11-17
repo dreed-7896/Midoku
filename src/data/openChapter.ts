@@ -34,3 +34,12 @@ export async function openChapter(store: Store, go: (to: string) => void, entryI
   const c = nextIfRead && shown[i].read && shown[i + 1] ? shown[i + 1] : shown[i]
   go(`/read/${e.id}/${c.id}`)
 }
+
+/** Opens a page bookmark: the chapter (or the part of a split chapter holding that page) at that page. */
+export async function openBookmark(store: Store, go: (to: string) => void, entryId: string, find: Find, page: number) {
+  const whole = await findChapter(store, entryId, find)
+  const e = store.entry(entryId)
+  if (!whole || !e) { go(`/entry/${entryId}`); return }
+  const part = visibleChapters(e).find((c) => c.physicalId === whole.id && c.range && page >= c.range[0] && page <= c.range[1])
+  go(`/read/${e.id}/${(part ?? whole).id}?page=${page}`)
+}

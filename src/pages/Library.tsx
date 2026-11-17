@@ -3,9 +3,10 @@ import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, ServerStatus, Sheet } from '../components/Chrome'
 import { Icon, type IconName } from '../components/Icon'
 import { Banner, Empty, Loading } from '../components/Status'
-import { CardMenu, CoverCorner, EntryGrid, type Pick } from '../components/LibraryCards'
+import { CardMenu, EntryGrid, LibraryCard, type Pick } from '../components/LibraryCards'
+import { useLongPress } from '../components/LongPress'
 import { BulkMigrateSheet, DuplicatesSheet, GroupSheet } from '../components/LibraryTools'
-import { TLink as Link, useNav } from '../components/Nav'
+import { useNav } from '../components/Nav'
 import { newCount, resumeChapter, statusOf, unreadCount, useStore } from '../data/store'
 import { Entry, GroupBy, LibraryFilters, LibraryTab, SortBy, Status, STATUS_LABEL } from '../data/types'
 
@@ -47,6 +48,9 @@ export default function Library() {
   const nav = useNav()
   const [more, setMore] = useState(false)
   const [menuFor, setMenuFor] = useState<Entry | null>(null)
+  const [readingAdd, setReadingAdd] = useState(false)
+  // Shuffle (Reading tab): a tap picks from Reading, a long press (or an empty Reading list) from the whole library.
+  const shufflePress = useLongPress<void>(() => shuffle(true))
   const pager = useRef<HTMLDivElement>(null)
   const strip = useRef<HTMLDivElement>(null)
 
@@ -118,20 +122,14 @@ export default function Library() {
   } : undefined
   const stopPicking = () => { setPicking(false); setPicked([]) }
 
-  /** Titles a tab shows, with the titles nested inside them. */
-  const inTab = (t: LibraryTab): Entry[] => {
-    const base = t.kind === 'reading' ? store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
-      : t.kind === 'tab' ? roots.filter((e) => e.tabs.includes(t.id))
-      : t.kind === 'smart' ? roots.filter((e) => matches(e, t.filters))
-      : roots
-    return [...base, ...base.flatMap((e) => store.children(e.id))]
-  }
-  /** Opens a random title from this tab, or from the whole library. */
+  /** Opens a random title from the Reading list, or from the whole library. */
   const shuffle = (everything: boolean) => {
-    const pool = (everything ? store.entries.filter((e) => e.inLibrary) : inTab(tab)).filter((e) => e.sources.length || e.chapters.length)
+    const reading = store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
+    const fromAll = everything || !reading.length
+    const pool = (fromAll ? store.entries.filter((e) => e.inLibrary) : reading).filter((e) => e.sources.length || e.chapters.length)
     if (!pool.length) { store.toast('Nothing to pick from'); return }
     const e = pool[Math.floor(Math.random() * pool.length)]
-    if (everything) store.toast('Picked from your whole library')
+    if (fromAll && !everything) store.toast('Reading is empty · picked from your whole library')
     nav.go(`/entry/${e.id}`)
   }
 
@@ -189,12 +187,21 @@ export default function Library() {
           {tabs.map((t, i) => (
             <div key={t.id} className="pager__panel" data-scroll-active={i === active} role="tabpanel" aria-label={t.name}>
               {/* Only the visible tab and its neighbours are rendered. */}
-              {Math.abs(i - active) <= 1 && <TabPanel tab={t} filters={filters} sort={sort} groupBy={groupBy} roots={roots} pick={pick} />}
+              {Math.abs(i - active) <= 1 && <TabPanel tab={t} filters={filters} sort={sort} groupBy={groupBy} roots={roots} pick={pick} onAddReading={() => setReadingAdd(true)} />}
             </div>
           ))}
         </div>
       )}
       </CardMenu.Provider>
+
+      {tab.kind === 'reading' && !picking && !q && (
+        <button type="button" className="fab" aria-label="Random title from Reading (hold for the whole library)" title="Tap: from Reading · Hold: whole library"
+          onClick={() => { if (!shufflePress().wasLongPress()) shuffle(false) }}
+          onPointerDown={shufflePress().onPointerDown} onPointerMove={shufflePress().onPointerMove} onPointerUp={shufflePress().onPointerUp} onPointerLeave={shufflePress().onPointerLeave} onContextMenu={shufflePress().onContextMenu}>
+          <Icon name="shuffle" size={22} />
+        </button>
+      )}
+      {readingAdd && <ReadingAddSheet onClose={() => setReadingAdd(false)} />}
 
       {menuFor && (() => {
         const e = store.entry(menuFor.id) ?? menuFor
@@ -209,6 +216,11 @@ export default function Library() {
               <MenuRow icon="book" title="Open" onClick={() => { close(); nav.go(`/entry/${e.id}`) }} />
               {st !== 'completed' && <MenuRow icon="check" title="Mark all read" onClick={() => { close(); void store.markEntry(e.id, true) }} />}
               {st !== 'unread' && <MenuRow icon="undo" title="Mark all unread" detail="Clears read marks and page progress" onClick={() => { close(); if (window.confirm(`Mark every chapter of ${e.title} unread?`)) void store.markEntry(e.id, false) }} />}
+              {store.queue.includes(e.id) ? <>
+                <MenuRow icon="undo" title="Remove from Reading" onClick={() => { close(); store.removeFromReading([e.id]) }} />
+                {store.queue.indexOf(e.id) > 0 && <MenuRow icon="chevronRight" title="Move earlier in Reading" onClick={() => { close(); store.moveInReading(e.id, -1) }} />}
+                {store.queue.indexOf(e.id) < store.queue.length - 1 && <MenuRow icon="chevronRight" title="Move later in Reading" onClick={() => { close(); store.moveInReading(e.id, 1) }} />}
+              </> : <MenuRow icon="book" title="Add to Reading" onClick={() => { close(); store.addToReading([e.id]) }} />}
               <MenuRow icon="folder" title="Library tabs" onClick={() => { close(); setPicked([e.id]); setTool('tabs') }} />
               <MenuRow icon="select" title="Select" detail="Pick more titles to group, file or remove" onClick={() => { close(); setPicking(true); setPicked([e.id]) }} />
               <MenuRow icon="trash" title="Remove from library" detail="Progress is kept if you add it back" onClick={() => {
@@ -264,8 +276,10 @@ export default function Library() {
               detail="Asks the server for new chapters of followed titles" onClick={() => { setMore(false); void store.checkUpdates() }} />
           )}
           <MenuRow icon="select" title="Select titles" detail="Group, file into tabs, migrate or remove several at once" onClick={() => { setMore(false); setPicking(true) }} />
-          <MenuRow icon="shuffle" title="Random title" detail={`From ${tab.name}`} onClick={() => { setMore(false); shuffle(false) }} />
+          <MenuRow icon="plus" title="Add to Reading" detail="Pick titles for your reading list" onClick={() => { setMore(false); setReadingAdd(true) }} />
+          {store.queue.length > 0 && <MenuRow icon="undo" title="Clear Reading" detail={`Takes ${store.queue.length} title${store.queue.length === 1 ? '' : 's'} out of the list`} onClick={() => { setMore(false); if (window.confirm('Clear the Reading list? The titles stay in your library.')) store.removeFromReading() }} />}
           <MenuRow icon="shuffle" title="Random from the whole library" onClick={() => { setMore(false); shuffle(true) }} />
+          <MenuRow icon="bookmark" title="Bookmarks" detail="Every bookmarked page, by title" onClick={() => { setMore(false); nav.go('/bookmarks') }} />
           <MenuRow icon="clock" title="History" detail="Chapters you read, newest first" onClick={() => { setMore(false); nav.go('/history') }} />
           <MenuRow icon="layers" title="Find duplicates" detail="Same name or same source title" onClick={() => { setMore(false); setTool('dupes') }} />
         </div>
@@ -325,10 +339,10 @@ function MenuRow({ icon, title, detail, onClick }: { icon: IconName; title: stri
   )
 }
 
-function TabPanel({ tab, filters, sort, groupBy, roots, pick }: { tab: LibraryTab; filters: LibraryFilters; sort: SortBy; groupBy: GroupBy; roots: Entry[]; pick?: Pick }) {
+function TabPanel({ tab, filters, sort, groupBy, roots, pick, onAddReading }: { tab: LibraryTab; filters: LibraryFilters; sort: SortBy; groupBy: GroupBy; roots: Entry[]; pick?: Pick; onAddReading: () => void }) {
   const store = useStore()
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
-  if (tab.kind === 'reading' && !pick) return <ReadingQueue />
+  if (tab.kind === 'reading' && !pick) return <ReadingQueue onAdd={onAddReading} />
 
   const base = tab.kind === 'tab' ? roots.filter((e) => e.tabs.includes(tab.id))
     : tab.kind === 'reading' ? store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
@@ -399,28 +413,44 @@ function group(list: Entry[], by: GroupBy, sourceName: (id: string) => string, t
     a.name === 'No tab' ? 1 : b.name === 'No tab' ? -1 : b.entries.length - a.entries.length)
 }
 
-function ReadingQueue() {
+/** The Reading list: titles added by hand, in order (like native Midoku). */
+function ReadingQueue({ onAdd }: { onAdd: () => void }) {
   const store = useStore()
   const list = store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
   return (
     <section className="section section--tight pad-x">
-      {list.length === 0 ? <Empty icon="book" title="Nothing in progress" detail="Titles you start reading show up here, most recent first." /> : <p className="hint">Your next reads, in order.</p>}
-      <div className="grid3">
-        {list.map((e, i) => {
-          const ch = resumeChapter(e)
-          return (
-            <Link key={e.id} to={`/entry/${e.id}`} className="card">
-              <div className="thumb">
-                <Cover art={e.art} title={e.title} url={e.coverUrl} />
-                <span className="badge badge--tl badge--light">{i + 1}</span>
-                <CoverCorner entry={e} />
-              </div>
-              <div className="card-title">{e.title}</div>
-              <div className="card-meta">{ch ? `Next: ${ch.label}` : 'Caught up'}</div>
-            </Link>
-          )
-        })}
-      </div>
+      {list.length === 0
+        ? <Empty icon="book" title="Nothing in Reading" detail="Keep the titles you're reading here. Long-press a title → Add to Reading, or add several at once." action={{ label: 'Add titles', onClick: onAdd }} />
+        : <p className="hint">Your reading list, in order. Long-press a title to move it or take it out.</p>}
+      <div className="grid3">{list.map((e, i) => <LibraryCard key={e.id} entry={e} index={i + 1} />)}</div>
     </section>
+  )
+}
+
+/** Adds library titles to the Reading list. */
+function ReadingAddSheet({ onClose }: { onClose: () => void }) {
+  const store = useStore()
+  const [q, setQ] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const inList = new Set(store.queue)
+  const list = store.entries.filter((e) => e.inLibrary && !inList.has(e.id) && (!q.trim() || e.title.toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => a.title.localeCompare(b.title))
+  return (
+    <Sheet open tall title="Add to Reading" onClose={onClose}>
+      <label className="field"><Icon name="search" size={18} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your library" aria-label="Search your library" /></label>
+      {!list.length && <Empty compact icon="library" title={q ? 'No matches' : 'Everything is in Reading'} />}
+      <div className="check-list pad-t-sm">
+        {list.map((e) => (
+          <label key={e.id} className="check-row">
+            <span className="check-row__name grow"><Cover art={e.art} title={e.title} url={e.coverUrl} className="order-row__cover" /><span className="ellipsis">{e.title}</span></span>
+            <input type="checkbox" checked={picked.includes(e.id)} onChange={() => setPicked((p) => (p.includes(e.id) ? p.filter((x) => x !== e.id) : [...p, e.id]))} />
+          </label>
+        ))}
+      </div>
+      <div className="sheet__actions sheet__actions--sticky">
+        <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn--accent" disabled={!picked.length} onClick={() => { store.addToReading(picked); onClose() }}>Add{picked.length ? ` ${picked.length}` : ''}</button>
+      </div>
+    </Sheet>
   )
 }
