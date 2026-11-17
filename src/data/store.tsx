@@ -186,10 +186,10 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
     const newTabId = (prefix: string) => (get().server.status !== 'off' ? crypto.randomUUID() : `${prefix}-${Date.now().toString(36)}`)
 
     /** Reading state, split chapters and inserted chapters from the database, for a saved title whose chapters are loaded. */
-    const loadStates = (id: string) => {
+    const loadStates = async (id: string) => {
       const dbId = find(id)?.dbId
       if (!dbId || get().server.status === 'signin') return
-      loadEntryExtras(dbId)
+      await loadEntryExtras(dbId)
         .then(({ states, splits, inserts }) => editEntry(id, (e) => {
           const inserted = inserts.map(insertedFromRow)
           return {
@@ -289,7 +289,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
             return l ? { ...s, chapters: l.chapters.length } : s
           }),
         }))
-        if (firstLoad) loadStates(e.id)
+        if (firstLoad) await loadStates(e.id)
         return 'live'
       } catch (err) {
         if (!isOffline(err)) throw err
@@ -369,7 +369,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       sources.map((s) => ({ ...s, main: s.sourceId === sourceId && s.mangaUrl === mangaUrl }))
         .sort((a, b) => Number(b.main) - Number(a.main))
 
-    return {
+    const actions = {
       editEntry,
       loadEntry,
       loadStates,
@@ -433,11 +433,11 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
        * Moves a title to another source: links it, carries reading state (read, page, bookmark, hidden, moved,
        * thumbnail) and page layouts over by chapter number, makes it the main source and unlinks the old one.
        */
-      migrateSource: async (id: string, to: { mangaId: number; mangaUrl: string; sourceId: string; name?: string; iconUrl?: string }) => {
+      migrateSource: async (id: string, to: { mangaId: number; mangaUrl: string; sourceId: string; name?: string; iconUrl?: string }, quiet = false): Promise<false | { moved: number; lost: number }> => {
         let e = find(id)
         const from = e?.sources.find((s) => s.main) ?? e?.sources[0]
         if (!e || !from) return false
-        if (from.sourceId === to.sourceId && from.mangaUrl === to.mangaUrl) { toast('That is the current source'); return false }
+        if (from.sourceId === to.sourceId && from.mangaUrl === to.mangaUrl) { if (!quiet) toast('That is the current source'); return false }
         if (!e.remote?.chaptersLoaded) await loadEntry(e.id).catch(() => {})
         e = find(id)!
         const keysOf = (c: Chapter) => (c.alts?.length ? c.alts.map((a) => chapterKey(a.sourceId, a.url)) : c.sourceUrl ? [chapterKey(c.sourceId, c.sourceUrl)] : [])
@@ -454,7 +454,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         e = find(id)!
         const dbId = ensureEntry(e.id)
         const fresh = (c: Chapter) => c.alts?.find((a) => a.sourceId === to.sourceId && !before.has(chapterKey(a.sourceId, a.url)))
-        const touched = (c: Chapter) => c.read || c.page > 0 || c.bookmarked || c.removed || c.order != null || !!c.thumb
+        const touched = (c: Chapter) => c.read || c.page > 0 || c.bookmarked || c.removed || c.order != null || !!c.thumb || !!c.marks?.length
         let moved = 0, lost = 0
         const rows: ChapterStateRow[] = []
         for (const c of e.chapters) {
@@ -482,8 +482,8 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         await loadEntry(e.id).catch(() => {})
         // The chapters on screen are the new source's now: read their state from the database.
         loadStates(e.id)
-        toast(`Moved to ${to.name ?? 'the new source'} · ${moved} chapter${moved === 1 ? '' : 's'} carried over${lost ? ` · ${lost} not found there` : ''}`)
-        return true
+        if (!quiet) toast(`Moved to ${to.name ?? 'the new source'} · ${moved} chapter${moved === 1 ? '' : 's'} carried over${lost ? ` · ${lost} not found there` : ''}`)
+        return { moved, lost }
       },
       /** Nests a title inside another entry (a series), or takes it out again. */
       setParent: (childId: string, parentId: string | undefined) => {
@@ -511,7 +511,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           dropped.forEach((c) => changes.delete(c.id))
         }
         editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (changes.has(c.id) ? { ...c, ...changes.get(c.id) } : c)) }))
-        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined || 'thumb' in patch) saveChapters(e.id, new Set(changes.keys()))
+        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined || 'thumb' in patch || 'marks' in patch) saveChapters(e.id, new Set(changes.keys()))
       },
       /** Reads another version (linked source) of a chapter from now on. */
       chooseVersion: (id: string, chapterId: string, versionIndex: number) => {
@@ -665,12 +665,39 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const e = find(id)
         if (!e) return
         const custom: CustomDetails = { ...e.custom, ...patch }
+        delete (custom as { status?: unknown }).status // hand-set statuses are gone; status follows progress
         for (const k of Object.keys(custom) as (keyof CustomDetails)[]) if (custom[k] === undefined || custom[k] === '') delete custom[k]
         // A series made in Midoku has nothing from a server: its details are all its own.
         if (e.sources.length === 0 && !custom.title) custom.title = e.title
         editEntry(e.id, (x) => applyCustom(x, custom))
         const dbId = ensureEntry(e.id)
         if (dbId) updateEntry(dbId, { custom })
+      },
+      /** Bookmarks a page of a chapter (a whole-chapter page number), or takes the bookmark away. */
+      toggleMark: (id: string, chapterId: string, wholePage: number) => {
+        const e = find(id)
+        const whole = e?.chapters.find((c) => c.id === physicalIdOf(chapterId))
+        if (!e || !whole) return false
+        const has = whole.marks?.includes(wholePage)
+        const marks = has ? whole.marks!.filter((n) => n !== wholePage) : [...(whole.marks ?? []), wholePage].sort((a, b) => a - b)
+        actions.editChapters(e.id, new Set([whole.id]), { marks: marks.length ? marks : undefined })
+        return !has
+      },
+      /** Marks every chapter of a title (and of the titles nested in it) read or unread. */
+      markEntry: async (id: string, read: boolean) => {
+        const e = find(id)
+        if (!e) return
+        const targets = [e, ...get().entries.filter((x) => x.parentId === e.id)]
+        let n = 0
+        for (const t of targets) {
+          if (t.remote && !t.remote.chaptersLoaded) await loadEntry(t.id).catch(() => {})
+          const cur = find(t.id)
+          const ids = new Set((cur?.chapters ?? []).filter((c) => !c.removed && c.read !== read).map((c) => c.id))
+          if (!ids.size || !cur) continue
+          n += ids.size
+          actions.editChapters(cur.id, ids, read ? { read: true, isNew: false, newPages: undefined } : { read: false, page: 0 })
+        }
+        toast(n ? `${e.title}: ${n} chapter${n === 1 ? '' : 's'} marked ${read ? 'read' : 'unread'}` : `Already ${read ? 'read' : 'unread'}`)
       },
       /** Reading mode for one title; undefined goes back to the device default. */
       setReaderMode: (id: string, mode: ReaderMode | undefined) => {
@@ -822,6 +849,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       },
       toast,
     }
+    return actions
   }, [set, get])
 }
 
@@ -1051,11 +1079,12 @@ export const unreadCount = (e: Entry) => (summaryOnly(e) ? e.counts!.unread : vi
 export const newCount = (e: Entry) => (summaryOnly(e) ? e.counts!.unread : visibleChapters(e).filter((c) => c.isNew && !c.read).length)
 export const readCount = (e: Entry) => (summaryOnly(e) ? e.counts!.total - e.counts!.unread : visibleChapters(e).filter((c) => c.read).length)
 
-/** A status set by hand wins; otherwise reading until every chapter is read (a new chapter turns it back to reading). */
+/** Unread until a chapter is read, Reading until every chapter is (a new chapter turns it back), then Completed. */
 export function statusOf(e: Entry): Status {
-  if (e.custom?.status) return e.custom.status
   const total = totalCount(e)
-  return total > 0 && readCount(e) === total ? 'completed' : 'reading'
+  const read = readCount(e)
+  if (total > 0 && read === total) return 'completed'
+  return read > 0 || (!summaryOnly(e) && visibleChapters(e).some((c) => c.page > 0)) ? 'reading' : 'unread'
 }
 
 /** The chapter the reader resumes: the first unread one in reading order. */

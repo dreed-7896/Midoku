@@ -3,8 +3,8 @@ import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, ServerStatus, Sheet } from '../components/Chrome'
 import { Icon, type IconName } from '../components/Icon'
 import { Banner, Empty, Loading } from '../components/Status'
-import { EntryGrid, type Pick } from '../components/LibraryCards'
-import { DuplicatesSheet, GroupSheet } from '../components/LibraryTools'
+import { CardMenu, CoverCorner, EntryGrid, type Pick } from '../components/LibraryCards'
+import { BulkMigrateSheet, DuplicatesSheet, GroupSheet } from '../components/LibraryTools'
 import { TLink as Link, useNav } from '../components/Nav'
 import { newCount, resumeChapter, statusOf, unreadCount, useStore } from '../data/store'
 import { Entry, GroupBy, LibraryFilters, LibraryTab, SortBy, Status, STATUS_LABEL } from '../data/types'
@@ -43,9 +43,10 @@ export default function Library() {
   const [sheet, setSheet] = useState(false)
   const [picking, setPicking] = useState(false)
   const [picked, setPicked] = useState<string[]>([])
-  const [tool, setTool] = useState<null | 'group' | 'tabs' | 'dupes'>(null)
+  const [tool, setTool] = useState<null | 'group' | 'tabs' | 'dupes' | 'migrate'>(null)
   const nav = useNav()
   const [more, setMore] = useState(false)
+  const [menuFor, setMenuFor] = useState<Entry | null>(null)
   const pager = useRef<HTMLDivElement>(null)
   const strip = useRef<HTMLDivElement>(null)
 
@@ -178,6 +179,7 @@ export default function Library() {
         </div>
       )}
 
+      <CardMenu.Provider value={picking ? null : setMenuFor}>
       {q ? (
         <div className="pager__panel pager__panel--solo pad-x" data-scroll-active="true">
           {search.length ? <EntryGrid entries={search} pick={pick} /> : <Empty icon="search" title={`No titles match “${query}”`} detail="This searches titles and authors in your library. Use Search to find new titles." />}
@@ -192,6 +194,32 @@ export default function Library() {
           ))}
         </div>
       )}
+      </CardMenu.Provider>
+
+      {menuFor && (() => {
+        const e = store.entry(menuFor.id) ?? menuFor
+        const st = statusOf(e)
+        const next = resumeChapter(e)
+        const close = () => setMenuFor(null)
+        return (
+          <Sheet open title={e.title} onClose={close}>
+            <p className="hint">{STATUS_LABEL[st]}{store.children(e.id).length ? ` · series of ${store.children(e.id).length} titles` : ''}</p>
+            <div className="menu">
+              {next && <MenuRow icon="play" title={st === 'unread' ? 'Start reading' : 'Continue reading'} detail={next.label} onClick={() => { close(); nav.go(`/read/${e.id}/${next.id}`) }} />}
+              <MenuRow icon="book" title="Open" onClick={() => { close(); nav.go(`/entry/${e.id}`) }} />
+              {st !== 'completed' && <MenuRow icon="check" title="Mark all read" onClick={() => { close(); void store.markEntry(e.id, true) }} />}
+              {st !== 'unread' && <MenuRow icon="undo" title="Mark all unread" detail="Clears read marks and page progress" onClick={() => { close(); if (window.confirm(`Mark every chapter of ${e.title} unread?`)) void store.markEntry(e.id, false) }} />}
+              <MenuRow icon="folder" title="Library tabs" onClick={() => { close(); setPicked([e.id]); setTool('tabs') }} />
+              <MenuRow icon="select" title="Select" detail="Pick more titles to group, file or remove" onClick={() => { close(); setPicking(true); setPicked([e.id]) }} />
+              <MenuRow icon="trash" title="Remove from library" detail="Progress is kept if you add it back" onClick={() => {
+                close()
+                if (!window.confirm(`Remove ${e.title} from your library?`)) return
+                store.removeFromLibrary([e.id]); store.toast(`Removed ${e.title}`)
+              }} />
+            </div>
+          </Sheet>
+        )
+      })()}
 
       <Sheet open={sheet} title="Filter and sort" onClose={() => setSheet(false)}>
         <div className="label label--flush">Status</div>
@@ -235,7 +263,7 @@ export default function Library() {
             <MenuRow icon="refresh" title={store.updating ? `Checking ${store.updating.done} of ${store.updating.total}…` : 'Check for new chapters'}
               detail="Asks the server for new chapters of followed titles" onClick={() => { setMore(false); void store.checkUpdates() }} />
           )}
-          <MenuRow icon="select" title="Select titles" detail="Group, file into tabs or remove several at once" onClick={() => { setMore(false); setPicking(true) }} />
+          <MenuRow icon="select" title="Select titles" detail="Group, file into tabs, migrate or remove several at once" onClick={() => { setMore(false); setPicking(true) }} />
           <MenuRow icon="shuffle" title="Random title" detail={`From ${tab.name}`} onClick={() => { setMore(false); shuffle(false) }} />
           <MenuRow icon="shuffle" title="Random from the whole library" onClick={() => { setMore(false); shuffle(true) }} />
           <MenuRow icon="clock" title="History" detail="Chapters you read, newest first" onClick={() => { setMore(false); nav.go('/history') }} />
@@ -249,6 +277,7 @@ export default function Library() {
           <span className="action-bar__count">{picked.length} selected</span>
           <button type="button" disabled={picked.length < 2} onClick={() => setTool('group')}><Icon name="layers" size={18} />Group</button>
           <button type="button" disabled={!picked.length} onClick={() => setTool('tabs')}><Icon name="folder" size={18} />Tabs</button>
+          {store.server.status !== 'off' && <button type="button" disabled={!picked.length} onClick={() => setTool('migrate')}><Icon name="migrate" size={18} />Migrate</button>}
           <button type="button" disabled={!picked.length} onClick={() => {
             if (!window.confirm(`Remove ${picked.length} title${picked.length === 1 ? '' : 's'} from your library? Progress is kept if you add them back.`)) return
             store.removeFromLibrary(picked)
@@ -259,7 +288,8 @@ export default function Library() {
       )}
       {tool === 'group' && <GroupSheet ids={picked} onClose={() => setTool(null)} onDone={stopPicking} />}
       {tool === 'dupes' && <DuplicatesSheet onClose={() => setTool(null)} />}
-      <Sheet open={tool === 'tabs'} title={`Tabs for ${picked.length} title${picked.length === 1 ? '' : 's'}`} onClose={() => setTool(null)}>
+      {tool === 'migrate' && <BulkMigrateSheet ids={picked} onClose={() => setTool(null)} onDone={stopPicking} />}
+      <Sheet open={tool === 'tabs'} title={`Tabs for ${picked.length} title${picked.length === 1 ? '' : 's'}`} onClose={() => { setTool(null); if (!picking) setPicked([]) }}>
         <p className="hint">Tick a tab to add every selected title to it; untick to take them all out.</p>
         {!tabs.some((t) => t.kind === 'tab') && <Empty compact icon="folder" title="No tabs yet" detail="Create one with + in the tab strip." />}
         <div className="check-list">
@@ -383,7 +413,7 @@ function ReadingQueue() {
               <div className="thumb">
                 <Cover art={e.art} title={e.title} url={e.coverUrl} />
                 <span className="badge badge--tl badge--light">{i + 1}</span>
-                {newCount(e) > 0 && <span className="badge badge--tr">{newCount(e)}</span>}
+                <CoverCorner entry={e} />
               </div>
               <div className="card-title">{e.title}</div>
               <div className="card-meta">{ch ? `Next: ${ch.label}` : 'Caught up'}</div>

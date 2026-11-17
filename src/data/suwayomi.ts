@@ -152,12 +152,50 @@ export const getSources = () =>
   gql<{ sources: { nodes: (SSource & { extension: { pkgName: string } | null })[] } }>(`{ sources { nodes { ${SRC} extension { pkgName } } } }`)
     .then((d) => d.sources.nodes.filter((s) => s.id !== '0'))
 
-export const browseSource = (source: string, type: 'POPULAR' | 'LATEST' | 'SEARCH', page: number, query?: string) =>
+/** A source's own search filters (genres, sort, status…), as the extension defines them. */
+export type SFilter =
+  | { type: 'CheckBoxFilter'; name: string; checked: boolean }
+  | { type: 'TriStateFilter'; name: string; tri: TriState }
+  | { type: 'TextFilter'; name: string; text: string }
+  | { type: 'SelectFilter'; name: string; values: string[]; selected: number }
+  | { type: 'SortFilter'; name: string; values: string[]; sort: { index: number; ascending: boolean } | null }
+  | { type: 'HeaderFilter'; name: string }
+  | { type: 'SeparatorFilter'; name: string }
+  | { type: 'GroupFilter'; name: string; filters: SFilter[] }
+export type TriState = 'IGNORE' | 'INCLUDE' | 'EXCLUDE'
+/** A changed filter, by position (a group's child goes in groupChange). */
+export interface FilterChange {
+  position: number
+  checkBoxState?: boolean
+  triState?: TriState
+  textState?: string
+  selectState?: number
+  sortState?: { index: number; ascending: boolean }
+  groupChange?: FilterChange
+}
+
+const LEAF = `type: __typename ... on CheckBoxFilter { name checked: default } ... on TriStateFilter { name tri: default }
+  ... on TextFilter { name text: default } ... on SelectFilter { name values selected: default }
+  ... on SortFilter { name values sort: default { index ascending } } ... on HeaderFilter { name } ... on SeparatorFilter { name }`
+const filterCache = new Map<string, Promise<SFilter[]>>()
+export function getSourceFilters(source: string): Promise<SFilter[]> {
+  let p = filterCache.get(source)
+  if (!p) {
+    p = gql<{ source: { filters: SFilter[] } }>(
+      `query($id: LongString!) { source(id: $id) { filters { ${LEAF} ... on GroupFilter { name filters { ${LEAF} } } } } }`, { id: source },
+    ).then((d) => d.source.filters)
+    p.catch(() => filterCache.delete(source))
+    filterCache.set(source, p)
+  }
+  return p
+}
+
+export const browseSource = (source: string, type: 'POPULAR' | 'LATEST' | 'SEARCH', page: number, query?: string, filters?: FilterChange[]) =>
   gql<{ fetchSourceManga: { hasNextPage: boolean; mangas: SMangaCard[] } }>(
-    `mutation($source: LongString!, $type: FetchSourceMangaType!, $page: Int!, $query: String) {
-      fetchSourceManga(input: { source: $source, type: $type, page: $page, query: $query }) { hasNextPage mangas { ${CARD} } }
+    `mutation($source: LongString!, $type: FetchSourceMangaType!, $page: Int!, $query: String, $filters: [FilterChangeInput!]) {
+      fetchSourceManga(input: { source: $source, type: $type, page: $page, query: $query, filters: $filters }) { hasNextPage mangas { ${CARD} } }
     }`,
-    { source, type, page, query },
+    { source, type, page, query, filters: filters?.length ? filters : undefined },
   ).then((d) => d.fetchSourceManga)
 
 // Titles and chapters
@@ -262,6 +300,8 @@ export function toChapter(c: SChapter, sourceId: string): Chapter {
     label,
     title: c.scanlator ? `${c.name} · ${c.scanlator}` : c.name,
     date: uploaded > 0 ? new Date(uploaded).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : '',
+    uploadedAt: uploaded > 0 ? uploaded : undefined,
+    scanlator: c.scanlator || undefined,
     pages: c.pageCount > 0 ? c.pageCount : 0,
     // Progress and marks come from Midoku's database, not from the server.
     page: 0,

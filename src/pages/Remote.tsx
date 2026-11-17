@@ -9,8 +9,9 @@ import { TLink as Link, useNav } from '../components/Nav'
 import { useStore } from '../data/store'
 import {
   artFor, assetUrl, browseSource, byLanguage, changeExtension, getExtensions, getExtensionSources, getSources, refreshExtensions,
-  SExtension, SMangaCard, SSource, webviewUrl,
+  SExtension, SMangaCard, SSource, webviewUrl, type FilterChange, type SFilter,
 } from '../data/suwayomi'
+import { SourceFilters } from '../components/SourceFilters'
 
 const PAGE_SIZE = 60
 
@@ -203,6 +204,10 @@ export function RemoteBrowse() {
   const [attempt, setAttempt] = useState(0)
   const [actions, setActions] = useState(false)
   const [busy, setBusy] = useState<'update' | 'uninstall' | null>(null)
+  // The source's own filters: the edited set (to reopen the sheet as it was) and what changed from the defaults.
+  const [filterSet, setFilterSet] = useState<SFilter[] | null>(null)
+  const [changes, setChanges] = useState<FilterChange[]>([])
+  const [filtering, setFiltering] = useState(false)
 
   const extAction = async (action: 'update' | 'uninstall') => {
     if (!ext) return
@@ -223,7 +228,7 @@ export function RemoteBrowse() {
   }
 
   useEffect(() => {
-    setExt(undefined); setExtError(undefined); setSourceId(undefined); setItems([]); setPage(1)
+    setExt(undefined); setExtError(undefined); setSourceId(undefined); setItems([]); setPage(1); setFilterSet(null); setChanges([])
     getExtensionSources(pkg).then((e) => {
       const sources = byLanguage(e?.source?.nodes ?? [])
       if (!e || !e.isInstalled || !sources.length) { setExtError('This extension is not installed on the server.'); return }
@@ -240,7 +245,7 @@ export function RemoteBrowse() {
     let alive = true
     setLoading(true)
     setError(undefined)
-    browseSource(sourceId, query ? 'SEARCH' : mode, page, query || undefined)
+    browseSource(sourceId, query || changes.length ? 'SEARCH' : mode, page, query || (changes.length ? '' : undefined), changes)
       .then((r) => {
         if (!alive) return
         setItems((prev) => (page === 1 ? r.mangas : [...prev, ...r.mangas]))
@@ -249,7 +254,7 @@ export function RemoteBrowse() {
       .catch((e: Error) => alive && setError(e.message))
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
-  }, [sourceId, mode, query, page, attempt])
+  }, [sourceId, mode, query, page, attempt, changes])
 
   const reset = (fn: () => void) => { setItems([]); setPage(1); fn() }
   const submit = (e: FormEvent) => { e.preventDefault(); reset(() => setQuery(input.trim())) }
@@ -297,7 +302,7 @@ export function RemoteBrowse() {
 
       {sources.length > 1 && (
         <div className="chips pad-x pad-t">
-          {sources.map((s: SSource) => <Chip key={s.id} on={s.id === sourceId} onClick={() => reset(() => setSourceId(s.id))}>{langLabel(s.lang)}</Chip>)}
+          {sources.map((s: SSource) => <Chip key={s.id} on={s.id === sourceId} onClick={() => reset(() => { setSourceId(s.id); setFilterSet(null); setChanges([]) })}>{langLabel(s.lang)}</Chip>)}
         </div>
       )}
 
@@ -306,11 +311,17 @@ export function RemoteBrowse() {
           <Icon name="search" size={18} />
           <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={`Search ${ext?.name ?? 'this source'}`} aria-label="Search this source" enterKeyHint="search" />
         </label>
+        {sourceId && <IconButton icon="sliders" label="Source filters" badge={changes.length || undefined} active={changes.length > 0} onClick={() => setFiltering(true)} />}
       </form>
+      {filtering && sourceId && <SourceFilters sourceId={sourceId} value={filterSet} onClose={() => setFiltering(false)}
+        onApply={(set, ch) => reset(() => { setFilterSet(set); setChanges(ch) })} />}
 
       <div className="underline-tabs pad-x" role="tablist">
-        {query ? (
-          <button type="button" role="tab" aria-selected className="is-on" onClick={() => { setInput(''); reset(() => setQuery('')) }}>“{query}” <Icon name="x" size={14} /></button>
+        {query || changes.length ? (
+          <>
+            {query && <button type="button" role="tab" aria-selected className="is-on" onClick={() => { setInput(''); reset(() => setQuery('')) }}>“{query}” <Icon name="x" size={14} /></button>}
+            {changes.length > 0 && <button type="button" role="tab" aria-selected className="is-on" onClick={() => reset(() => { setFilterSet(null); setChanges([]) })}>Filtered · {changes.length} <Icon name="x" size={14} /></button>}
+          </>
         ) : (
           <>
             <button type="button" role="tab" aria-selected={mode === 'POPULAR'} className={mode === 'POPULAR' ? 'is-on' : ''} onClick={() => reset(() => setMode('POPULAR'))}>Popular</button>

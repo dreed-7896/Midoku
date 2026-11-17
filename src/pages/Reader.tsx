@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { LazyImage, PageThumb, RemoteImage } from '../components/Art'
 import { useLongPress } from '../components/LongPress'
 import { Sheet } from '../components/Chrome'
@@ -54,6 +54,8 @@ export default function Reader() {
   const store = useStore()
   const nav = useNav()
   const { readerMode } = useSettings()
+  // A page bookmark opens the reader at that page (?page=<whole-chapter page>).
+  const atPage = Number(new URLSearchParams(useLocation().search).get('page')) || 0
   const entry = store.entry(entryId)
   // A title's own mode wins over the device default. Right to left is paged, turned the other way.
   const titleMode = entry?.custom?.reader
@@ -89,6 +91,7 @@ export default function Reader() {
   const [, bump] = useState(0)
   useEffect(() => {
     setUrls(null)
+    setPageNums([])
     setPagesError(undefined)
     loaded.current = new Set()
     heights.current = new Map()
@@ -164,7 +167,8 @@ export default function Reader() {
   // Open at the saved page, or the first page for a finished chapter.
   useLayoutEffect(() => {
     if (!chapter) return
-    startPage.current = chapter.read || !chapter.page ? 1 : chapter.page
+    const fromMark = atPage ? (pageNums.length ? pageNums.indexOf(atPage) + 1 : atPage) : 0
+    startPage.current = fromMark > 0 ? fromMark : chapter.read || !chapter.page ? 1 : chapter.page
     setPage(startPage.current)
     scrollToPage(startPage.current)
     setUi(true)
@@ -199,7 +203,7 @@ export default function Reader() {
     const whole = pageNums[n - 1] ?? n
     if (!window.confirm(`Use page ${n} as the thumbnail of ${chapter.label}?`)) return
     store.editChapters(entry.id, new Set([chapter.id]), { thumb: whole === (chapter.range?.[0] ?? 1) ? undefined : `page:${whole}` })
-    store.toast(entry.custom?.thumbs ? 'Thumbnail changed' : 'Thumbnail changed · turn on thumbnails in Edit details to see it')
+    store.toast(entry.custom?.thumbs ? 'Thumbnail changed' : 'Thumbnail changed · switch the chapter list to the grid to see it')
   })
   // The chapter list opens scrolled to the chapter being read.
   useEffect(() => {
@@ -215,6 +219,10 @@ export default function Reader() {
   }
 
   const close = () => nav.back(`/entry/${entry.id}`)
+  /** Whole-chapter page number of a shown page; bookmarks are kept by it. */
+  const wholeOf = (n: number) => pageNums[n - 1] ?? n
+  const marks = entry.chapters.find((c) => c.id === (chapter.physicalId ?? chapter.id))?.marks ?? chapter.marks ?? []
+  const marked = pages > 0 && marks.includes(wholeOf(Math.min(page, pages)))
   // Previous chapter slides in from the left like going back; next comes from the right.
   const goChapter = (c: Chapter) =>
     nav.go(`/read/${entry.id}/${c.id}`, { replace: true, direction: c.number < chapter.number ? 'back' : 'forward' })
@@ -387,10 +395,10 @@ export default function Reader() {
         <button type="button" className="icon-btn icon-btn--glass" aria-label="Next chapter" disabled={!next} onClick={() => next && goChapter(next)}>
           <Icon name="next" />
         </button>
-        <button type="button" className={`icon-btn icon-btn--glass${chapter.bookmarked ? ' is-accent-text' : ''}`} aria-pressed={chapter.bookmarked}
-          aria-label={chapter.bookmarked ? 'Remove bookmark' : 'Bookmark chapter'}
-          onClick={() => { store.editChapters(entry.id, new Set([chapter.id]), { bookmarked: !chapter.bookmarked }); store.toast(chapter.bookmarked ? `${chapter.label} unbookmarked` : `${chapter.label} bookmarked`) }}>
-          <Icon name={chapter.bookmarked ? 'bookmarkFill' : 'bookmark'} />
+        <button type="button" className={`icon-btn icon-btn--glass${marked ? ' is-accent-text' : ''}`} aria-pressed={marked} disabled={!pages}
+          aria-label={marked ? `Remove bookmark on page ${page}` : `Bookmark page ${page}`}
+          onClick={() => { const on = store.toggleMark(entry.id, chapter.id, wholeOf(page)); store.toast(on ? `Page ${page} bookmarked` : `Bookmark on page ${page} removed`) }}>
+          <Icon name={marked ? 'bookmarkFill' : 'bookmark'} />
         </button>
       </footer>
       <Sheet open={panel === 'chapters'} tall title={`Chapters · ${ordered.length}`} onClose={() => setPanel(null)}>
@@ -411,7 +419,7 @@ export default function Reader() {
         </div>
       </Sheet>
       <Sheet open={panel === 'pages'} tall title={`Pages · ${chapter.label}`} onClose={() => setPanel(null)}>
-        {isRemote && <p className="hint">Tap a page to go to it. Long-press one to make it the chapter's thumbnail.</p>}
+        <p className="hint">Tap a page to go to it.{isRemote ? " Long-press one to make it the chapter's thumbnail." : ''} The bookmark button marks the page you're on.</p>
         <div className="splitter__grid">
           {list.map((n) => {
             const lp = pagePress(n)
@@ -420,6 +428,7 @@ export default function Reader() {
                 onClick={() => { if (lp.wasLongPress()) return; setPanel(null); setPage(n); scrollToPage(n) }}
                 onPointerDown={isRemote ? lp.onPointerDown : undefined} onPointerMove={lp.onPointerMove} onPointerUp={lp.onPointerUp} onPointerLeave={lp.onPointerLeave} onContextMenu={isRemote ? lp.onContextMenu : undefined}>
                 <div className="splitter__img">{isRemote && urls ? <LazyImage src={urls[n - 1]} fromDevice={fromDevice} placeholder={n} /> : <PageThumb layout={n} />}</div>
+                {marks.includes(wholeOf(n)) && <span className="splitter__part splitter__mark"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
                 <span className="splitter__num">{n}</span>
               </button>
             )

@@ -1,6 +1,6 @@
 import { READER_LABEL, type ReaderMode } from '../data/types'
 import { useEffect, useState } from 'react'
-import { IconButton } from '../components/Chrome'
+import { PageHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
@@ -21,7 +21,6 @@ const DELAYS: { value: Settings['lockDelay']; label: string }[] = [
 export default function SettingsPage() {
   const settings = useSettings()
   const store = useStore()
-  const nav = useNav()
   const [supported, setSupported] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [checking, setChecking] = useState(false)
@@ -64,12 +63,7 @@ export default function SettingsPage() {
 
   return (
     <div className="page">
-      <div className="entry__top">
-        <IconButton icon="back" label="Back" onClick={() => nav.back('/')} />
-      </div>
-      <header className="pad-x pad-t">
-        <h1 className="h1">Settings</h1>
-      </header>
+      <PageHead title="Settings" />
 
       <ServerSection />
 

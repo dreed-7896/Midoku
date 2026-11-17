@@ -1,14 +1,12 @@
-/** Reading and Completed are worked out from reading progress; the others are set by hand. */
-export type Status = 'reading' | 'planned' | 'onhold' | 'completed' | 'dropped'
-export type ManualStatus = Exclude<Status, 'reading' | 'completed'>
+/** Worked out from reading progress only: nothing read, some read, everything read. */
+export type Status = 'unread' | 'reading' | 'completed'
 
 export const STATUS_LABEL: Record<Status, string> = {
+  unread: 'Unread',
   reading: 'Reading',
-  planned: 'Planned',
-  onhold: 'On hold',
   completed: 'Completed',
-  dropped: 'Dropped',
 }
+export const isStatus = (s: string): s is Status => s in STATUS_LABEL
 
 /** Details edited in Midoku; they win over what the server says. */
 export interface CustomDetails {
@@ -17,7 +15,6 @@ export interface CustomDetails {
   description?: string
   /** An image address or a picture saved as a data URL. */
   cover?: string
-  status?: ManualStatus
   /** Reading mode for this title; the device default is used without one. */
   reader?: ReaderMode
   /** Chapters as a grid of page thumbnails instead of a list. */
@@ -65,6 +62,12 @@ export interface Chapter {
   isNew: boolean
   /** Pages added since the server last fetched this chapter (found by the update check). */
   newPages?: number
+  /** Scanlation group, when the source names one. */
+  scanlator?: string
+  /** Upload time on the source (ms), for sorting by date. */
+  uploadedAt?: number
+  /** Bookmarked pages (whole-chapter page numbers). */
+  marks?: number[]
   /** Thumbnail picked by the person: "page:N" (a page of the chapter) or an image data URL. */
   thumb?: string
   /** Number of physical chapters (source variants) stacked in this slot. */
@@ -96,7 +99,7 @@ export interface Chapter {
   sourceNumber?: number
 }
 
-export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string }
+export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string; scanlator?: string }
 
 export interface InsertedChapter {
   id: string

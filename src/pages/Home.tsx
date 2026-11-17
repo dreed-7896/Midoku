@@ -44,7 +44,6 @@ export default function Home() {
     <div className="page">
       <PageHead kicker={`${weekday} · ${totalNew} new`} title="Feed">
         <IconButton icon="clock" label="History" onClick={() => nav.go('/history')} />
-        <IconButton icon="settings" label="Settings" onClick={() => nav.go('/settings')} />
         <IconButton icon="bell" label={`Updates, ${totalNew} new`} badge={totalNew || undefined} onClick={() => nav.go('/updates')} />
       </PageHead>
 
@@ -98,20 +97,20 @@ export default function Home() {
         </div>
       </section>}
 
-      <section className="section pad-x">
+      {/* Shown while loading, on an error, or when there is something unread; an empty feed shows nothing. */}
+      {(!feed.items || feed.error || preview.length > 0) && <section className="section pad-x">
         <div className="section-head section-head--flush">
           <h2 className="h2">Updates{totalNew > 0 && <span className="h2__count">{totalNew} new</span>}</h2>
           <button type="button" className="link-btn" onClick={() => nav.go('/updates')}>See all</button>
         </div>
         {!feed.items && !feed.error && <Loading label="Loading updates" shape="rows" count={2} />}
         {feed.error && <Empty compact icon="alert" tone="error" title="Couldn't load updates" detail={feed.error.slice(0, 140)} />}
-        {feed.items && !preview.length && <Empty compact icon="check" tone="done" title="All caught up" detail="New chapters, and new pages in recent chapters, show up here." />}
         {preview.length > 0 && (
           <div className="check-list">
             {preview.map((u) => <UpdateRow key={u.key} u={u} fresh={u.at > feed.seenAt} busy={opening === u.key} onOpen={() => void open(u)} />)}
           </div>
         )}
-      </section>
+      </section>}
 
       <section className="section pad-x">
         {store.server.status !== 'off' && <PopularPanel />}

@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react'
 import { statusOf, suggestedChapterName, totalCount, useStore } from '../data/store'
-import { resetThumbs } from '../data/thumbs'
-import { STATUS_LABEL, type Chapter, type CustomDetails, type Entry, type ManualStatus } from '../data/types'
+import { STATUS_LABEL, type Chapter, type CustomDetails, type Entry } from '../data/types'
 import { Cover } from './Art'
 import { Sheet } from './Chrome'
 import { Icon } from './Icon'
 import { Empty } from './Status'
-
-const MANUAL: ManualStatus[] = ['planned', 'onhold', 'dropped']
 
 /** Turns a picked picture into a small JPEG data URL, so it can be kept with the title. */
 function shrinkImage(file: File, width = 360): Promise<string> {
@@ -28,7 +25,7 @@ function shrinkImage(file: File, width = 360): Promise<string> {
   })
 }
 
-/** Title, author, description, cover and reading status, kept over what the source says. */
+/** Title, author, description and cover, kept over what the source says; reading status follows progress. */
 export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: () => void }) {
   const store = useStore()
   const o = entry.original ?? { title: entry.title, author: entry.author, description: entry.description, coverUrl: entry.coverUrl }
@@ -38,22 +35,13 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
   const [author, setAuthor] = useState(c.author ?? '')
   const [description, setDescription] = useState(c.description ?? '')
   const [cover, setCover] = useState(c.cover ?? '')
-  const [status, setStatus] = useState<ManualStatus | undefined>(c.status)
-  const [thumbs, setThumbs] = useState(!!c.thumbs)
   const [busy, setBusy] = useState(false)
-  const auto = statusOf({ ...entry, custom: { ...c, status: undefined } })
+  const status = statusOf(entry)
 
   const pick = async (file?: File) => {
     if (!file) return
     setBusy(true)
     try { setCover(await shrinkImage(file)) } catch (e) { store.toast((e as Error).message) } finally { setBusy(false) }
-  }
-  const resetAll = async () => {
-    if (!window.confirm(`Reset all chapter thumbnails of ${entry.title}?`)) return
-    await resetThumbs(entry.chapters)
-    const picked = new Set(entry.chapters.filter((x) => x.thumb).map((x) => x.id))
-    if (picked.size) store.editChapters(entry.id, picked, { thumb: undefined })
-    store.toast('Thumbnails reset')
   }
   const save = () => {
     const patch: CustomDetails = {
@@ -61,8 +49,6 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
       author: author.trim() || undefined,
       description: description.trim() || undefined,
       cover: cover.trim() || undefined,
-      status,
-      thumbs: thumbs || undefined,
     }
     store.editDetails(entry.id, patch)
     store.toast('Details saved')
@@ -92,29 +78,12 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
       <textarea className="form-input form-input--area" value={description} onChange={(e) => setDescription(e.target.value)} placeholder={o.description || 'Description'} aria-label="Description" rows={5} />
       {!own && <p className="hint">Leave a field empty to use the source's.</p>}
 
-      <div className="label">Reading status</div>
+      <div className="label">Reading status · {STATUS_LABEL[status]}</div>
       <div className="segmented">
-        <button type="button" className={!status ? 'is-on' : ''} onClick={() => setStatus(undefined)}>Auto · {STATUS_LABEL[auto]}</button>
-        {MANUAL.map((s) => <button key={s} type="button" className={status === s ? 'is-on' : ''} onClick={() => setStatus(s)}>{STATUS_LABEL[s]}</button>)}
+        <button type="button" disabled={status === 'completed'} onClick={() => { void store.markEntry(entry.id, true); onClose() }}>Mark all read</button>
+        <button type="button" disabled={status === 'unread'} onClick={() => { void store.markEntry(entry.id, false); onClose() }}>Mark all unread</button>
       </div>
-      <p className="hint">Auto is Reading until every chapter is read, then Completed.</p>
-
-      {!own && <>
-        <div className="label">Chapters</div>
-        <div className="check-list">
-          <label className="check-row">
-            <span className="check-row__name check-row__name--stack"><strong>Show thumbnails</strong><span className="card-meta">A grid with each chapter's first page, made on this device</span></span>
-            <input type="checkbox" role="switch" className="switch" checked={thumbs} onChange={() => setThumbs((t) => !t)} />
-          </label>
-          {thumbs && (
-            <button type="button" className="check-row" onClick={() => void resetAll()}>
-              <span className="check-row__name check-row__name--stack"><strong>Reset thumbnails</strong><span className="card-meta">Clears picked and made thumbnails; progress is kept</span></span>
-              <Icon name="undo" size={18} />
-            </button>
-          )}
-        </div>
-        {thumbs && <p className="hint">Long-press a chapter → Edit thumbnail to pick a page or a picture.</p>}
-      </>}
+      <p className="hint">Unread, Reading and Completed follow your reading progress.</p>
 
       <div className="sheet__actions">
         <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>

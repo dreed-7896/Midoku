@@ -126,6 +126,8 @@ export interface ChapterStateRow {
   pages_grew_at?: string | null
   /** Chapter thumbnail picked by the person: "page:N" or an image data URL. */
   thumb?: string | null
+  /** Bookmarked pages (whole-chapter page numbers). */
+  marks?: number[] | null
 }
 export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }
 export interface InsertedRow {
@@ -175,7 +177,7 @@ export async function loadLibrary(): Promise<DbLibrary> {
 /** A saved title's reading state, split chapters and inserted chapters. */
 export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
-    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at, thumb').eq('entry_id', entryId)),
+    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at, thumb, marks').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
     all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
   ])

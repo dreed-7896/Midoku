@@ -13,6 +13,7 @@ const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: '/library', label: 'Library', icon: 'library' },
   { to: '/search', label: 'Search', icon: 'search' },
   { to: '/sources', label: 'Sources', icon: 'sources' },
+  { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
 export function TabBar() {

@@ -7,17 +7,19 @@ import { TLink as Link, useNav } from '../components/Nav'
 import { useLongPress } from '../components/LongPress'
 import { PageSplitter } from '../components/PageSplitter'
 import { ThumbSheet } from '../components/ThumbSheet'
+import { resetThumbs } from '../data/thumbs'
 import { AddToEntrySheet, EditDetailsSheet, MoveSheet } from '../components/EntryTools'
+import { CoverCorner } from '../components/LibraryCards'
 import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
 import { Banner, Empty, Loading } from '../components/Status'
 import { chapterKey, useDownloads } from '../data/downloads'
 import { layoutOf, physicalIdOf } from '../data/library'
-import { agoText, newCount, progressPct, readCount, resumeChapter, statusOf, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
+import { agoText, progressPct, readCount, resumeChapter, statusOf, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
 import { getChapters, SChapter, toChapter } from '../data/suwayomi'
 import { STATUS_LABEL, type Chapter } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
-type Panel = null | 'migrate' | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'addTo' | 'move'
+type Panel = null | 'marks' | 'chfilter' | 'migrate' | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'addTo' | 'move'
 
 export default function EntryPage() {
   const { id = '' } = useParams()
@@ -27,6 +29,10 @@ export default function EntryPage() {
   const [expanded, setExpanded] = useState(false)
   const [filter, setFilter] = useState<ChapterFilter>('all')
   const [descending, setDescending] = useState(true)
+  /** Chapter list filters: one linked source, one scanlation group, and sorting by number or upload date. */
+  const [bySource, setBySource] = useState<string>()
+  const [byGroup, setByGroup] = useState<string>()
+  const [sortBy, setSortBy] = useState<'number' | 'date'>('number')
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showRemoved, setShowRemoved] = useState(false)
@@ -65,10 +71,15 @@ export default function EntryPage() {
 
   const all = useMemo(() => (entry ? visibleChapters(entry) : []), [entry])
   const chapters = useMemo(() => {
+    const versionsOf = (c: Chapter) => (c.alts?.length ? c.alts : [{ sourceId: c.sourceId, scanlator: c.scanlator }])
     const list = all.filter((c) =>
-      filter === 'unread' ? !c.read : filter === 'bookmarked' ? c.bookmarked : filter === 'downloaded' ? c.downloaded : true)
-    return list.sort((a, b) => (descending ? b.number - a.number : a.number - b.number))
-  }, [all, filter, descending])
+      (filter === 'unread' ? !c.read : filter === 'bookmarked' ? c.bookmarked || !!c.marks?.length : filter === 'downloaded' ? c.downloaded : true)
+      && (!bySource || versionsOf(c).some((v) => v.sourceId === bySource))
+      && (!byGroup || versionsOf(c).some((v) => v.scanlator === byGroup)))
+    const key = (c: Chapter) => (sortBy === 'date' ? c.uploadedAt ?? 0 : c.number)
+    return list.sort((a, b) => (descending ? key(b) - key(a) : key(a) - key(b)) || (descending ? b.number - a.number : a.number - b.number))
+  }, [all, filter, descending, bySource, byGroup, sortBy])
+  const groups = useMemo(() => [...new Set(all.flatMap((c) => (c.alts?.length ? c.alts.map((a) => a.scanlator) : [c.scanlator])).filter((g): g is string => !!g))].sort(), [all])
 
   if (!entry) {
     return (
@@ -96,6 +107,13 @@ export default function EntryPage() {
   const resume = resumeChapter(entry)
   /** Chapters as a grid of thumbnails: off by default, turned on per title (Edit details, or the button here). */
   const thumbs = !!entry.custom?.thumbs
+  const resetAllThumbs = async () => {
+    if (!window.confirm(`Reset all chapter thumbnails of ${entry.title}?`)) return
+    await resetThumbs(entry.chapters)
+    const picked = new Set(entry.chapters.filter((x) => x.thumb).map((x) => x.id))
+    if (picked.size) store.editChapters(entry.id, picked, { thumb: undefined })
+    store.toast('Thumbnails reset')
+  }
   const bm = libraryPress()
   /** Filing a title into a tab puts it in the library too. */
   const fileIn = (tabId: string) => {
@@ -105,7 +123,10 @@ export default function EntryPage() {
   const main = entry.sources.find((s) => s.main) ?? entry.sources[0]
   const unread = unreadCount(entry)
   const downloaded = all.filter((c) => c.downloaded).length
-  const bookmarked = all.filter((c) => c.bookmarked).length
+  const bookmarked = all.filter((c) => c.bookmarked || c.marks?.length).length
+  /** Page bookmarks, oldest chapter first; each opens the part of a split chapter that holds the page. */
+  const pageMarks = entry.chapters.filter((c) => c.marks?.length && !c.removed).sort((a, b) => a.number - b.number)
+    .flatMap((c) => c.marks!.map((n) => ({ c, n, open: all.find((p) => p.physicalId === c.id && p.range && n >= p.range[0] && n <= p.range[1]) ?? c })))
   const sheetChapter = sheetFor ? all.find((c) => c.id === sheetFor) ?? entry.chapters.find((c) => c.id === sheetFor) : undefined
 
   const openChapter = (c: Chapter) => {
@@ -243,7 +264,7 @@ export default function EntryPage() {
           {entry.sources.length > 1 && <em>+{entry.sources.length - 1} more</em>}
         </button>
         <div className="fact"><span>Status</span><strong><span className={`dot dot--${entry.publishing.toLowerCase()}`} />{entry.publishing}</strong></div>
-        <button type="button" className="fact fact--btn" onClick={() => setPanel('edit')}><span>Reading</span><strong>{STATUS_LABEL[statusOf(entry)]}</strong><em>{entry.custom?.status ? 'set by you · ' : ''}{entry.lastReadAgo !== undefined ? `read ${agoText(entry.lastReadAgo)}` : 'never read'}</em></button>
+        <button type="button" className="fact fact--btn" onClick={() => setPanel('edit')}><span>Reading</span><strong>{STATUS_LABEL[statusOf(entry)]}</strong><em>{entry.lastReadAgo !== undefined ? `read ${agoText(entry.lastReadAgo)}` : 'never read'}</em></button>
       </div>}
 
       {(entry.description || entry.tags.length > 0) && (
@@ -265,7 +286,7 @@ export default function EntryPage() {
           <div className="grid3">
             {kids.map((k) => (
               <Link key={k.id} to={`/entry/${k.id}`} className="card">
-                <div className="thumb"><Cover art={k.art} title={k.title} url={k.coverUrl} />{newCount(k) > 0 && <span className="badge badge--tr">{newCount(k)}</span>}
+                <div className="thumb"><Cover art={k.art} title={k.title} url={k.coverUrl} /><CoverCorner entry={k} />
                   <span className="thumb__bar"><span style={{ width: `${progressPct(k)}%` }} /></span></div>
                 <div className="card-title card-title--2">{k.title}</div>
               </Link>
@@ -279,6 +300,7 @@ export default function EntryPage() {
           <h2 className="h2">Chapters<span className="h2__count">{loaded ? all.length : '…'}</span></h2>
           <div className="row-gap">
             <IconButton icon={thumbs ? 'list' : 'grid'} label={thumbs ? 'Show chapters as a list' : 'Show chapter thumbnails'} onClick={() => store.editDetails(entry.id, { thumbs: thumbs ? undefined : true })} />
+            <IconButton icon="sliders" label="Filter and sort chapters" badge={(bySource ? 1 : 0) + (byGroup ? 1 : 0) + (sortBy === 'date' ? 1 : 0) || undefined} onClick={() => setPanel('chfilter')} />
             <IconButton icon="sort" label={descending ? 'Show oldest first' : 'Show newest first'} onClick={() => setDescending((d) => !d)} />
             <IconButton icon="select" label={selecting ? 'Done selecting' : 'Select chapters'} active={selecting}
               onClick={() => { setSelecting((s) => !s); setSelected(new Set()) }} />
@@ -322,7 +344,7 @@ export default function EntryPage() {
               {c.physicalId && <span className="badge badge--glass">Part</span>}
             </>
             const flags = <>
-              {c.bookmarked && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
+              {(c.bookmarked || !!c.marks?.length) && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label={c.marks?.length ? `${c.marks.length} bookmarked page${c.marks.length === 1 ? '' : 's'}` : 'Bookmarked'} /></span>}
               {c.downloaded && <span className="flag"><Icon name="download" size={12} stroke={2.2} label="Downloaded" /></span>}
               {progress !== undefined && <span className="flag">{Math.round(progress * 100)}%</span>}
             </>
@@ -387,9 +409,58 @@ export default function EntryPage() {
         )}
       </section>}
 
+      <Sheet open={panel === 'marks'} title="Bookmarks" onClose={() => setPanel(null)}>
+        {!pageMarks.length && <Empty compact icon="bookmark" title="No bookmarked pages" detail="Tap the bookmark button in the reader to mark the page you're on." />}
+        <div className="check-list">
+          {pageMarks.map(({ c, n, open }) => (
+            <div key={`${c.id}-${n}`} className="check-row">
+              <button type="button" className="check-row__name check-row__name--stack grow plain-btn" onClick={() => { setPanel(null); nav.go(`/read/${entry.id}/${open.id}?page=${n}`) }}>
+                <strong className="ellipsis">{open.label} · page {open.range ? n - open.range[0] + 1 : n}</strong>
+                <span className="card-meta ellipsis">{c.title}</span>
+              </button>
+              <button type="button" className="icon-btn icon-btn--sm" aria-label={`Remove bookmark on ${c.label} page ${n}`} onClick={() => store.toggleMark(entry.id, c.id, n)}><Icon name="x" size={16} /></button>
+            </div>
+          ))}
+        </div>
+      </Sheet>
+
+      <Sheet open={panel === 'chfilter'} title="Chapters" onClose={() => setPanel(null)}>
+        <div className="label label--flush">Sort by</div>
+        <div className="segmented">
+          <button type="button" className={sortBy === 'number' ? 'is-on' : ''} onClick={() => setSortBy('number')}>Chapter number</button>
+          <button type="button" className={sortBy === 'date' ? 'is-on' : ''} onClick={() => setSortBy('date')}>Upload date</button>
+        </div>
+        <div className="segmented pad-t-sm">
+          <button type="button" className={descending ? 'is-on' : ''} onClick={() => setDescending(true)}>{sortBy === 'date' ? 'Newest first' : 'Highest first'}</button>
+          <button type="button" className={!descending ? 'is-on' : ''} onClick={() => setDescending(false)}>{sortBy === 'date' ? 'Oldest first' : 'Lowest first'}</button>
+        </div>
+        {entry.sources.length > 1 && <>
+          <div className="label">Source</div>
+          <div className="chips wrap">
+            <Chip on={!bySource} onClick={() => setBySource(undefined)}>All</Chip>
+            {entry.sources.map((s, i) => <Chip key={`${s.sourceId}-${i}`} on={bySource === s.sourceId} onClick={() => setBySource(s.sourceId)}>{s.name ?? store.source(s.sourceId)?.name ?? s.sourceId}</Chip>)}
+          </div>
+        </>}
+        {groups.length > 0 && <>
+          <div className="label">Scanlator</div>
+          <div className="chips wrap">
+            <Chip on={!byGroup} onClick={() => setByGroup(undefined)}>All</Chip>
+            {groups.map((g) => <Chip key={g} on={byGroup === g} onClick={() => setByGroup(g)}>{g}</Chip>)}
+          </div>
+        </>}
+        <div className="sheet__actions">
+          <button type="button" className="btn btn--ghost" onClick={() => { setBySource(undefined); setByGroup(undefined); setSortBy('number'); setDescending(true) }}>Reset</button>
+          <button type="button" className="btn btn--accent" onClick={() => setPanel(null)}>Done</button>
+        </div>
+      </Sheet>
+
       <Sheet open={panel === 'options'} title={entry.title} onClose={() => setPanel(null)}>
         <div className="menu">
-          <MenuRow icon="settings" title="Edit details" detail="Title, author, description, cover, reading status" onClick={() => setPanel('edit')} />
+          <MenuRow icon="settings" title="Edit details" detail="Title, author, description, cover" onClick={() => setPanel('edit')} />
+          {!ownSeries && statusOf(entry) !== 'completed' && <MenuRow icon="check" title="Mark all read" detail={`${unread} unread chapter${unread === 1 ? '' : 's'}`} onClick={() => { setPanel(null); void store.markEntry(entry.id, true) }} />}
+          {!ownSeries && statusOf(entry) !== 'unread' && <MenuRow icon="undo" title="Mark all unread" detail="Clears read marks and page progress" onClick={() => { setPanel(null); if (window.confirm(`Mark every chapter of ${entry.title} unread?`)) void store.markEntry(entry.id, false) }} />}
+          {thumbs && <MenuRow icon="image" title="Reset thumbnails" detail="Clears picked and made chapter thumbnails" onClick={() => { setPanel(null); void resetAllThumbs() }} />}
+          <MenuRow icon="bookmark" title="Bookmarks" detail={pageMarks.length ? `${pageMarks.length} bookmarked page${pageMarks.length === 1 ? '' : 's'}` : 'Bookmark pages from the reader'} onClick={() => setPanel('marks')} />
           <MenuRow icon="folder" title="Library tabs" detail={userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => t.name).join(', ') || 'Not in any tab'} onClick={() => setPanel('tabs')} />
           <MenuRow icon="sources" title="Sources" detail={`${entry.sources.length} linked · main: ${main?.name ?? '—'}`} onClick={() => setPanel('sources')} />
           {entry.remote && <MenuRow icon="migrate" title="Migrate" detail={`Move to another source · progress comes along`} onClick={() => setPanel('migrate')} />}
@@ -461,7 +532,7 @@ export default function EntryPage() {
         {kids.length > 0 && <div className="grid3 pad-b">
           {kids.map((k) => (
             <Link key={k.id} to={`/entry/${k.id}`} className="card" onClick={() => setPanel(null)}>
-              <div className="thumb"><Cover art={k.art} title={k.title} url={k.coverUrl} />{newCount(k) > 0 && <span className="badge badge--tr">{newCount(k)}</span>}</div>
+              <div className="thumb"><Cover art={k.art} title={k.title} url={k.coverUrl} /><CoverCorner entry={k} /></div>
               <div className="card-title card-title--2">{k.title}</div>
             </Link>
           ))}
