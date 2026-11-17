@@ -655,3 +655,5 @@ body:has(.action-bar) .mini { display: none; }
 .check-row input.switch:checked { background: var(--accent); }
 .check-row input.switch:checked::after { transform: translateX(14px); background: var(--on-accent); }
 .check-row input:disabled { opacity: 0.45; }
+.fab { transition: opacity 0.18s, transform 0.18s; }
+.fab.is-hidden { opacity: 0; transform: scale(0.8); pointer-events: none; }

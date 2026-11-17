@@ -74,11 +74,24 @@ export default function Library() {
     if (chip && s) s.scrollTo({ left: chip.offsetLeft - (s.clientWidth - chip.offsetWidth) / 2, behavior: 'smooth' })
   }, [active])
 
+  const touching = useRef(false)
+  const settle = useRef<ReturnType<typeof setTimeout>>()
+  /** If the pager comes to rest between two tabs (iOS can drop the snap when the screen re-renders mid-swipe), finish the move. */
+  const snapIfStuck = () => {
+    clearTimeout(settle.current)
+    settle.current = setTimeout(() => {
+      const el = pager.current
+      if (!el || touching.current) return
+      const i = Math.round(el.scrollLeft / el.clientWidth)
+      if (Math.abs(el.scrollLeft - i * el.clientWidth) > 2) el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' })
+    }, 180)
+  }
   const onPagerScroll = () => {
     const el = pager.current
     if (!el) return
     const i = Math.round(el.scrollLeft / el.clientWidth)
     if (i !== active && i >= 0 && i < tabs.length) setActive(i)
+    snapIfStuck()
   }
   const goTab = (i: number) => {
     const el = pager.current
@@ -183,7 +196,7 @@ export default function Library() {
           {search.length ? <EntryGrid entries={search} pick={pick} /> : <Empty icon="search" title={`No titles match “${query}”`} detail="This searches titles and authors in your library. Use Search to find new titles." />}
         </div>
       ) : (
-        <div className="pager" ref={pager} onScroll={onPagerScroll}>
+        <div className="pager" ref={pager} onScroll={onPagerScroll} onTouchStart={() => { touching.current = true }} onTouchEnd={() => { touching.current = false; snapIfStuck() }} onTouchCancel={() => { touching.current = false; snapIfStuck() }}>
           {tabs.map((t, i) => (
             <div key={t.id} className="pager__panel" data-scroll-active={i === active} role="tabpanel" aria-label={t.name}>
               {/* Only the visible tab and its neighbours are rendered. */}
@@ -194,8 +207,9 @@ export default function Library() {
       )}
       </CardMenu.Provider>
 
-      {tab.kind === 'reading' && !picking && !q && (
-        <button type="button" className="fab" aria-label="Random title from Reading (hold for the whole library)" title="Tap: from Reading · Hold: whole library"
+      {/* Always mounted: adding or removing it while the pager is still snapping stops the snap on iOS. */}
+      {(
+        <button type="button" className={`fab${tab.kind === 'reading' && !picking && !q ? '' : ' is-hidden'}`} tabIndex={tab.kind === 'reading' ? 0 : -1} aria-hidden={tab.kind !== 'reading'} aria-label="Random title from Reading (hold for the whole library)" title="Tap: from Reading · Hold: whole library"
           onClick={() => { if (!shufflePress().wasLongPress()) shuffle(false) }}
           onPointerDown={shufflePress().onPointerDown} onPointerMove={shufflePress().onPointerMove} onPointerUp={shufflePress().onPointerUp} onPointerLeave={shufflePress().onPointerLeave} onContextMenu={shufflePress().onContextMenu}>
           <Icon name="shuffle" size={22} />
