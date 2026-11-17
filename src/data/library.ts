@@ -1,7 +1,7 @@
 import type { ChapterStateRow, DbLibrary, EntryRow, EntrySourceRow, InsertedRow, SplitRow, TabRow } from './db'
 import { chapterKey, isSaved } from './downloads'
 import { artFor, assetUrl, hoursSince, SChapter, toChapter } from './suwayomi'
-import type { Chapter, ChapterVersion, Entry, EntrySource, InsertedChapter, LibraryTab } from './types'
+import type { Chapter, ChapterVersion, Entry, EntrySource, InsertedChapter, LibraryTab, PageLayout } from './types'
 
 /** Pure mapping between Midoku's database rows, Suwayomi data and the app's model. */
 
@@ -202,23 +202,51 @@ export function partRanges(pages: number, breaks: number[]): [number, number][] 
   return starts.map((s, i) => [s, (starts[i + 1] ?? (pages || Number.MAX_SAFE_INTEGER) + 1) - 1])
 }
 
-export function expandSplits(chapters: Chapter[], splits?: Record<string, number[]>): Chapter[] {
+/** A stored layout; copies saved before pages could be left out hold just the breaks. */
+export const layoutOf = (v: PageLayout | number[] | undefined): PageLayout | undefined =>
+  !v ? undefined : Array.isArray(v) ? { breaks: v, skip: [] } : v
+
+/** Physical page numbers a chapter (or part) shows, out of `total` pages. */
+export function shownPages(c: Pick<Chapter, 'range' | 'skip'>, total: number): number[] {
+  const [a, b] = c.range ?? [1, total]
+  const skip = new Set(c.skip ?? [])
+  const out: number[] = []
+  for (let n = a; n <= Math.min(b, total); n++) if (!skip.has(n)) out.push(n)
+  return out
+}
+
+export function expandSplits(chapters: Chapter[], splits?: Record<string, PageLayout | number[]>): Chapter[] {
   if (!splits || !Object.keys(splits).length) return chapters
   return chapters.flatMap((c) => {
-    const breaks = c.sourceUrl ? splits[chapterKey(c.sourceId, c.sourceUrl)] : undefined
-    if (!breaks?.length) return [c]
-    const ranges = partRanges(c.pages, breaks)
+    const layout = c.sourceUrl ? layoutOf(splits[chapterKey(c.sourceId, c.sourceUrl)]) : undefined
+    if (!layout || (!layout.breaks.length && !layout.skip.length)) return [c]
+    const skip = layout.skip
+    // Where the chapter's saved page sits among the shown pages of a range.
+    const placed = (range: [number, number]): Pick<Chapter, 'page' | 'pages' | 'read' | 'part'> => {
+      if (!c.pages) return { pages: 0, read: c.read, page: !c.read && c.page >= range[0] ? c.page - range[0] + 1 : 0, part: `From page ${range[0]}` }
+      const shown = shownPages({ range, skip }, c.pages)
+      const last = shown[shown.length - 1] ?? range[1]
+      return {
+        part: shown.length ? `Pages ${shown[0]}–${last}${shown.length < last - shown[0] + 1 ? ` · ${shown.length}` : ''}` : 'No pages',
+        pages: shown.length,
+        read: c.read || (c.page > 0 && c.page >= last),
+        page: c.read || c.page < range[0] || c.page >= last ? 0 : shown.filter((n) => n <= c.page).length,
+      }
+    }
+    if (!layout.breaks.length) {
+      const range: [number, number] = [1, c.pages || Number.MAX_SAFE_INTEGER]
+      return [{ ...c, range, skip, ...placed(range), read: c.read, part: undefined }]
+    }
+    const ranges = partRanges(c.pages, layout.breaks)
     return ranges.map(([a, b], i): Chapter => ({
       ...c,
       id: `${c.id}${PART}${i + 1}`,
       physicalId: c.id,
       range: [a, b],
+      skip,
       number: c.number + i / 1000,
       label: `${c.label} · ${i + 1}/${ranges.length}`,
-      part: c.pages ? `Pages ${a}–${b}` : `From page ${a}`,
-      pages: c.pages ? b - a + 1 : 0,
-      read: c.read || (c.page > 0 && c.page >= b),
-      page: c.read ? 0 : c.page >= a && c.page < b ? c.page - a + 1 : 0,
+      ...placed([a, b]),
     }))
   })
 }

@@ -128,7 +128,7 @@ export function IconButton({ icon, label, onClick, badge, glass, active }: {
   )
 }
 
-export function Sheet({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
+export function Sheet({ open, title, onClose, children, tall }: { open: boolean; title: string; onClose: () => void; children: ReactNode; tall?: boolean }) {
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
@@ -138,7 +138,7 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
   return createPortal(
     <div className="sheet-wrap">
       <button type="button" className="sheet-scrim" aria-label="Close" onClick={onClose} />
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`sheet${tall ? ' sheet--tall' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="sheet__head">
           <h2 className="h2">{title}</h2>
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="x" /></button>

@@ -6,13 +6,13 @@ import {
 } from './db'
 import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
 import {
-  applyStates, entriesFromDb, entryRow, expandSplits, insertedFromRow, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
+  applyStates, entriesFromDb, entryRow, expandSplits, insertedFromRow, shownPages, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
   sourceRow, stateRow, statesOf, tabRow, toTab, withDownloads, withInserted,
 } from './library'
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
 import { useSettings } from './settings'
 import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
-import type { Chapter, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, Source, Status } from './types'
+import type { Chapter, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
 
 /*
  * Where things live:
@@ -189,7 +189,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           return {
             ...e,
             inserted,
-            splits: Object.fromEntries(splits.map((r) => [chapterKey(r.source_id, r.chapter_url), r.breaks])),
+            splits: Object.fromEntries(splits.map((r) => [chapterKey(r.source_id, r.chapter_url), { breaks: r.breaks, skip: r.excluded ?? [] }])),
             chapters: withDownloads(applyStates(withInserted(e.chapters, inserted), states.map(rowState))),
           }
         }))
@@ -444,23 +444,27 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         if (dbId) saveChapterStates(c.alts!.map((a) => stateRow(dbId, { ...chosen, sourceId: a.sourceId, sourceUrl: a.url, preferred: a === v })))
         toast(`Reading ${v.name}`)
       },
-      /** Cuts a chapter into parts at the given pages (first page of every part after the first). */
-      splitChapter: (id: string, chapterId: string, breaks: number[]) => {
+      /** Sets where a chapter's parts start (first page of every part after the first) and which pages are left out. */
+      splitChapter: (id: string, chapterId: string, { breaks, skip }: PageLayout) => {
         const e = find(id)
         const c = e?.chapters.find((x) => x.id === physicalIdOf(chapterId))
         if (!e || !c?.sourceUrl) return
         const key = chapterKey(c.sourceId, c.sourceUrl)
-        const clean = [...new Set(breaks)].filter((b) => b > 1).sort((a, b) => a - b)
+        const sorted = (l: number[]) => [...new Set(l)].sort((a, b) => a - b)
+        const clean = sorted(breaks).filter((b) => b > 1)
+        const left = sorted(skip).filter((n) => n >= 1)
+        const any = clean.length > 0 || left.length > 0
         editEntry(e.id, (x) => {
           const { [key]: _old, ...rest } = x.splits ?? {}
-          return { ...x, splits: clean.length ? { ...rest, [key]: clean } : rest }
+          return { ...x, splits: any ? { ...rest, [key]: { breaks: clean, skip: left } } : rest }
         })
         const dbId = ensureEntry(e.id)
         if (dbId) {
-          if (clean.length) saveSplit({ entry_id: dbId, source_id: c.sourceId, chapter_url: c.sourceUrl, breaks: clean })
+          if (any) saveSplit({ entry_id: dbId, source_id: c.sourceId, chapter_url: c.sourceUrl, breaks: clean, excluded: left })
           else deleteSplit(dbId, c.sourceId, c.sourceUrl)
         }
-        toast(clean.length ? `${c.label} split into ${clean.length + 1} parts` : `${c.label} is whole again`)
+        const skipped = left.length ? `${left.length} page${left.length === 1 ? '' : 's'} left out` : ''
+        toast(!any ? `${c.label} is whole again` : [clean.length ? `${c.label} in ${clean.length + 1} parts` : c.label, skipped].filter(Boolean).join(' · '))
       },
       /** Places a chapter from another title or source into this entry. */
       insertChapter: (id: string, chapter: Omit<InsertedChapter, 'id'>) => {
@@ -509,11 +513,14 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const e = find(entryId)
         if (!e) return
         // A part of a split chapter saves its position on the whole chapter.
-        const part = chapterId.includes('~') ? visibleChapters(e).find((c) => c.id === chapterId) : undefined
-        const parts = part ? visibleChapters(e).filter((c) => c.physicalId === part.physicalId) : []
-        const lastPart = !part || parts[parts.length - 1]?.id === part.id
-        if (part?.range) chapterId = part.physicalId!
-        const page = part?.range ? part.range[0] - 1 + pageIn : pageIn
+        // So does a chapter with pages left out: the reader's page number maps to the physical page.
+        const shown = visibleChapters(e)
+        const part = shown.find((c) => c.id === chapterId && c.range)
+        const parts = part?.physicalId ? shown.filter((c) => c.physicalId === part.physicalId) : []
+        const lastPart = !part?.physicalId || parts[parts.length - 1]?.id === part.id
+        if (part?.physicalId) chapterId = part.physicalId
+        const total = e.chapters.find((c) => c.id === chapterId)?.pages ?? 0
+        const page = part?.range ? shownPages(part, total)[pageIn - 1] ?? part.range[0] - 1 + pageIn : pageIn
         set((s) => ({
           ...s,
           miniHidden: false,

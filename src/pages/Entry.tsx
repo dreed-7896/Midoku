@@ -4,10 +4,11 @@ import { Cover, PageThumb } from '../components/Art'
 import { Chip, IconButton, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { TLink as Link, useNav } from '../components/Nav'
+import { PageSplitter } from '../components/PageSplitter'
 import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
 import { Banner, Empty, Loading } from '../components/Status'
 import { chapterKey, getSaved, useDownloads } from '../data/downloads'
-import { partRanges, physicalIdOf } from '../data/library'
+import { layoutOf, physicalIdOf } from '../data/library'
 import { agoLabel, newCount, progressPct, readCount, resumeChapter, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
 import { getChapters, getPages, SChapter, toChapter } from '../data/suwayomi'
 import type { Chapter } from '../data/types'
@@ -15,13 +16,13 @@ import type { Chapter } from '../data/types'
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
 type Panel = null | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert'
 
-/** Long press (or right click) on a chapter opens its sheet; the click that ends a long press is ignored. */
-function useLongPress(onLong: (c: Chapter) => void) {
+/** Long press (or right click) runs `onLong`; the click that ends a long press is ignored. */
+function useLongPress<T>(onLong: (item: T) => void) {
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const fired = useRef(false)
   const start = useRef<{ x: number; y: number } | null>(null)
   const cancel = () => { clearTimeout(timer.current); start.current = null }
-  return (c: Chapter) => ({
+  return (c: T) => ({
     onPointerDown: (e: React.PointerEvent) => {
       fired.current = false
       start.current = { x: e.clientX, y: e.clientY }
@@ -55,7 +56,8 @@ export default function EntryPage() {
   const [insertAfter, setInsertAfter] = useState<Chapter | null>(null)
   const [pickedTitle, setPickedTitle] = useState<PickedTitle | null>(null)
   const downloads = useDownloads()
-  const longPress = useLongPress((c) => setSheetFor(c.id))
+  const longPress = useLongPress<Chapter>((c) => setSheetFor(c.id))
+  const libraryPress = useLongPress<void>(() => setPanel('tabs'))
 
   // Titles from the server (ids like "s42") load their details and chapters here.
   const remoteId = /^s\d+$/.test(id) ? Number(id.slice(1)) : null
@@ -105,6 +107,12 @@ export default function EntryPage() {
   const parent = entry.parentId ? store.entry(entry.parentId) : undefined
   const nestable = store.entries.filter((e) => e.inLibrary && e.id !== entry.id && !e.parentId && !store.children(e.id).length)
   const resume = resumeChapter(entry)
+  const bm = libraryPress()
+  /** Filing a title into a tab puts it in the library too. */
+  const fileIn = (tabId: string) => {
+    if (!entry.inLibrary && !entry.tabs.includes(tabId)) store.toggleLibrary(entry.id)
+    store.toggleInTab(entry.id, tabId)
+  }
   const main = entry.sources.find((s) => s.main) ?? entry.sources[0]
   const unread = unreadCount(entry)
   const downloaded = all.filter((c) => c.downloaded).length
@@ -203,7 +211,9 @@ export default function EntryPage() {
           </span>
         </button>
         <button type="button" className={`icon-btn icon-btn--xl${entry.inLibrary ? ' is-accent' : ''}`} aria-pressed={entry.inLibrary}
-          aria-label={entry.inLibrary ? 'Remove from library' : 'Add to library'} onClick={() => store.toggleLibrary(entry.id)}>
+          aria-label={entry.inLibrary ? 'Remove from library' : 'Add to library'} title="Hold to pick tabs"
+          onClick={() => { if (!bm.wasLongPress()) store.toggleLibrary(entry.id) }}
+          onPointerDown={bm.onPointerDown} onPointerMove={bm.onPointerMove} onPointerUp={bm.onPointerUp} onPointerLeave={bm.onPointerLeave} onContextMenu={bm.onContextMenu}>
           <Icon name={entry.inLibrary ? 'bookmarkFill' : 'bookmark'} />
         </button>
         <IconButton icon="download" label="Download unread chapters" onClick={downloadUnread} />
@@ -275,7 +285,7 @@ export default function EntryPage() {
                   <span className="chapter__badges">
                     {c.isNew && !c.read && <span className="badge">New</span>}
                     {c.insertedFrom && <span className="badge badge--glass">Added</span>}
-                    {c.range && <span className="badge badge--glass">Part</span>}
+                    {c.physicalId && <span className="badge badge--glass">Part</span>}
                   </span>
                   {c.versions > 1 && (
                     <span role="button" tabIndex={0} className="badge badge--glass chapter__versions" aria-label={`${c.versions} versions, choose one`}
@@ -333,19 +343,19 @@ export default function EntryPage() {
       </Sheet>
 
       <Sheet open={panel === 'tabs'} title="Library tabs" onClose={() => setPanel(null)}>
-        <p className="hint">Pick the tabs this title shows in. A title can be in more than one.</p>
+        <p className="hint">{entry.inLibrary ? 'Pick the tabs this title shows in. A title can be in more than one.' : 'Picking a tab also adds this title to your library.'}</p>
         {userTabs.length === 0 && <Empty compact icon="folder" title="No tabs yet" detail="Create one to sort your library." />}
         <div className="check-list">
           {userTabs.map((t) => (
             <label key={t.id} className="check-row">
               <span className="check-row__name">{t.name}</span>
-              <input type="checkbox" checked={entry.tabs.includes(t.id)} onChange={() => store.toggleInTab(entry.id, t.id)} />
+              <input type="checkbox" checked={entry.tabs.includes(t.id)} onChange={() => fileIn(t.id)} />
             </label>
           ))}
         </div>
         <button type="button" className="btn btn--ghost btn--block" onClick={() => {
           const name = window.prompt('Name the new tab')
-          if (name?.trim()) store.toggleInTab(entry.id, store.createTab(name.trim()))
+          if (name?.trim()) fileIn(store.createTab(name.trim()))
         }}><Icon name="plus" size={16} />New tab</button>
       </Sheet>
 
@@ -458,24 +468,12 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, canEdit }: { entryI
   const entry = store.entry(entryId)!
   const whole = entry.chapters.find((c) => c.id === physicalIdOf(chapter.id)) ?? chapter
   const splitKey = whole.sourceUrl ? chapterKey(whole.sourceId, whole.sourceUrl) : ''
-  const breaks = entry.splits?.[splitKey] ?? []
+  const layout = layoutOf(entry.splits?.[splitKey])
   const [splitting, setSplitting] = useState(false)
-  const [pages, setPages] = useState(whole.pages)
-  const [pagesError, setPagesError] = useState<string>()
   const ids = new Set([chapter.id])
   const done = (fn: () => void) => { fn(); onClose() }
 
-  // Splitting needs the page count; fetch it if the chapter was never opened.
-  useEffect(() => {
-    if (!splitting || pages || !whole.remoteId) return
-    const saved = whole.sourceUrl ? getSaved(chapterKey(whole.sourceId, whole.sourceUrl)) : undefined
-    ;(saved ? Promise.resolve(saved.pages) : getPages(whole.remoteId))
-      .then((list) => { setPages(list.length); store.editChapters(entryId, new Set([whole.id]), { pages: list.length }) })
-      .catch((e: Error) => setPagesError(e.message))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [splitting])
-
-  const evenly = (parts: number) => Array.from({ length: parts - 1 }, (_, i) => Math.round(((i + 1) * pages) / parts) + 1)
+  if (splitting) return <PageSplitter entryId={entryId} chapter={whole} layout={layout} onClose={onClose} />
 
   return (
     <Sheet open title={chapter.label} onClose={onClose}>
@@ -506,8 +504,8 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, canEdit }: { entryI
           </button>
         )}
         {canEdit && !chapter.insertId && (
-          <button type="button" onClick={() => (breaks.length ? done(() => store.splitChapter(entryId, whole.id, [])) : setSplitting((x) => !x))}>
-            <Icon name="layers" size={18} />{breaks.length ? 'Join parts' : 'Split into parts'}
+          <button type="button" onClick={() => setSplitting(true)}>
+            <Icon name="layers" size={18} />{layout ? 'Edit pages & parts' : 'Split or trim pages'}
           </button>
         )}
         {canEdit && <button type="button" onClick={onInsert}><Icon name="plus" size={18} />Insert after</button>}
@@ -516,24 +514,6 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, canEdit }: { entryI
         </button>
       </div>
 
-      {splitting && (
-        <div className="pad-t">
-          <div className="label label--flush">Split {whole.label}</div>
-          {pagesError ? <Empty compact tone="error" icon="alert" title="Couldn't count the pages" detail={pagesError} />
-            : !pages ? <Loading label="Counting pages" shape="page" />
-            : <>
-              {pages < 4 && <Empty compact icon="info" title="Too short to split" detail={`This chapter has ${pages} page${pages === 1 ? '' : 's'}.`} />}
-              {pages >= 4 && <p className="hint">{pages} pages. Each part shows as its own chapter; progress carries across.</p>}
-              <div className="split-grid">
-                {[2, 3, 4, 5, 6].filter((n) => pages >= n * 2).map((n) => (
-                  <button key={n} type="button" className="btn btn--ghost" onClick={() => done(() => store.splitChapter(entryId, whole.id, evenly(n)))}>
-                    <strong>{n} parts</strong><small>{partRanges(pages, evenly(n)).map(([a, b]) => b - a + 1).join(' · ')} pages</small>
-                  </button>
-                ))}
-              </div>
-            </>}
-        </div>
-      )}
     </Sheet>
   )
 }

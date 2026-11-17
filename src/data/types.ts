@@ -57,8 +57,10 @@ export interface Chapter {
   alts?: ChapterVersion[]
   /** This version was picked by hand instead of the main source's. */
   preferred?: boolean
-  /** A part of a split chapter: its pages within the physical chapter (1-based, inclusive). */
+  /** Pages shown, within the physical chapter (1-based, inclusive): a part of a split chapter, or a chapter with excluded pages. */
   range?: [number, number]
+  /** Pages left out (physical page numbers). */
+  skip?: number[]
   /** For parts: the id of the whole chapter they come from. */
   physicalId?: string
   /** A chapter inserted from another title or source (row id in Midoku's database). */
@@ -118,8 +120,8 @@ export interface Entry {
   remote?: { mangaId: number; sourceId: string; mangaUrl: string; url?: string; chaptersLoaded: boolean }
   /** Row id in Midoku's database once the title has been saved there. */
   dbId?: string
-  /** Split chapters: chapter key (source + url) → first page of every part after the first. */
-  splits?: Record<string, number[]>
+  /** Page layouts: chapter key (source + url) → where parts start and which pages are left out. */
+  splits?: Record<string, PageLayout>
   /** Chapters placed in from other titles or sources. */
   inserted?: InsertedChapter[]
   /** Chapter totals from the library list, used before the chapters themselves are loaded. */
@@ -150,3 +152,6 @@ export type LibraryTab =
   | { id: string; kind: 'tab'; name: string }
   /** Saved filters that update as the library changes. */
   | { id: string; kind: 'smart'; name: string; filters: LibraryFilters }
+
+/** How a chapter's pages are shown: `breaks` = first page of every part after the first, `skip` = pages left out. */
+export interface PageLayout { breaks: number[]; skip: number[] }

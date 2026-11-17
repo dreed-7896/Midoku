@@ -8,6 +8,7 @@ import { useNav } from '../components/Nav'
 import { updateSettings, useSettings } from '../data/settings'
 import { useStore, visibleChapters } from '../data/store'
 import { chapterKey, getSaved } from '../data/downloads'
+import { shownPages } from '../data/library'
 import { getPages } from '../data/suwayomi'
 import type { Chapter, CoverArt } from '../data/types'
 
@@ -84,9 +85,9 @@ export default function Reader() {
         if (!alive) return
         // A part shows only its pages; the whole chapter's page count is kept on the whole chapter.
         const whole = chapter.physicalId ?? chapter.id
-        const known = chapter.physicalId ? entry?.chapters.find((c) => c.id === whole)?.pages : chapter.pages
+        const known = entry?.chapters.find((c) => c.id === whole)?.pages ?? chapter.pages
         if (known !== list.length) store.editChapters(entryId, new Set([whole]), { pages: list.length })
-        setUrls(chapter.range ? list.slice(chapter.range[0] - 1, chapter.range[1]) : list)
+        setUrls(chapter.range ? shownPages(chapter, list.length).map((n) => list[n - 1]) : list)
       })
       .catch((e: Error) => alive && setPagesError(e.message))
     return () => { alive = false }
