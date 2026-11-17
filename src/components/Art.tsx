@@ -1,27 +1,33 @@
 import { CSSProperties, useEffect, useState } from 'react'
+import { savedPageUrl } from '../data/downloads'
 import { fetchImage, needsAuthForImages } from '../data/suwayomi'
 import type { CoverArt } from '../data/types'
 
 /**
  * An image from the server. Plain <img> when the server is open; with a login it is fetched with the
  * Authorization header and shown from a blob URL, released when the image leaves the screen.
+ * fromDevice reads a downloaded page from the device first (works offline, without the service worker).
+ * Covers and icons are cached by the service worker (sw.js), so they also show offline.
  */
-export function RemoteImage({ src, alt = '', className, onLoad }: { src: string; alt?: string; className?: string; onLoad?: () => void }) {
+export function RemoteImage({ src, alt = '', className, onLoad, fromDevice }: { src: string; alt?: string; className?: string; onLoad?: () => void; fromDevice?: boolean }) {
   const auth = needsAuthForImages()
-  const [url, setUrl] = useState(auth ? '' : src)
+  const direct = !auth && !fromDevice
+  const [url, setUrl] = useState(direct ? src : '')
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     setFailed(false)
-    if (!auth) { setUrl(src); return }
+    if (direct) { setUrl(src); return }
     const ctrl = new AbortController()
     let objectUrl = ''
-    fetchImage(src, ctrl.signal)
-      .then((blob) => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) })
+    const load = async () => (fromDevice && (await savedPageUrl(src))) || URL.createObjectURL(await fetchImage(src, ctrl.signal))
+    load()
+      .then((u) => { objectUrl = u; if (ctrl.signal.aborted) URL.revokeObjectURL(u); else setUrl(u) })
       .catch(() => { if (!ctrl.signal.aborted) setFailed(true) })
     return () => { ctrl.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [src, auth])
+  }, [src, direct, fromDevice])
   if (failed || !url) return null
-  return <img src={url} alt={alt} className={className} loading="lazy" decoding="async" onLoad={onLoad} onError={() => setFailed(true)} />
+  // CORS mode (Suwayomi allows any origin) so the service worker can cache real, readable responses.
+  return <img src={url} alt={alt} className={className} loading="lazy" decoding="async" crossOrigin={direct ? 'anonymous' : undefined} onLoad={onLoad} onError={() => setFailed(true)} />
 }
 
 /** Placeholder cover artwork: two flat colours, one shape and the title, like a printed book cover. */

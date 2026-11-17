@@ -27,6 +27,7 @@ export interface SSource {
 
 export interface SMangaCard {
   id: number
+  url: string
   title: string
   thumbnailUrl: string | null
 }
@@ -38,7 +39,6 @@ export interface SManga extends SMangaCard {
   genre: string[]
   status: string
   realUrl: string | null
-  url: string
   sourceId: string
   initialized: boolean
   source?: { id: string; displayName: string; iconUrl: string; lang: string } | null
@@ -53,25 +53,24 @@ export interface SChapter {
   chapterNumber: number
   uploadDate: string
   scanlator: string | null
-  isDownloaded: boolean
   pageCount: number
   sourceOrder: number
 }
 
 const EXT = 'pkgName name lang iconUrl versionName isInstalled hasUpdate isNsfw'
 const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw'
-const CARD = 'id title thumbnailUrl'
-const MANGA = `${CARD} author artist description genre status realUrl url sourceId initialized source { id displayName iconUrl lang }`
+const CARD = 'id url title thumbnailUrl'
+const MANGA = `${CARD} author artist description genre status realUrl sourceId initialized source { id displayName iconUrl lang }`
 // Only what the source says. Reading state on the server is ignored; Midoku keeps its own.
 const SUMMARY = `${MANGA} chapters { totalCount } latestUploadedChapter { uploadDate }`
-const CHAPTER = 'id url name chapterNumber uploadDate scanlator isDownloaded pageCount sourceOrder'
+const CHAPTER = 'id url name chapterNumber uploadDate scanlator pageCount sourceOrder'
 
 export const isConnected = () => !!getSettings().serverUrl
 
 const normalise = (url: string) => url.trim().replace(/\/+$/, '')
 const serverBase = () => normalise(getSettings().serverUrl)
 
-function authHeaders(user = getSettings().serverUser, pass = getSettings().serverPass): Record<string, string> {
+export function authHeaders(user = getSettings().serverUser, pass = getSettings().serverPass): Record<string, string> {
   return user ? { Authorization: `Basic ${btoa(`${user}:${pass}`)}` } : {}
 }
 
@@ -188,6 +187,24 @@ export const getMangaSummaries = (ids: number[]) =>
       .then((d) => d.mangas.nodes)
     : Promise.resolve([])
 
+/** The server's copy of a source title, found by the source and the title's address on it. */
+export const findManga = (sourceId: string, url: string) =>
+  gql<{ mangas: { nodes: SManga[] } }>(
+    `query($s: LongString!, $u: String!) { mangas(filter: { sourceId: { equalTo: $s }, url: { equalTo: $u } }) { nodes { ${SUMMARY} } } }`,
+    { s: sourceId, u: url },
+  ).then((d) => d.mangas.nodes[0])
+
+/**
+ * Finds a title on this server again (after a reinstall or a move to another server, its id changes).
+ * When the server has never seen it, a search on the source by title adds it, then it is looked up again.
+ */
+export async function resolveManga(sourceId: string, url: string, title: string): Promise<SManga | undefined> {
+  const found = await findManga(sourceId, url)
+  if (found) return found
+  await browseSource(sourceId, 'SEARCH', 1, title)
+  return findManga(sourceId, url)
+}
+
 /** Page image URLs for a chapter. */
 export const getPages = (chapterId: number) =>
   gql<{ fetchChapterPages: { pages: string[] } }>(
@@ -218,7 +235,7 @@ function publishing(status: string): Entry['publishing'] {
   return 'Ongoing'
 }
 
-function toChapter(c: SChapter, sourceId: string): Chapter {
+export function toChapter(c: SChapter, sourceId: string): Chapter {
   const known = c.chapterNumber >= 0
   const label = known ? `Ch. ${Number(c.chapterNumber.toFixed(2))}` : c.name
   const uploaded = Number(c.uploadDate)
@@ -235,7 +252,8 @@ function toChapter(c: SChapter, sourceId: string): Chapter {
     page: 0,
     read: false,
     bookmarked: false,
-    downloaded: c.isDownloaded,
+    // Downloads are Midoku's own, on this device (see downloads.ts).
+    downloaded: false,
     isNew: uploaded > Date.now() - 7 * 24 * HOUR,
     sourceUrl: c.url,
     versions: 1,
@@ -257,7 +275,7 @@ export function toEntry(m: SManga, chapters?: SChapter[]): Entry {
     tags: m.genre ?? [],
     description: m.description ?? '',
     sources: [{
-      sourceId: m.sourceId, chapters: total, following: true, main: true,
+      sourceId: m.sourceId, mangaId: m.id, mangaUrl: m.url, chapters: total, following: true, main: true,
       name: m.source?.displayName, iconUrl: m.source?.iconUrl ? assetUrl(m.source.iconUrl) : undefined,
     }],
     chapters: (chapters ?? []).map((c) => toChapter(c, m.sourceId)),

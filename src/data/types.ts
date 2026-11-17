@@ -53,10 +53,15 @@ export interface Chapter {
   remoteId?: number
   /** The source's chapter url; reading state in Midoku's database is keyed by it. */
   sourceUrl?: string
+  /** Every physical chapter (one per linked source) stacked in this slot, the shown one first. */
+  alts?: { sourceId: string; url: string; remoteId: number }[]
 }
 
 export interface EntrySource {
   sourceId: string
+  /** The title on that source: its id on the current server and its address on the source. */
+  mangaId?: number
+  mangaUrl?: string
   chapters: number
   following: boolean
   main?: boolean

@@ -21,6 +21,8 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - Screens: Home feed, Library (tabs, filters, groups, collections), Entry details, Search, Sources, Source browse, Reader (webtoon by default, paged optional), Settings.
 - Navigation is a native-style screen stack: pushes slide in from the right over the darkened previous screen; back reverses it. In the installed app, swiping from the left edge drags the screen away and reveals the real previous one.
 - Library: tabs you can swipe between (Reading, All, your own tabs, saved filters).
+- Offline: download chapters from a title (or select chapters → Save); the library and titles opened in the last 3 days stay available offline, and changes made offline sync when back online. Settings → Storage shows what is kept.
+- New chapters: checked on launch (every 6 hours) or with the refresh button in Library.
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".
 - App lock: a device passkey (Face ID / Touch ID / fingerprint) guards the app on this device. Turn it on in Settings.
 - State lives in `src/data/store.tsx`. Suwayomi is read-only (titles, chapters, pages, extensions). The library, tabs and reading progress are stored in Supabase (`src/data/db.ts`, schema in `supabase/migrations/`); the app opens with a password screen (asked every 10 days per device; change it in **Settings → Privacy**).

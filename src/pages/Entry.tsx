@@ -5,7 +5,8 @@ import { Cover, PageThumb, SourceIcon } from '../components/Art'
 import { Chip, IconButton, SectionHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { agoLabel, newCount, progressPct, readCount, resumeChapter, statusOf, unreadCount, useStore, visibleChapters } from '../data/store'
-import { getChapters, getManga, toEntry } from '../data/suwayomi'
+import { chapterKey, useDownloads } from '../data/downloads'
+import { SourcePicker } from '../components/SourcePicker'
 import { Chapter, STATUS_LABEL } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
@@ -27,22 +28,23 @@ export default function EntryPage() {
 
   // Titles from the server (ids like "s42") load their details and chapters here.
   const remoteId = /^s\d+$/.test(id) ? Number(id.slice(1)) : null
-  const [remote, setRemote] = useState<{ loading: boolean; error?: string }>({ loading: false })
+  const [remote, setRemote] = useState<{ loading: boolean; error?: string; saved?: boolean }>({ loading: false })
   const loadRemote = useCallback(async (refresh = false) => {
     if (remoteId === null) return
     setRemote({ loading: true })
     try {
-      const manga = await getManga(remoteId, refresh)
-      store.upsertEntry(toEntry(manga))
-      const chapters = await getChapters(remoteId, refresh)
-      store.upsertEntry(toEntry(manga, chapters))
-      setRemote({ loading: false })
-      if (refresh) store.toast('Up to date')
+      const from = await store.loadEntry(id, refresh)
+      setRemote({ loading: false, saved: from === 'saved' })
+      if (refresh) store.toast(from === 'saved' ? 'Offline · showing the saved copy' : 'Up to date')
     } catch (e) {
       setRemote({ loading: false, error: (e as Error).message })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remoteId])
+  }, [remoteId, id])
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [linking, setLinking] = useState(false)
+  const [nesting, setNesting] = useState(false)
+  const downloads = useDownloads()
   useEffect(() => {
     if (remoteId !== null && !entry?.remote?.chaptersLoaded) loadRemote()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,6 +102,27 @@ export default function EntryPage() {
     setSelected(new Set())
     setSelecting(false)
   }
+  // Saves the selected chapters on the device, or removes them when all are saved already.
+  const saveSelected = () => {
+    const picked = entry.chapters.filter((c) => selected.has(c.id))
+    if (picked.length && picked.every((c) => c.downloaded)) store.removeDownloads(entry.id, selected)
+    else if (entry.remote) store.downloadChapters(entry.id, selected)
+    else act({ downloaded: true }, 'Downloaded')
+    setSelected(new Set())
+    setSelecting(false)
+  }
+  const downloadUnread = () => {
+    if (!entry.remote) { store.toast(`Queued ${counts.unread} chapters`); return }
+    store.downloadChapters(entry.id, new Set(all.filter((c) => !c.read && !c.downloaded).map((c) => c.id)))
+  }
+  const progressOf = (c: Chapter) => {
+    if (!c.sourceUrl) return undefined
+    const key = chapterKey(c.sourceId, c.sourceUrl)
+    if (downloads.active?.key === key) return downloads.active.progress
+    return downloads.queued.has(key) ? 0 : undefined
+  }
+  const library = store.entries.filter((e) => e.inLibrary && e.id !== entry.id && !e.parentId && !store.children(e.id).length)
+  const parent = entry.parentId ? store.entry(entry.parentId) : undefined
 
   const refresh = async () => {
     setRefreshing(true)
@@ -145,13 +168,16 @@ export default function EntryPage() {
           aria-label={entry.inLibrary ? 'Remove from library' : 'Add to library'} onClick={() => store.toggleLibrary(entry.id)}>
           <Icon name={entry.inLibrary ? 'bookmarkFill' : 'bookmark'} />
         </button>
-        <IconButton icon="download" label="Download unread chapters" onClick={() => store.toast(`Queued ${counts.unread} chapters`)} />
+        <IconButton icon="download" label="Download unread chapters" onClick={downloadUnread} />
         <button type="button" className={`icon-btn icon-btn--xl${refreshing ? ' is-spinning' : ''}`} aria-label="Refresh entry" onClick={refresh}>
           <Icon name="refresh" />
         </button>
       </div>
 
+      {remote.saved && <p className="hint pad-x pad-t">Offline · showing the copy saved on this device.</p>}
+
       <div className="chips pad-x pad-t">
+        {parent && <Link to={`/entry/${parent.id}`} className="chip"><Icon name="library" size={14} />{parent.title}</Link>}
         <span className="chip chip--static" title="Set automatically from your reading progress">
           <span className={`dot dot--status-${statusOf(entry)}`} />{STATUS_LABEL[statusOf(entry)]}
         </span>
@@ -186,14 +212,15 @@ export default function EntryPage() {
       </div>
 
       <section className="section pad-x">
-        <SectionHead title="Sources" count={entry.sources.length} action="Manage" onAction={() => store.toast('Source manager comes later')} />
+        <SectionHead title="Sources" count={entry.sources.length} action="Manage"
+          onAction={() => (entry.remote ? setSourcesOpen(true) : store.toast('Linking sources needs a server'))} />
         <div className="grid3">
-          {entry.sources.map((s) => {
+          {entry.sources.map((s, i) => {
             // Server sources are not in the local list; their name and icon travel with the title.
             const src = store.source(s.sourceId) ?? (s.name ? { name: s.name, letter: s.name[0], color: '#22222A', lang: '' } : undefined)
             if (!src) return null
             return (
-              <div key={s.sourceId} className={`tile${s.main ? ' tile--main' : ''}`}>
+              <div key={`${s.sourceId}-${s.mangaUrl ?? i}`} className={`tile${s.main ? ' tile--main' : ''}`}>
                 <div className="split">
                   <SourceIcon letter={src.letter} color={src.color} size={38} url={s.iconUrl} />
                   {s.main && <span className="tag tag--accent">Main</span>}
@@ -201,7 +228,7 @@ export default function EntryPage() {
                 <div className="tile__name">{src.name}</div>
                 <div className="card-meta">{s.chapters} ch{src.lang ? ` · ${src.lang}` : ''}</div>
                 <label className="switch-row">
-                  <input type="checkbox" role="switch" className="switch" checked={s.following} onChange={() => store.toggleFollow(entry.id, s.sourceId)}
+                  <input type="checkbox" role="switch" className="switch" checked={s.following} onChange={() => store.toggleFollow(entry.id, s.sourceId, s.mangaUrl)}
                     aria-label={`Follow new chapters from ${src.name}`} />
                   <span>{s.following ? 'Following' : 'Paused'}</span>
                 </label>
@@ -225,7 +252,7 @@ export default function EntryPage() {
                 <div className="card-meta">{visibleChapters(k).length} ch · {unreadCount(k)} unread</div>
               </Link>
             ))}
-            <button type="button" className="add-tile" onClick={() => store.toast('Pick a library title to nest here — comes later')}>
+            <button type="button" className="add-tile" onClick={() => (entry.remote || !store.entries.some((e) => e.remote) ? setNesting(true) : store.toast('Nesting needs a server title'))}>
               <Icon name="plus" size={22} />Add title
             </button>
           </div>
@@ -266,6 +293,7 @@ export default function EntryPage() {
                   <span className="chapter__flags">
                     {c.bookmarked && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
                     {c.downloaded && <span className="flag"><Icon name="download" size={12} stroke={2.2} label="Downloaded" /></span>}
+                    {!c.downloaded && progressOf(c) !== undefined && <span className="flag">{Math.round(progressOf(c)! * 100)}%</span>}
                   </span>
                   {c.read && <span className="badge badge--bl badge--glass"><Icon name="check" size={11} stroke={2.6} />Read</span>}
                   {current && c.page > 0 && <span className="chapter__progress"><span style={{ width: `${(c.page / c.pages) * 100}%` }} /></span>}
@@ -317,13 +345,47 @@ export default function EntryPage() {
         }}><Icon name="plus" size={16} />New tab</button>
       </Sheet>
 
+      <Sheet open={sourcesOpen} title="Sources" onClose={() => setSourcesOpen(false)}>
+        <p className="hint">Chapters from every source are merged; the main source is the one read and supplies the details.</p>
+        <div className="check-list">
+          {entry.sources.map((s, i) => (
+            <div key={`${s.sourceId}-${s.mangaUrl ?? i}`} className="check-row">
+              <span className="check-row__name">{s.name ?? s.sourceId}<span className="card-meta"> · {s.chapters} ch{s.following ? '' : ' · paused'}</span></span>
+              {s.main ? <span className="tag tag--accent">Main</span> : (
+                <span className="row-gap">
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => store.setMainSource(entry.id, s.sourceId, s.mangaUrl)}>Make main</button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => store.unlinkSource(entry.id, s.sourceId, s.mangaUrl)}>Unlink</button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+        <button type="button" className="btn btn--ghost btn--block" onClick={() => { setSourcesOpen(false); setLinking(true) }}><Icon name="plus" size={16} />Link another source</button>
+      </Sheet>
+
+      {linking && <SourcePicker query={entry.title} onClose={() => setLinking(false)}
+        onPick={(m) => { setLinking(false); void store.linkSource(entry.id, m) }} />}
+
+      <Sheet open={nesting} title="Titles in this entry" onClose={() => setNesting(false)}>
+        <p className="hint">Pick library titles to show inside “{entry.title}”, like volumes or seasons of a series.</p>
+        <div className="check-list">
+          {[...kids, ...library].map((t) => (
+            <label key={t.id} className="check-row">
+              <span className="check-row__name">{t.title}</span>
+              <input type="checkbox" checked={t.parentId === entry.id} onChange={() => store.setParent(t.id, t.parentId === entry.id ? undefined : entry.id)} />
+            </label>
+          ))}
+          {!kids.length && !library.length && <p className="hint">No other library titles to nest.</p>}
+        </div>
+      </Sheet>
+
       {selecting && (
         <div className="action-bar" role="toolbar" aria-label="Chapter actions">
           <span className="action-bar__count">{selected.size} selected</span>
           <button type="button" disabled={!selected.size} onClick={() => act({ read: true, isNew: false }, 'Marked read:')}><Icon name="check" size={18} />Read</button>
           <button type="button" disabled={!selected.size} onClick={() => act({ read: false }, 'Marked unread:')}><Icon name="undo" size={18} />Unread</button>
           <button type="button" disabled={!selected.size} onClick={() => act({ bookmarked: true }, 'Bookmarked')}><Icon name="bookmark" size={18} />Mark</button>
-          <button type="button" disabled={!selected.size} onClick={() => act({ downloaded: true }, 'Downloaded')}><Icon name="download" size={18} />Save</button>
+          <button type="button" disabled={!selected.size} onClick={saveSelected}><Icon name="download" size={18} />Save</button>
           <button type="button" disabled={!selected.size} onClick={() => act({ removed: true }, 'Removed')}><Icon name="trash" size={18} />Remove</button>
         </div>
       )}

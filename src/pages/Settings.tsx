@@ -5,7 +5,9 @@ import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
 import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
-import { changePassword, lockApp } from '../data/db'
+import { clearData } from '../data/cache'
+import { changePassword, lockApp, usePendingWrites } from '../data/db'
+import { removeAllDownloads, savedBytes, useDownloads } from '../data/downloads'
 import { testServer } from '../data/suwayomi'
 import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
@@ -119,6 +121,8 @@ export default function SettingsPage() {
         <p className="hint pad-t-sm">The lock uses a passkey saved on this device. It hides the app from others; it does not encrypt your library.</p>
       </section>
 
+      <StorageSection />
+
       <section className="section pad-x">
         <div className="label label--flush">About</div>
         <div className="setting">
@@ -218,3 +222,54 @@ function ServerSection() {
   )
 }
 
+
+const mb = (bytes: number) => (bytes < 1e6 ? `${Math.round(bytes / 1e3)} KB` : `${(bytes / 1e6).toFixed(bytes < 1e8 ? 1 : 0)} MB`)
+
+/** What is kept on this device for offline use, and changes still waiting to be saved. */
+function StorageSection() {
+  const store = useStore()
+  const downloads = useDownloads()
+  const pending = usePendingWrites()
+  const [usage, setUsage] = useState<{ used: number; quota: number }>()
+  const count = Object.keys(downloads.saved).length
+  useEffect(() => {
+    navigator.storage?.estimate?.().then((e) => setUsage({ used: e.usage ?? 0, quota: e.quota ?? 0 })).catch(() => {})
+  }, [count])
+
+  const clearDownloads = async () => {
+    if (!window.confirm(`Remove all ${count} downloaded chapters from this device?`)) return
+    await removeAllDownloads()
+    store.toast('Downloads removed')
+  }
+  const clearCache = async () => {
+    await Promise.all([clearData(), caches.delete('midoku-images').catch(() => false)])
+    store.toast('Cache cleared')
+  }
+
+  return (
+    <section className="section pad-x">
+      <div className="label label--flush">Storage & offline</div>
+      <div className="setting">
+        <span className="setting__icon"><Icon name="download" size={22} /></span>
+        <div className="setting__text">
+          <strong>{count} downloaded chapter{count === 1 ? '' : 's'}</strong>
+          <span className="card-meta card-meta--wrap">
+            {mb(savedBytes())}{downloads.queued.size || downloads.active ? ` · ${downloads.queued.size + (downloads.active ? 1 : 0)} downloading` : ''}
+            {usage ? ` · ${mb(usage.used)} used on this device` : ''}
+          </span>
+        </div>
+      </div>
+      <div className="setting">
+        <span className="setting__icon"><Icon name="refresh" size={22} /></span>
+        <div className="setting__text">
+          <strong>{pending ? `${pending} change${pending === 1 ? '' : 's'} waiting to sync` : 'Everything is saved'}</strong>
+          <span className="card-meta card-meta--wrap">Changes made offline are sent when the device is back online. Opened titles stay readable offline for 3 days.</span>
+        </div>
+      </div>
+      <div className="row-btns">
+        <button type="button" className="btn btn--ghost" disabled={!count} onClick={clearDownloads}>Remove downloads</button>
+        <button type="button" className="btn btn--ghost" onClick={clearCache}>Clear cache</button>
+      </div>
+    </section>
+  )
+}

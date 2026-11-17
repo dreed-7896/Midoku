@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon'
 import { useNav } from '../components/Nav'
 import { updateSettings, useSettings } from '../data/settings'
 import { useStore, visibleChapters } from '../data/store'
+import { chapterKey, getSaved } from '../data/downloads'
 import { getPages } from '../data/suwayomi'
 import type { Chapter, CoverArt } from '../data/types'
 
@@ -72,7 +73,9 @@ export default function Reader() {
     heights.current = new Map()
     if (!chapter?.remoteId) return
     let alive = true
-    getPages(chapter.remoteId)
+    // A downloaded chapter reads from the device; others ask the server for their pages.
+    const saved = chapter.sourceUrl ? getSaved(chapterKey(chapter.sourceId, chapter.sourceUrl)) : undefined
+    ;(saved ? Promise.resolve(saved.pages) : getPages(chapter.remoteId))
       .then((list) => {
         if (!alive) return
         setUrls(list)
@@ -83,6 +86,7 @@ export default function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, loadTry])
   const pages = isRemote ? urls?.length ?? 0 : chapter?.pages ?? 0
+  const fromDevice = !!chapter?.downloaded
 
   const scroller = useRef<HTMLDivElement>(null)
   const lastTop = useRef(0)
@@ -197,10 +201,10 @@ export default function Reader() {
               : (known ? { height: known, aspectRatio: 'auto' } : undefined)
             return mode === 'webtoon' ? (
               <div key={n} className="wt-page wt-page--img" data-page={n} style={style}>
-                {near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="wt-img" onLoad={onLoad} />}
+                {near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="wt-img" onLoad={onLoad} fromDevice={fromDevice} />}
               </div>
             ) : (
-              <div key={n} className="pg-page" data-page={n}>{near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" />}</div>
+              <div key={n} className="pg-page" data-page={n}>{near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" fromDevice={fromDevice} />}</div>
             )
           }
           return mode === 'webtoon' ? (

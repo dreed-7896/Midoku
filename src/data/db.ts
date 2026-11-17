@@ -43,7 +43,10 @@ const setSession = (s: Session | null) => {
   listeners.forEach((l) => l())
 }
 db.auth.getSession().then(({ data }) => setSession(data.session))
-db.auth.onAuthStateChange((_event, s) => setSession(s))
+db.auth.onAuthStateChange((_event, s) => {
+  setSession(s)
+  if (s) void flushWrites()
+})
 // An app left open in the background is checked again when it comes back.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && auth.userId && expired()) db.auth.getSession().then(({ data }) => setSession(data.session))
@@ -145,15 +148,86 @@ export async function loadLibrary(): Promise<DbLibrary> {
 export const loadChapterStates = (entryId: string) =>
   all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed').eq('entry_id', entryId))
 
-const run = async (q: PromiseLike<{ error: { message: string } | null }>) => fail((await q).error)
+// Writes: an ordered outbox kept in localStorage. Each change is queued, then sent in order; without a
+// connection the queue waits and is sent when the device is back online, so nothing done offline is lost.
+// Order matters: a title's row is written before the tabs, sources and chapter states that refer to it.
 
-export const saveEntry = (row: EntryRow) => run(db.from('entries').upsert(row))
+type Match = Record<string, string>
+type Op =
+  | { kind: 'upsert'; table: string; rows: object[]; onConflict?: string }
+  | { kind: 'update'; table: string; patch: object; match: Match }
+  | { kind: 'delete'; table: string; match: Match }
+
+const OUTBOX_KEY = 'midoku.outbox'
+let outbox: Op[] = (() => { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) ?? '[]') } catch { return [] } })()
+const outboxListeners = new Set<() => void>()
+const errorListeners = new Set<(message: string) => void>()
+let pendingCount = outbox.length
+function persistOutbox() {
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox)) } catch { /* kept in memory for this session */ }
+  pendingCount = outbox.length
+  outboxListeners.forEach((l) => l())
+}
+
+/** Number of changes not yet saved in the database. */
+export const usePendingWrites = () => useSyncExternalStore((l) => { outboxListeners.add(l); return () => outboxListeners.delete(l) }, () => pendingCount)
+/** Called when the database refuses a change (not for missing connection). */
+export const onWriteError = (fn: (message: string) => void) => { errorListeners.add(fn); return () => { errorListeners.delete(fn) } }
+
+const networkError = (message: string) => !navigator.onLine || /fetch|network|load failed|timed? ?out/i.test(message)
+
+async function send(op: Op) {
+  const t = db.from(op.table)
+  const { error } = await (op.kind === 'upsert' ? t.upsert(op.rows, op.onConflict ? { onConflict: op.onConflict } : undefined)
+    : op.kind === 'update' ? t.update(op.patch).match(op.match)
+    : t.delete().match(op.match))
+  if (error) throw new Error(error.message)
+}
+
+let flushing: Promise<boolean> | null = null
+/** Sends queued changes in order. Resolves true once the queue is empty. */
+export function flushWrites(): Promise<boolean> {
+  if (flushing) return flushing
+  flushing = (async () => {
+    while (outbox.length && auth.userId) {
+      try {
+        await send(outbox[0])
+      } catch (e) {
+        const message = (e as Error).message
+        if (networkError(message)) return false
+        errorListeners.forEach((l) => l(message))
+      }
+      outbox.shift()
+      persistOutbox()
+    }
+    return outbox.length === 0
+  })().finally(() => { flushing = null })
+  return flushing
+}
+
+function enqueue(op: Op) {
+  outbox.push(op)
+  persistOutbox()
+  void flushWrites()
+}
+
+window.addEventListener('online', () => void flushWrites())
+setInterval(() => { if (outbox.length && navigator.onLine) void flushWrites() }, 30_000)
+
+const now = () => new Date().toISOString()
+
+export const saveEntry = (row: EntryRow) => enqueue({ kind: 'upsert', table: 'entries', rows: [row] })
 export const updateEntry = (id: string, patch: Partial<EntryRow>) =>
-  run(db.from('entries').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id))
-export const saveEntrySource = (row: EntrySourceRow) => run(db.from('entry_sources').upsert(row, { onConflict: 'entry_id,source_id,manga_url' }))
-export const saveTabs = (rows: TabRow[]) => run(db.from('tabs').upsert(rows))
-export const deleteTabRow = (id: string) => run(db.from('tabs').delete().eq('id', id))
+  enqueue({ kind: 'update', table: 'entries', patch: { ...patch, updated_at: now() }, match: { id } })
+export const saveEntrySource = (row: EntrySourceRow) => enqueue({ kind: 'upsert', table: 'entry_sources', rows: [row], onConflict: 'entry_id,source_id,manga_url' })
+export const updateEntrySource = (match: { entry_id: string; source_id?: string; manga_url?: string }, patch: Partial<EntrySourceRow>) =>
+  enqueue({ kind: 'update', table: 'entry_sources', patch, match: match as Match })
+export const deleteEntrySource = (entryId: string, sourceId: string, mangaUrl: string) =>
+  enqueue({ kind: 'delete', table: 'entry_sources', match: { entry_id: entryId, source_id: sourceId, manga_url: mangaUrl } })
+export const saveTabs = (rows: TabRow[]) => enqueue({ kind: 'upsert', table: 'tabs', rows })
+export const deleteTabRow = (id: string) => enqueue({ kind: 'delete', table: 'tabs', match: { id } })
 export const setEntryTab = (entryId: string, tabId: string, on: boolean) =>
-  run(on ? db.from('entry_tabs').upsert({ entry_id: entryId, tab_id: tabId }) : db.from('entry_tabs').delete().eq('entry_id', entryId).eq('tab_id', tabId))
+  enqueue(on ? { kind: 'upsert', table: 'entry_tabs', rows: [{ entry_id: entryId, tab_id: tabId }] }
+    : { kind: 'delete', table: 'entry_tabs', match: { entry_id: entryId, tab_id: tabId } })
 export const saveChapterStates = (rows: ChapterStateRow[]) =>
-  run(db.from('chapter_states').upsert(rows.map((r) => ({ ...r, updated_at: new Date().toISOString() })), { onConflict: 'entry_id,source_id,chapter_url' }))
+  enqueue({ kind: 'upsert', table: 'chapter_states', rows: rows.map((r) => ({ ...r, updated_at: now() })), onConflict: 'entry_id,source_id,chapter_url' })

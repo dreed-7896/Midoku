@@ -13,3 +13,6 @@
 - Each deploy gets a new service worker version (`vite.config.ts`); the app offers "Restart to update" when one is waiting.
 - Midoku collection semantics carry over: entries can nest titles, link several sources, hold chapter versions, inserted and split chapters, and removed chapters that can be restored. Reading actions resolve the physical source chapter.
 - The reader renders only pages near the current one; keep it that way so very long chapters stay light.
+- Offline: database writes go through an ordered outbox (`flushWrites` in `src/data/db.ts`) that survives reloads and is sent when back online. The library snapshot and opened titles (kept 3 days after last opened; longer while they have downloads) live in Cache Storage (`src/data/cache.ts`). Downloads are Midoku's own (`src/data/downloads.ts`, cache `midoku-downloads`), never Suwayomi's. The service worker serves downloaded pages and caches covers/icons (`midoku-images`); it must not delete those caches on deploy.
+- Linked sources merge into one chapter list (`mergeChapters` in `src/data/library.ts`): same chapter number = one slot with versions, the main source's chapter is read. New chapters: `checkUpdates` asks Suwayomi to fetch chapters of followed sources (on launch every 6 h, or the Library button). Titles whose server id stops matching are found again by source id + url (`resolveManga`).
+

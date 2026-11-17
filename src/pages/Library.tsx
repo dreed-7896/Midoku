@@ -109,11 +109,17 @@ export default function Library() {
   return (
     <div className="page library">
       <PageHead kicker={`${roots.length} titles · ${unreadTotal} unread`} title="Library">
+        {store.server.status !== 'off' && (
+          <IconButton icon="refresh" label={store.updating ? `Checking ${store.updating.done} of ${store.updating.total}` : 'Check for new chapters'}
+            active={!!store.updating} onClick={() => void store.checkUpdates()} />
+        )}
         <IconButton icon="search" label="Search library" active={searching} onClick={() => { setSearching((s) => !s); setQuery('') }} />
         <IconButton icon="sliders" label={`Filter and sort, ${filterCount} filters active`} badge={filterCount || undefined} onClick={() => setSheet(true)} />
       </PageHead>
 
       <ServerStatus />
+      {store.offline && <p className="hint pad-x pad-t">Offline · showing your library as saved on this device. Changes are sent when you're back online.</p>}
+      {store.updating && <p className="hint pad-x pad-t">Checking for new chapters… {store.updating.done} of {store.updating.total}</p>}
 
       {searching && (
         <div className="pad-x pad-t-sm">

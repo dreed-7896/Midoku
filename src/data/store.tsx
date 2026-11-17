@@ -1,18 +1,25 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
-  ChapterStateRow, DbLibrary, deleteTabRow, EntryRow, loadChapterStates, loadLibrary, saveChapterStates, saveEntry,
-  saveEntrySource, saveTabs, setEntryTab, TabRow, updateEntry, useAuth,
+  DbLibrary, deleteEntrySource, deleteTabRow, flushWrites, loadChapterStates, loadLibrary, onWriteError, saveChapterStates,
+  saveEntry, saveEntrySource, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
+import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
+import {
+  applyStates, entriesFromDb, entryRow, LibrarySnapshot, mergeChapters, rowState, sourceRow, stateRow, statesOf, tabRow, toTab, withDownloads,
+} from './library'
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
 import { useSettings } from './settings'
-import { artFor, assetUrl, getMangaSummaries, hoursSince } from './suwayomi'
-import type { Chapter, Entry, LibraryFilters, LibraryTab, Source, Status } from './types'
+import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
+import type { Chapter, Entry, EntrySource, LibraryFilters, LibraryTab, Source, Status } from './types'
 
 /*
  * Where things live:
  * - Sample data (no server address): kept on this device in localStorage.
  * - With a Suwayomi server: Suwayomi only supplies titles, chapters, pages and extensions and is never written to.
- *   The library, tabs, reading progress and chapter marks live in Midoku's database (Supabase), per signed-in person.
+ *   The library, tabs, sources, reading progress and chapter marks live in Midoku's database (Supabase).
+ * - Offline: the last library and every opened title are kept in Cache Storage (cache.ts), changes wait in
+ *   the write queue (db.ts) and downloaded chapters are read from the device (downloads.ts).
  */
 
 // Sample data layout on this device
@@ -47,87 +54,28 @@ function sampleState() {
 
 const DEVICE_TABS = LIBRARY_TABS.filter((t) => t.kind === 'reading' || t.kind === 'all')
 
-// Database rows to the app's model
+/** New chapters are looked for when the app opens, at most this often. */
+const UPDATE_EVERY_MS = 6 * 3_600_000
+const UPDATED_KEY = 'midoku.updatedAt'
+/** When each title was last opened in this session; its offline copy is kept 3 days from then. */
+const openedAt = new Map<string, number>()
 
-const toTab = (r: TabRow): LibraryTab =>
-  r.kind === 'smart' ? { id: r.id, kind: 'smart', name: r.name, filters: r.filters ?? { statuses: [], newOnly: false } } : { id: r.id, kind: r.kind, name: r.name } as LibraryTab
+const lastUpdateCheck = () => { try { return Number(localStorage.getItem(UPDATED_KEY)) || 0 } catch { return 0 } }
 
-const tabRow = (t: LibraryTab, position: number): TabRow =>
-  ({ id: t.id, kind: t.kind, name: t.name, filters: t.kind === 'smart' ? t.filters : null, position })
+const newestUpload = (lists: { chapters: SChapter[] }[]) =>
+  Math.max(0, ...lists.flatMap((l) => l.chapters.map((c) => Number(c.uploadDate) || 0)))
 
-const publishingOf = (p: string): Entry['publishing'] => (p === 'Completed' || p === 'Hiatus' ? p : 'Ongoing')
-
-/** Library titles as stored; chapter totals are filled in from the server afterwards. */
-function entriesFromDb(lib: DbLibrary): Entry[] {
-  const main = new Map<string, DbLibrary['sources'][number]>()
-  for (const s of lib.sources) if (s.is_main || !main.has(s.entry_id)) main.set(s.entry_id, s)
-  const tabsOf = new Map<string, string[]>()
-  for (const t of lib.entryTabs) tabsOf.set(t.entry_id, [...(tabsOf.get(t.entry_id) ?? []), t.tab_id])
-  const read = new Map(lib.progress.map((p) => [p.entry_id, p.read_count]))
-  const appId = new Map<string, string>()
-  const list: Entry[] = []
-  for (const r of lib.entries) {
-    const src = main.get(r.id)
-    if (src?.server_manga_id == null) continue
-    const mangaId = src.server_manga_id
-    appId.set(r.id, `s${mangaId}`)
-    const readCount = read.get(r.id) ?? 0
-    list.push({
-      id: `s${mangaId}`,
-      dbId: r.id,
-      title: r.title,
-      author: r.author,
-      art: artFor(mangaId),
-      coverPath: r.cover_path ?? undefined,
-      coverUrl: assetUrl(r.cover_path),
-      publishing: publishingOf(r.publishing),
-      tabs: tabsOf.get(r.id) ?? [],
-      tags: r.tags,
-      description: r.description,
-      sources: [{ sourceId: src.source_id, chapters: 0, following: src.following, main: true, name: src.source_name ?? undefined }],
-      parentId: r.parent_id ?? undefined,
-      chapters: [],
-      inLibrary: r.in_library,
-      lastReadAgo: r.last_read_at ? hoursSince(Date.parse(r.last_read_at)) : undefined,
-      updatedAgo: 1e6,
-      addedOrder: r.added_at ? Date.parse(r.added_at) : 0,
-      remote: { mangaId, sourceId: src.source_id, mangaUrl: src.manga_url, chaptersLoaded: false },
-      counts: { total: readCount, unread: 0 },
-    })
+/** Details from the server for a library title: cover, chapter totals, newest upload. */
+function enrich(e: Entry, m: SManga): Entry {
+  const total = m.chapters?.totalCount ?? 0
+  const read = e.counts ? e.counts.total - e.counts.unread : 0
+  return {
+    ...e,
+    coverUrl: assetUrl(m.thumbnailUrl) || e.coverUrl,
+    updatedAgo: hoursSince(m.latestUploadedChapter?.uploadDate) ?? e.updatedAgo,
+    sources: e.sources.map((x) => (x.main ? { ...x, chapters: total, name: m.source?.displayName ?? x.name, iconUrl: m.source?.iconUrl ? assetUrl(m.source.iconUrl) : x.iconUrl } : x)),
+    counts: e.chapters.length ? e.counts : { total: Math.max(total, read), unread: Math.max(0, total - read) },
   }
-  return list.map((e) => (e.parentId ? { ...e, parentId: appId.get(e.parentId) } : e))
-}
-
-const entryRow = (e: Entry, dbId: string): EntryRow => ({
-  id: dbId,
-  title: e.title,
-  author: e.author,
-  cover_path: e.coverPath ?? null,
-  description: e.description,
-  tags: e.tags,
-  publishing: e.publishing,
-  parent_id: null,
-  in_library: e.inLibrary,
-  last_read_at: null,
-})
-
-const stateRow = (dbId: string, c: Chapter): ChapterStateRow => ({
-  entry_id: dbId,
-  source_id: c.sourceId,
-  chapter_url: c.sourceUrl!,
-  chapter_number: c.number,
-  page: c.page,
-  read: c.read,
-  bookmarked: c.bookmarked,
-  removed: !!c.removed,
-})
-
-const applyStates = (chapters: Chapter[], states: Pick<Chapter, 'sourceUrl' | 'page' | 'read' | 'bookmarked' | 'removed'>[]) => {
-  const byUrl = new Map(states.filter((s) => s.sourceUrl).map((s) => [s.sourceUrl!, s]))
-  return chapters.map((c) => {
-    const s = c.sourceUrl ? byUrl.get(c.sourceUrl) : undefined
-    return s ? { ...c, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined } : c
-  })
 }
 
 // Store
@@ -135,7 +83,7 @@ const applyStates = (chapters: Chapter[], states: Pick<Chapter, 'sourceUrl' | 'p
 type ServerState =
   /** Sample data, no server address. */
   | { status: 'off' }
-  /** A server is set but nobody is signed in to Midoku's database. */
+  /** A server is set but the app password has not been entered. */
   | { status: 'signin' }
   | { status: 'loading' | 'ready' }
   /** where: the library (Midoku's database) or the Suwayomi server. */
@@ -150,6 +98,10 @@ interface State {
   toastMessage: string | null
   miniHidden: boolean
   server: ServerState
+  /** The library shown is the copy saved on this device (no connection). */
+  offline: boolean
+  /** Progress of the check for new chapters. */
+  updating: { done: number; total: number } | null
 }
 
 const initial: State = {
@@ -160,9 +112,19 @@ const initial: State = {
   toastMessage: null,
   miniHidden: false,
   server: { status: 'off' },
+  offline: false,
+  updating: null,
 }
 
 const SAMPLE_QUEUE = initial.queue
+
+/** Finds a title by app id, or by the server id of any of its linked sources. */
+function findIn(entries: Entry[], id: string) {
+  const hit = entries.find((e) => e.id === id)
+  if (hit || !/^s\d+$/.test(id)) return hit
+  const n = Number(id.slice(1))
+  return entries.find((e) => e.sources.some((s) => s.mangaId === n))
+}
 
 function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
   return useMemo(() => {
@@ -174,12 +136,10 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       clearTimeout(toastTimer)
       toastTimer = setTimeout(() => set((s) => ({ ...s, toastMessage: null })), 2200)
     }
-    const find = (id: string) => get().entries.find((e) => e.id === id)
+    const find = (id: string) => findIn(get().entries, id)
 
-    /** Database writes run after the local change; a failure is reported, the local change stays. */
-    const sync = (p: Promise<unknown>) => p.catch((e: Error) => toast(`Not saved: ${e.message}`))
-    const usesDb = () => get().server.status !== 'off'
     let warned = false
+    /** Changes are saved in the database (through the write queue) only once the app password was entered. */
     const canSave = () => {
       const st = get().server.status
       if (st === 'off') return false
@@ -191,104 +151,257 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       return true
     }
 
-    /** Saves the title to the database once and returns its row id; later writes wait for it. */
-    const saving = new Map<string, Promise<string>>()
-    const ensureEntry = (id: string): Promise<string> => {
-      const pending = saving.get(id)
-      if (pending) return pending
+    /** Saves the title in the database the first time it matters; returns its row id. */
+    const ensureEntry = (id: string): string | undefined => {
       const e = find(id)
-      if (!e?.remote) return Promise.reject(new Error('Not a server title'))
-      if (e.dbId) return Promise.resolve(e.dbId)
+      if (!e?.remote || !canSave()) return undefined
+      if (e.dbId) return e.dbId
       const dbId = crypto.randomUUID()
-      editEntry(id, (x) => ({ ...x, dbId }))
-      const remote = e.remote
-      const p = saveEntry(entryRow(e, dbId))
-        .then(() => saveEntrySource({
-          entry_id: dbId, source_id: remote.sourceId, manga_url: remote.mangaUrl, server_manga_id: remote.mangaId,
-          source_name: e.sources[0]?.name ?? null, following: true, is_main: true,
-        }))
-        .then(() => dbId)
-      p.catch(() => {
-        saving.delete(id)
-        editEntry(id, (x) => ({ ...x, dbId: undefined }))
-      })
-      saving.set(id, p)
-      return p
+      editEntry(e.id, (x) => ({ ...x, dbId }))
+      saveEntry(entryRow(e, dbId))
+      e.sources.filter((s) => s.mangaUrl).forEach((s) => saveEntrySource(sourceRow(dbId, s)))
+      return dbId
     }
-    const withEntry = (id: string, write: (dbId: string) => Promise<unknown>) => {
-      if (!canSave() || !find(id)?.remote) return
-      sync(ensureEntry(id).then(write))
+
+    const saveChapters = (id: string, chapterIds: Set<string>) => {
+      const dbId = ensureEntry(id)
+      if (!dbId) return
+      const rows = (find(id)?.chapters ?? []).filter((c) => chapterIds.has(c.id) && c.sourceUrl).map((c) => stateRow(dbId, c))
+      if (rows.length) saveChapterStates(rows)
     }
-    const saveChapters = (id: string, chapterIds: Set<string>) =>
-      withEntry(id, (dbId) => {
-        const rows = (find(id)?.chapters ?? []).filter((c) => chapterIds.has(c.id) && c.sourceUrl).map((c) => stateRow(dbId, c))
-        return rows.length ? saveChapterStates(rows) : Promise.resolve()
-      })
-    /** Tab writes in flight; filing a title into a new tab waits for the tab to exist. */
-    const tabWrites = new Map<string, Promise<unknown>>()
+
     const writeTab = (id: string) => {
       if (!canSave()) return
       const tabs = get().tabs
       const i = tabs.findIndex((t) => t.id === id)
-      if (i < 0) return
-      const p = (tabWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(() => saveTabs([tabRow(tabs[i], i)]))
-      tabWrites.set(id, p)
-      sync(p)
+      if (i >= 0) saveTabs([tabRow(tabs[i], i)])
     }
-    const newTabId = (prefix: string) => (usesDb() ? crypto.randomUUID() : `${prefix}-${Date.now().toString(36)}`)
+    const newTabId = (prefix: string) => (get().server.status !== 'off' ? crypto.randomUUID() : `${prefix}-${Date.now().toString(36)}`)
 
     /** Reading state from the database for a saved title whose chapters are loaded. */
     const loadStates = (id: string) => {
       const dbId = find(id)?.dbId
       if (!dbId || get().server.status === 'signin') return
       loadChapterStates(dbId)
-        .then((rows) => editEntry(id, (e) => ({
-          ...e,
-          chapters: applyStates(e.chapters, rows.map((r) => ({ sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed }))),
-        })))
-        .catch((e: Error) => toast(`Couldn't load reading progress: ${e.message}`))
+        .then((rows) => editEntry(id, (e) => ({ ...e, chapters: applyStates(e.chapters, rows.map(rowState)) })))
+        .catch((e: Error) => { if (!isOffline(e)) toast(`Couldn't load reading progress: ${e.message}`) })
     }
+
+    /** Merges fresh server data into a title, keeping everything Midoku knows about it. */
+    const mergeEntry = (fresh: Entry) =>
+      set((s) => {
+        const prev = findIn(s.entries, fresh.id)
+        if (!prev) return { ...s, entries: [...s.entries, { ...fresh, chapters: withDownloads(fresh.chapters) }] }
+        const next: Entry = {
+          ...fresh,
+          id: prev.id,
+          dbId: prev.dbId,
+          tabs: prev.tabs,
+          inLibrary: prev.inLibrary,
+          lastReadAgo: prev.lastReadAgo,
+          parentId: prev.parentId,
+          addedOrder: prev.addedOrder,
+          // Linked sources are Midoku's; the server only refreshes the main source's name, icon and count.
+          sources: prev.sources.length ? prev.sources.map((x) => {
+            const f = fresh.sources.find((y) => y.sourceId === x.sourceId && y.mangaUrl === x.mangaUrl)
+            return f ? { ...x, name: f.name ?? x.name, iconUrl: f.iconUrl ?? x.iconUrl, chapters: f.chapters || x.chapters } : x
+          }) : fresh.sources,
+          remote: prev.remote ? { ...fresh.remote!, mangaId: prev.remote.mangaId, sourceId: prev.remote.sourceId, mangaUrl: prev.remote.mangaUrl, chaptersLoaded: fresh.remote?.chaptersLoaded || prev.remote.chaptersLoaded } : fresh.remote,
+          counts: fresh.counts && prev.counts
+            ? { total: fresh.counts.total, unread: Math.max(0, fresh.counts.total - (prev.counts.total - prev.counts.unread)) }
+            : fresh.counts,
+          chapters: fresh.remote?.chaptersLoaded ? withDownloads(applyStates(fresh.chapters, statesOf(prev.chapters))) : prev.chapters,
+        }
+        return { ...s, entries: s.entries.map((e) => (e === prev ? next : e)) }
+      })
+
+    /**
+     * Loads a title's details and the chapters of every linked source from the server. Without a
+     * connection the copy saved on this device is used. Returns whether the data is live or saved.
+     */
+    const loadEntry = async (id: string, refresh = false): Promise<'live' | 'saved'> => {
+      const known = find(id)
+      openedAt.set(known?.id ?? id, Date.now())
+      const mangaId = known?.remote?.mangaId ?? Number(id.slice(1))
+      try {
+        const manga = await getManga(mangaId, refresh)
+        const firstLoad = !find(id)?.remote?.chaptersLoaded
+        mergeEntry(toEntry(manga))
+        const e = find(id)!
+        const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.mangaId != null)
+        const lists = await Promise.all(sources.map((s, i) =>
+          getChapters(s.mangaId!, refresh)
+            .then((chapters) => ({ sourceId: s.sourceId, mangaUrl: s.mangaUrl, chapters }))
+            // Only the main source has to answer; another source failing just leaves its versions out.
+            .catch((err) => { if (i === 0) throw err; return null })))
+        const ok = lists.filter((l): l is NonNullable<typeof l> => !!l)
+        const fresh = toEntry(manga)
+        mergeEntry({ ...fresh, chapters: mergeChapters(ok), remote: { ...fresh.remote!, chaptersLoaded: true } })
+        editEntry(e.id, (x) => ({
+          ...x,
+          updatedAgo: hoursSince(newestUpload(ok)) ?? x.updatedAgo,
+          sources: x.sources.map((s) => {
+            const l = ok.find((y) => y.sourceId === s.sourceId && y.mangaUrl === s.mangaUrl)
+            return l ? { ...s, chapters: l.chapters.length } : s
+          }),
+        }))
+        if (firstLoad) loadStates(e.id)
+        return 'live'
+      } catch (err) {
+        if (!isOffline(err)) throw err
+        const entryId = known?.id ?? id
+        const hasDownloads = getSavedList().some((d) => d.entryId === entryId)
+        const saved = await readEntryCopy<Entry>(entryId, hasDownloads)
+        if (!saved) throw err
+        // The saved copy carries its reading state; anything newer known here wins.
+        mergeEntry({ ...saved, remote: saved.remote && { ...saved.remote, chaptersLoaded: true } })
+        return 'saved'
+      }
+    }
+
+    /** Asks the server to look for new chapters on every library title (followed sources only). */
+    let checking = false
+    const checkUpdates = async (quiet = false) => {
+      if (checking || get().server.status === 'off') return
+      const list = get().entries.filter((e) => e.inLibrary && e.dbId && e.remote)
+      if (!list.length) { if (!quiet) toast('Nothing to check yet'); return }
+      checking = true
+      set((s) => ({ ...s, updating: { done: 0, total: list.length } }))
+      let found = 0
+      let failures = 0
+      const jobs = [...list]
+      const worker = async () => {
+        while (jobs.length) {
+          const e = jobs.shift()!
+          try {
+            const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.following && s.mangaId != null)
+            if (!sources.length) throw new Error('No followed source')
+            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, chapters }))))
+            const merged = mergeChapters(lists)
+            const cur = find(e.id)
+            if (cur) {
+              const before = cur.chapters.length || (cur.counts?.total ?? 0)
+              const read = cur.counts ? cur.counts.total - cur.counts.unread : 0
+              if (merged.length > before) found++
+              editEntry(cur.id, (x) => ({
+                ...x,
+                updatedAgo: hoursSince(newestUpload(lists)) ?? x.updatedAgo,
+                chapters: x.remote?.chaptersLoaded ? withDownloads(applyStates(merged, statesOf(x.chapters))) : x.chapters,
+                counts: { total: Math.max(merged.length, read), unread: Math.max(0, merged.length - read) },
+              }))
+            }
+          } catch {
+            failures++
+          }
+          set((s) => ({ ...s, updating: s.updating && { ...s.updating, done: s.updating.done + 1 } }))
+        }
+      }
+      await Promise.all([worker(), worker(), worker()])
+      checking = false
+      set((s) => ({ ...s, updating: null, updatesSeen: found ? false : s.updatesSeen }))
+      try { localStorage.setItem(UPDATED_KEY, String(Date.now())) } catch { /* checked again next launch */ }
+      if (found) toast(`${found} title${found === 1 ? ' has' : 's have'} new chapters`)
+      else if (failures === list.length) toast("Couldn't reach the server")
+      else if (!quiet) toast('No new chapters')
+    }
+
+    const reorderMain = (sources: EntrySource[], sourceId: string, mangaUrl?: string) =>
+      sources.map((s) => ({ ...s, main: s.sourceId === sourceId && s.mangaUrl === mangaUrl }))
+        .sort((a, b) => Number(b.main) - Number(a.main))
 
     return {
       editEntry,
+      loadEntry,
+      loadStates,
+      checkUpdates,
       toggleLibrary: (id: string) => {
         const e = find(id)
         if (!e) return
-        editEntry(id, (x) => ({ ...x, inLibrary: !x.inLibrary }))
+        editEntry(e.id, (x) => ({ ...x, inLibrary: !x.inLibrary }))
         // A title saved for the first time is written with its new library state.
-        const known = !!e.dbId || saving.has(id)
-        withEntry(id, (dbId) => (known ? updateEntry(dbId, { in_library: !e.inLibrary }) : Promise.resolve()))
+        if (e.dbId) { if (canSave()) updateEntry(e.dbId, { in_library: !e.inLibrary }) } else ensureEntry(e.id)
       },
-      /** Adds or refreshes a title loaded from the server, keeping what Midoku knows about it. */
-      upsertEntry: (entry: Entry) => {
-        const old = find(entry.id)
-        const firstChapters = entry.remote?.chaptersLoaded && !old?.remote?.chaptersLoaded
-        set((s) => {
-          const prev = s.entries.find((e) => e.id === entry.id)
-          const next: Entry = prev ? {
-            ...entry,
-            dbId: prev.dbId,
-            tabs: prev.tabs,
-            inLibrary: prev.inLibrary,
-            lastReadAgo: prev.lastReadAgo,
-            parentId: prev.parentId,
-            addedOrder: prev.addedOrder,
-            counts: entry.counts && prev.counts
-              ? { total: entry.counts.total, unread: Math.max(0, entry.counts.total - (prev.counts.total - prev.counts.unread)) }
-              : entry.counts,
-            chapters: applyStates(entry.chapters, prev.chapters),
-          } : entry
-          return { ...s, entries: prev ? s.entries.map((e) => (e.id === entry.id ? next : e)) : [...s.entries, next] }
-        })
-        // The first time chapters arrive for a saved title, bring in its reading state.
-        if (firstChapters) loadStates(entry.id)
+      toggleFollow: (id: string, sourceId: string, mangaUrl?: string) => {
+        const e = find(id)
+        if (!e) return
+        const s = e.sources.find((x) => x.sourceId === sourceId && (!mangaUrl || x.mangaUrl === mangaUrl))
+        if (!s) return
+        editEntry(e.id, (x) => ({ ...x, sources: x.sources.map((y) => (y === s ? { ...y, following: !y.following } : y)) }))
+        const dbId = e.remote ? ensureEntry(e.id) : undefined
+        if (dbId && s.mangaUrl) updateEntrySource({ entry_id: dbId, source_id: s.sourceId, manga_url: s.mangaUrl }, { following: !s.following })
       },
-      loadStates,
-      toggleFollow: (id: string, sourceId: string) =>
-        editEntry(id, (e) => ({ ...e, sources: e.sources.map((s) => (s.sourceId === sourceId ? { ...s, following: !s.following } : s)) })),
+      /** Links the same title on another source; its chapters become versions in the same slots. */
+      linkSource: async (id: string, link: { mangaId: number; mangaUrl: string; sourceId: string; name?: string; iconUrl?: string }) => {
+        const e = find(id)
+        if (!e) return
+        if (e.sources.some((s) => s.sourceId === link.sourceId && s.mangaUrl === link.mangaUrl)) { toast('Already linked'); return }
+        const source: EntrySource = { sourceId: link.sourceId, mangaId: link.mangaId, mangaUrl: link.mangaUrl, name: link.name, iconUrl: link.iconUrl, chapters: 0, following: true, main: false }
+        const hadRow = !!e.dbId
+        editEntry(e.id, (x) => ({ ...x, sources: [...x.sources, source] }))
+        const dbId = ensureEntry(e.id)
+        if (dbId && hadRow) saveEntrySource(sourceRow(dbId, source))
+        toast(`Linked ${link.name ?? 'source'}`)
+        await loadEntry(e.id).catch(() => {})
+      },
+      unlinkSource: async (id: string, sourceId: string, mangaUrl?: string) => {
+        const e = find(id)
+        const s = e?.sources.find((x) => x.sourceId === sourceId && x.mangaUrl === mangaUrl)
+        if (!e || !s || s.main) return
+        editEntry(e.id, (x) => ({ ...x, sources: x.sources.filter((y) => y !== s) }))
+        if (e.dbId && s.mangaUrl && canSave()) deleteEntrySource(e.dbId, s.sourceId, s.mangaUrl)
+        await loadEntry(e.id).catch(() => {})
+      },
+      /** The main source supplies the details and is the one read; the title keeps its place and progress. */
+      setMainSource: async (id: string, sourceId: string, mangaUrl?: string) => {
+        const e = find(id)
+        const s = e?.sources.find((x) => x.sourceId === sourceId && x.mangaUrl === mangaUrl)
+        if (!e || !s || s.main || s.mangaId == null || !s.mangaUrl) return
+        editEntry(e.id, (x) => ({
+          ...x,
+          sources: reorderMain(x.sources, sourceId, mangaUrl),
+          remote: x.remote && { ...x.remote, mangaId: s.mangaId!, sourceId, mangaUrl: s.mangaUrl! },
+        }))
+        const dbId = ensureEntry(e.id)
+        if (dbId && e.dbId) {
+          updateEntrySource({ entry_id: dbId }, { is_main: false })
+          updateEntrySource({ entry_id: dbId, source_id: sourceId, manga_url: s.mangaUrl }, { is_main: true })
+        }
+        toast(`${s.name ?? 'Source'} is now the main source`)
+        await loadEntry(e.id).catch(() => {})
+      },
+      /** Nests a title inside another entry (a series), or takes it out again. */
+      setParent: (childId: string, parentId: string | undefined) => {
+        const child = find(childId)
+        const parent = parentId ? find(parentId) : undefined
+        if (!child || child.id === parent?.id) return
+        editEntry(child.id, (x) => ({ ...x, parentId: parent?.id }))
+        const childDb = ensureEntry(child.id)
+        const parentDb = parent ? ensureEntry(parent.id) : null
+        if (childDb && parentDb !== undefined) updateEntry(childDb, { parent_id: parentDb })
+      },
       editChapters: (id: string, chapterIds: Set<string>, patch: Partial<Chapter>) => {
-        editEntry(id, (x) => ({ ...x, chapters: x.chapters.map((c) => (chapterIds.has(c.id) ? { ...c, ...patch } : c)) }))
-        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined) saveChapters(id, chapterIds)
+        const e = find(id)
+        if (!e) return
+        editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (chapterIds.has(c.id) ? { ...c, ...patch } : c)) }))
+        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined) saveChapters(e.id, chapterIds)
+      },
+      /** Saves chapters on this device for offline reading. */
+      downloadChapters: (id: string, chapterIds: Set<string>) => {
+        const e = find(id)
+        if (!e) return
+        const jobs: DownloadJob[] = e.chapters
+          .filter((c) => chapterIds.has(c.id) && c.sourceUrl && c.remoteId)
+          .map((c) => ({ key: chapterKey(c.sourceId, c.sourceUrl!), entryId: e.id, title: e.title, label: c.label, remoteId: c.remoteId! }))
+        if (!jobs.length) { toast(e.remote ? 'Nothing to download' : 'Downloads need a server'); return }
+        const n = download(jobs)
+        toast(n ? `Downloading ${n} chapter${n === 1 ? '' : 's'}` : 'Already downloaded')
+      },
+      removeDownloads: (id: string, chapterIds: Set<string>) => {
+        const e = find(id)
+        if (!e) return
+        const keys = e.chapters.filter((c) => chapterIds.has(c.id) && c.sourceUrl).map((c) => chapterKey(c.sourceId, c.sourceUrl!))
+        keys.forEach((k) => void removeDownload(k))
+        toast(`Removed ${keys.length} download${keys.length === 1 ? '' : 's'}`)
       },
       toggleInstall: (sourceId: string) =>
         set((s) => ({ ...s, sources: s.sources.map((x) => (x.id === sourceId ? { ...x, installed: !x.installed, update: false } : x)) })),
@@ -301,21 +414,24 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       dismissMini: () => set((s) => ({ ...s, miniHidden: true })),
       /** Saves the reader position; reaching the last page marks the chapter read. */
       setProgress: (entryId: string, chapterId: string, page: number) => {
+        const e = find(entryId)
+        if (!e) return
         set((s) => ({
           ...s,
           miniHidden: false,
-          entries: s.entries.map((e) => e.id !== entryId ? e : {
-            ...e,
+          entries: s.entries.map((x) => x.id !== e.id ? x : {
+            ...x,
             lastReadAgo: 0,
-            chapters: e.chapters.map((c) => {
+            chapters: x.chapters.map((c) => {
               if (c.id !== chapterId) return c
               const done = page >= c.pages
               return { ...c, page: done ? 0 : page, read: c.read || done, isNew: done ? false : c.isNew }
             }),
           }),
         }))
-        saveChapters(entryId, new Set([chapterId]))
-        withEntry(entryId, (dbId) => updateEntry(dbId, { last_read_at: new Date().toISOString() }))
+        saveChapters(e.id, new Set([chapterId]))
+        const dbId = find(e.id)?.dbId
+        if (dbId) updateEntry(dbId, { last_read_at: new Date().toISOString() })
       },
       /** Adds a category tab and returns its id. */
       createTab: (name: string) => {
@@ -335,14 +451,15 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           tabs: s.tabs.filter((t) => t.id !== id),
           entries: s.entries.map((e) => (e.tabs.includes(id) ? { ...e, tabs: e.tabs.filter((t) => t !== id) } : e)),
         }))
-        if (canSave()) sync(deleteTabRow(id))
+        if (canSave()) deleteTabRow(id)
       },
       toggleInTab: (entryId: string, tabId: string) => {
         const e = find(entryId)
         if (!e) return
         const on = !e.tabs.includes(tabId)
-        editEntry(entryId, (x) => ({ ...x, tabs: on ? [...x.tabs, tabId] : x.tabs.filter((t) => t !== tabId) }))
-        withEntry(entryId, (dbId) => (tabWrites.get(tabId) ?? Promise.resolve()).then(() => setEntryTab(dbId, tabId, on)))
+        editEntry(e.id, (x) => ({ ...x, tabs: on ? [...x.tabs, tabId] : x.tabs.filter((t) => t !== tabId) }))
+        const dbId = ensureEntry(e.id)
+        if (dbId) setEntryTab(dbId, tabId, on)
       },
       addTab: (name: string, filters: LibraryFilters) => {
         const id = newTabId('smart')
@@ -375,6 +492,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const { serverUrl, serverUser, serverPass } = useSettings()
   const auth = useAuth()
   const lastServer = useRef('')
+  // Back online after an offline launch: load the library from the database again.
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    const on = () => { if (latest.current.offline) setReload((n) => n + 1) }
+    window.addEventListener('online', on)
+    return () => window.removeEventListener('online', on)
+  }, [])
+
+  useEffect(() => onWriteError((message) => actions.toast(`Not saved: ${message}`)), [actions])
 
   useEffect(() => {
     // Titles opened from the same server stay while the library (re)loads; another server starts empty.
@@ -382,78 +508,157 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     lastServer.current = serverUrl
     const browsed = (s: State) => (sameServer ? s.entries.filter((e) => e.remote && !e.dbId) : [])
     if (!serverUrl) {
-      set((s) => ({ ...s, ...sampleState(), sources: SOURCES, queue: SAMPLE_QUEUE, server: { status: 'off' } }))
+      set((s) => ({ ...s, ...sampleState(), sources: SOURCES, queue: SAMPLE_QUEUE, server: { status: 'off' }, offline: false }))
       return
     }
-    if (!auth.ready) {
-      set((s) => ({ ...s, entries: browsed(s), queue: [], tabs: DEVICE_TABS, server: { status: 'loading' } }))
-      return
-    }
-    if (!auth.userId) {
-      set((s) => ({ ...s, entries: browsed(s), queue: [], tabs: DEVICE_TABS, server: { status: 'signin' } }))
+    if (!auth.ready || !auth.userId) {
+      set((s) => ({ ...s, entries: browsed(s), queue: [], tabs: DEVICE_TABS, server: { status: auth.ready ? 'signin' : 'loading' } }))
       return
     }
     let alive = true
     set((s) => ({ ...s, entries: browsed(s), queue: [], server: { status: 'loading' } }))
     ;(async () => {
-      let lib: DbLibrary
+      // The library saved on this device shows at once; the database's copy replaces it when it arrives.
+      const snap = await readJSON<LibrarySnapshot>('library')
+      if (!alive) return
+      if (snap) set((s) => ({ ...s, entries: [...snap.entries, ...browsed(s).filter((e) => !snap.entries.some((x) => x.id === e.id))], tabs: snap.tabs, server: { status: 'ready' } }))
+      let entries: Entry[]
+      let tabs: LibraryTab[]
+      let offline = false
       try {
-        lib = await loadLibrary()
+        if (!navigator.onLine) throw new TypeError('Failed to fetch')
+        // Changes made offline go out first, so the library read back includes them.
+        await flushWrites().catch(() => false)
+        const lib: DbLibrary = await loadLibrary()
+        tabs = lib.tabs.map(toTab)
+        if (!tabs.length) {
+          // First launch: start with Reading and All.
+          tabs = DEVICE_TABS.map((t) => ({ ...t, id: crypto.randomUUID() }))
+          saveTabs(tabs.map(tabRow))
+        }
+        entries = entriesFromDb(lib)
       } catch (e) {
-        if (alive) set((s) => ({ ...s, server: { status: 'error', error: (e as Error).message, where: 'library' } }))
-        return
+        if (!alive) return
+        if (!snap || !isOffline(e)) {
+          set((s) => ({ ...s, server: { status: 'error', error: (e as Error).message, where: 'library' } }))
+          return
+        }
+        ;({ entries, tabs } = snap)
+        offline = true
       }
       if (!alive) return
-      let tabs = lib.tabs.map(toTab)
-      if (!tabs.length) {
-        // First sign-in: start with Reading and All.
-        tabs = DEVICE_TABS.map((t) => ({ ...t, id: crypto.randomUUID() }))
-        saveTabs(tabs.map(tabRow)).catch((e: Error) => actions.toast(`Not saved: ${e.message}`))
-      }
-      const entries = entriesFromDb(lib)
       // A saved title that is already open keeps its loaded chapters and gets its reading state.
       // (Anything still in the state was opened from this server after the reset above.)
-      const open = new Map(latest.current.entries.filter((e) => e.remote && !e.dbId).map((e) => [e.id, e]))
+      const open = new Map(latest.current.entries.filter((e) => e.remote && (!e.dbId || e.remote.chaptersLoaded)).map((e) => [e.id, e]))
       const merged = entries.map((e) => {
         const o = open.get(e.id)
-        return o?.remote?.chaptersLoaded ? { ...e, chapters: o.chapters, remote: { ...e.remote!, chaptersLoaded: true, url: o.remote.url } } : e
+        return o?.remote?.chaptersLoaded ? { ...e, chapters: withDownloads(o.chapters), remote: { ...e.remote!, chaptersLoaded: true, url: o.remote.url } } : e
       })
       const ids = new Set(entries.map((e) => e.id))
-      set((s) => ({ ...s, entries: [...merged, ...[...open.values()].filter((e) => !ids.has(e.id))], tabs, server: { status: 'ready' } }))
-      merged.forEach((e) => e.remote?.chaptersLoaded && actions.loadStates(e.id))
-      // Chapter totals and newest uploads come from the server.
-      try {
-        const summaries = await getMangaSummaries(entries.map((e) => e.remote!.mangaId))
-        if (!alive) return
-        const byId = new Map(summaries.map((m) => [`s${m.id}`, m]))
-        set((s) => ({
-          ...s,
-          entries: s.entries.map((e) => {
-            const m = byId.get(e.id)
-            if (!m || e.remote?.chaptersLoaded) return e
-            const total = m.chapters?.totalCount ?? 0
-            const read = e.counts ? e.counts.total - e.counts.unread : 0
-            return {
-              ...e,
-              coverUrl: assetUrl(m.thumbnailUrl) || e.coverUrl,
-              updatedAgo: hoursSince(m.latestUploadedChapter?.uploadDate) ?? 1e6,
-              sources: e.sources.map((x, i) => (i === 0 ? { ...x, chapters: total, name: m.source?.displayName ?? x.name, iconUrl: m.source?.iconUrl ? assetUrl(m.source.iconUrl) : x.iconUrl } : x)),
-              counts: { total: Math.max(total, read), unread: Math.max(0, total - read) },
-            }
-          }),
-        }))
-      } catch (e) {
-        if (alive) set((s) => ({ ...s, server: { status: 'error', error: (e as Error).message, where: 'server' } }))
-      }
+      set((s) => ({ ...s, entries: [...merged, ...[...open.values()].filter((e) => !ids.has(e.id))], tabs, offline, server: { status: 'ready' } }))
+      // Open titles reload so chapters from every linked source are merged, then get their reading state.
+      merged.forEach((e) => { if (e.remote?.chaptersLoaded) void actions.loadEntry(e.id).catch(() => 'saved').then(() => actions.loadStates(e.id)) })
+      if (offline) return
+      await syncWithServer(() => alive)
     })()
     return () => { alive = false }
-  }, [serverUrl, serverUser, serverPass, auth.ready, auth.userId, actions])
+
+    /**
+     * Fills in chapter totals from the server and finds titles whose server id no longer matches
+     * (Suwayomi reinstalled or moved), then looks for new chapters if it has been a while.
+     */
+    async function syncWithServer(alive: () => boolean) {
+      const entries = latest.current.entries.filter((e) => e.dbId)
+      const ids = [...new Set(entries.flatMap((e) => e.sources.map((s) => s.mangaId).filter((n): n is number => n != null)))]
+      let byId: Map<number, SManga>
+      try {
+        byId = new Map((await getMangaSummaries(ids)).map((m) => [m.id, m]))
+      } catch (e) {
+        if (alive()) set((s) => ({ ...s, server: { status: 'error', error: (e as Error).message, where: 'server' } }))
+        return
+      }
+      if (!alive()) return
+      const matches = (s: EntrySource, m?: SManga) => !!m && m.url === s.mangaUrl && String(m.sourceId) === String(s.sourceId)
+      set((st) => ({ ...st, entries: st.entries.map((e) => {
+        const main = e.sources.find((s) => s.main)
+        const m = main?.mangaId != null ? byId.get(main.mangaId) : undefined
+        return e.dbId && main && matches(main, m) ? enrich(e, m!) : e
+      }) }))
+      // Titles the server no longer knows by that id are found again by source and address.
+      const lost = entries.flatMap((e) => e.sources.filter((s) => s.mangaUrl && !matches(s, s.mangaId != null ? byId.get(s.mangaId) : undefined)).map((s) => ({ e, s })))
+      let missing = 0
+      for (const { e, s } of lost) {
+        if (!alive()) return
+        let m: SManga | undefined
+        try { m = await resolveManga(s.sourceId, s.mangaUrl!, e.title) } catch { m = undefined }
+        if (!m) { missing++; continue }
+        const found = m
+        updateEntrySource({ entry_id: e.dbId!, source_id: s.sourceId, manga_url: s.mangaUrl! }, { server_manga_id: found.id })
+        set((st) => {
+          const cur = st.entries.find((x) => x.dbId === e.dbId)
+          if (!cur) return st
+          const newId = s.main ? `s${found.id}` : cur.id
+          const next: Entry = {
+            ...cur,
+            id: newId,
+            sources: cur.sources.map((x) => (x.sourceId === s.sourceId && x.mangaUrl === s.mangaUrl ? { ...x, mangaId: found.id } : x)),
+            remote: s.main && cur.remote ? { ...cur.remote, mangaId: found.id } : cur.remote,
+          }
+          return {
+            ...st,
+            entries: st.entries.map((x) => (x === cur ? (s.main ? enrich(next, found) : next) : x.parentId === cur.id ? { ...x, parentId: newId } : x)),
+          }
+        })
+      }
+      if (missing && alive()) actions.toast(`${missing} linked title${missing === 1 ? '' : 's'} couldn't be found on this server`)
+      if (alive() && navigator.onLine && Date.now() - lastUpdateCheck() > UPDATE_EVERY_MS) void actions.checkUpdates(true)
+    }
+  }, [serverUrl, serverUser, serverPass, auth.ready, auth.userId, actions, set, reload])
+
+  // Old copies of opened titles go after 3 days (titles with downloads keep theirs).
+  useEffect(() => { void pruneEntryCopies(new Set(getSavedList().map((d) => d.entryId))) }, [])
+
+  // Downloads finishing or being removed show on the chapters.
+  const downloads = useDownloads()
+  useEffect(() => {
+    set((s) => {
+      let changed = false
+      const entries = s.entries.map((e) => {
+        if (!e.chapters.length) return e
+        const chapters = withDownloads(e.chapters)
+        if (chapters.some((c, i) => c !== e.chapters[i])) { changed = true; return { ...e, chapters } }
+        return e
+      })
+      return changed ? { ...s, entries } : s
+    })
+  }, [downloads.saved, set])
+
+  const { tabs, entries, server } = state
 
   // Sample data: remember tabs and filing on this device.
-  const { tabs, entries, server } = state
   useEffect(() => {
     if (server.status === 'off') saveSampleLayout({ tabs, memberships: Object.fromEntries(entries.map((e) => [e.id, e.tabs])) })
   }, [server.status, tabs, entries])
+
+  // Keep a copy for offline launches: the library, and each opened title with its chapters and progress.
+  const savedEntries = useRef(new Map<string, Entry>())
+  useEffect(() => {
+    if (server.status !== 'ready' && !(server.status === 'error' && server.where === 'server')) return
+    const t = setTimeout(() => {
+      const lib = entries.filter((e) => e.dbId).map((e) => ({
+        ...e, chapters: [], remote: e.remote && { ...e.remote, chaptersLoaded: false },
+        counts: { total: totalCount(e), unread: unreadCount(e) },
+      }))
+      void writeJSON('library', { entries: lib, tabs } satisfies LibrarySnapshot)
+      for (const e of entries) {
+        const opened = openedAt.get(e.id)
+        if (!opened || !e.remote?.chaptersLoaded || savedEntries.current.get(e.id) === e) continue
+        savedEntries.current.set(e.id, e)
+        void writeEntryCopy(e.id, e, opened)
+      }
+    }, 1000)
+    return () => clearTimeout(t)
+  }, [server, entries, tabs])
 
   // With a server, the Reading tab lists titles started and not finished, most recently read first.
   const queue = useMemo(() => (server.status === 'off' ? state.queue : entries
@@ -465,7 +670,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...state,
     queue,
     ...actions,
-    entry: (id) => state.entries.find((e) => e.id === id),
+    entry: (id) => findIn(state.entries, id),
     source: (id) => state.sources.find((s) => s.id === id),
     children: (id) => state.entries.filter((e) => e.parentId === id && e.inLibrary),
   }), [state, queue, actions])
