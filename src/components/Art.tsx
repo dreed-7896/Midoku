@@ -1,14 +1,38 @@
-import type { CSSProperties } from 'react'
+import { CSSProperties, useEffect, useState } from 'react'
+import { fetchImage, needsAuthForImages } from '../data/suwayomi'
 import type { CoverArt } from '../data/types'
 
+/**
+ * An image from the server. Plain <img> when the server is open; with a login it is fetched with the
+ * Authorization header and shown from a blob URL, released when the image leaves the screen.
+ */
+export function RemoteImage({ src, alt = '', className, onLoad }: { src: string; alt?: string; className?: string; onLoad?: () => void }) {
+  const auth = needsAuthForImages()
+  const [url, setUrl] = useState(auth ? '' : src)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    setFailed(false)
+    if (!auth) { setUrl(src); return }
+    const ctrl = new AbortController()
+    let objectUrl = ''
+    fetchImage(src, ctrl.signal)
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) })
+      .catch(() => { if (!ctrl.signal.aborted) setFailed(true) })
+    return () => { ctrl.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [src, auth])
+  if (failed || !url) return null
+  return <img src={url} alt={alt} className={className} loading="lazy" decoding="async" onLoad={onLoad} onError={() => setFailed(true)} />
+}
+
 /** Placeholder cover artwork: two flat colours, one shape and the title, like a printed book cover. */
-export function Cover({ art, title, className = '', plain }: { art: CoverArt; title: string; className?: string; plain?: boolean }) {
+export function Cover({ art, title, className = '', plain, url }: { art: CoverArt; title: string; className?: string; plain?: boolean; url?: string }) {
   const style = { '--c1': art.c1, '--c2': art.c2, '--ink': art.ink } as CSSProperties
   return (
     <div className={`cover${plain ? ' cover--plain' : ''} ${className}`} style={style} role="img" aria-label={`${title} cover`}>
       <span className={`cover__shape cover__shape--${art.motif}`} />
       <span className="cover__rule" />
       <span className="cover__title">{title}</span>
+      {url && <RemoteImage src={url} className="cover__img" />}
     </div>
   )
 }
@@ -34,10 +58,11 @@ export function PageThumb({ layout }: { layout: number }) {
   )
 }
 
-export function SourceIcon({ letter, color, size = 40 }: { letter: string; color: string; size?: number }) {
+export function SourceIcon({ letter, color, size = 40, url }: { letter: string; color: string; size?: number; url?: string }) {
   return (
     <span className="source-icon" style={{ width: size, height: size, background: color, fontSize: Math.round(size * 0.44) }} aria-hidden="true">
       {letter}
+      {url && <RemoteImage src={url} className="source-icon__img" />}
     </span>
   )
 }

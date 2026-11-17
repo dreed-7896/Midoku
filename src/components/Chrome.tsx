@@ -47,7 +47,7 @@ export function MiniPlayer() {
   return (
     <div className="mini" style={{ background: current.art.c1 }}>
       <TLink to={`/entry/${current.id}`} className="mini__main">
-        <Cover art={current.art} title={current.title} className="mini__cover" />
+        <Cover art={current.art} title={current.title} url={current.coverUrl} className="mini__cover" />
         <span className="mini__text">
           <span className="mini__title">{current.title}</span>
           <span className="mini__sub">{ch.label} · page {Math.max(ch.page, 1)} of {ch.pages}</span>
@@ -75,6 +75,23 @@ export function UpdateCard() {
       <span className="update__text"><strong>New version available</strong><span>Restart to update</span></span>
       <button type="button" className="btn btn--accent btn--sm" onClick={restartToUpdate}>Restart</button>
       <button type="button" className="mini__close" aria-label="Later" onClick={() => setHidden(true)}><Icon name="x" size={16} /></button>
+    </div>
+  )
+}
+
+/** Loading and error state of the server library; nothing when showing sample data or when ready. */
+export function ServerStatus() {
+  const { server } = useStore()
+  const nav = useNav()
+  if (server.status === 'loading') return <p className="hint pad-x pad-t">Loading your library from Suwayomi…</p>
+  if (server.status !== 'error') return null
+  return (
+    <div className="pad-x pad-t">
+      <div className="notice">
+        <span className="notice__icon"><Icon name="alert" /></span>
+        <span className="grow"><strong>Can't reach your server</strong><span className="card-meta card-meta--wrap">{server.error}</span></span>
+        <button type="button" className="btn btn--light btn--sm" onClick={() => nav.go('/settings')}>Settings</button>
+      </div>
     </div>
   )
 }

@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { TLink as Link, useNav } from '../components/Nav'
 import { Cover, PageThumb, SourceIcon } from '../components/Art'
 import { Chip, IconButton, SectionHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { agoLabel, newCount, progressPct, readCount, resumeChapter, statusOf, unreadCount, useStore, visibleChapters } from '../data/store'
+import { getChapters, getManga, toEntry } from '../data/suwayomi'
 import { Chapter, STATUS_LABEL } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
@@ -24,6 +25,29 @@ export default function EntryPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [shown, setShown] = useState(24)
 
+  // Titles from the server (ids like "s42") load their details and chapters here.
+  const remoteId = /^s\d+$/.test(id) ? Number(id.slice(1)) : null
+  const [remote, setRemote] = useState<{ loading: boolean; error?: string }>({ loading: false })
+  const loadRemote = useCallback(async (refresh = false) => {
+    if (remoteId === null) return
+    setRemote({ loading: true })
+    try {
+      const manga = await getManga(remoteId, refresh)
+      store.upsertEntry(toEntry(manga))
+      const chapters = await getChapters(remoteId, refresh)
+      store.upsertEntry(toEntry(manga, chapters))
+      setRemote({ loading: false })
+      if (refresh) store.toast('Up to date')
+    } catch (e) {
+      setRemote({ loading: false, error: (e as Error).message })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteId])
+  useEffect(() => {
+    if (remoteId !== null && !entry?.remote?.chaptersLoaded) loadRemote()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteId])
+
   const chapters = useMemo(() => {
     if (!entry) return []
     const list = visibleChapters(entry).filter((c) =>
@@ -33,9 +57,16 @@ export default function EntryPage() {
 
   if (!entry) {
     return (
-      <div className="page pad-x">
-        <p className="empty">This title isn't in your library.</p>
-        <Link to="/library" className="btn btn--ghost">Back to library</Link>
+      <div className="page">
+        <div className="entry__top"><IconButton icon="back" label="Back" onClick={() => nav.back('/library')} /></div>
+        <div className="pad-x pad-t">
+          {remoteId !== null && !remote.error ? <p className="hint">Loading…</p> : (
+            <>
+              <p className="empty">{remote.error ?? "This title isn't in your library."}</p>
+              {remoteId !== null && <button type="button" className="btn btn--ghost" onClick={() => loadRemote()}>Try again</button>}
+            </>
+          )}
+        </div>
       </div>
     )
   }
@@ -70,9 +101,11 @@ export default function EntryPage() {
     setSelecting(false)
   }
 
-  const refresh = () => {
+  const refresh = async () => {
     setRefreshing(true)
-    setTimeout(() => { setRefreshing(false); store.toast('Up to date') }, 1200)
+    if (entry.remote) await loadRemote(true)
+    else await new Promise((r) => setTimeout(r, 1200)).then(() => store.toast('Up to date'))
+    setRefreshing(false)
   }
 
   return (
@@ -84,13 +117,13 @@ export default function EntryPage() {
       <div className="entry__top">
         <IconButton icon="back" label="Back" glass onClick={() => nav.back('/library')} />
         <div className="row-gap">
-          <IconButton icon="globe" label="Open source website" glass onClick={() => store.toast('Opens the source page in the browser')} />
+          <IconButton icon="globe" label="Open source website" glass onClick={() => (entry.remote?.url ? window.open(entry.remote.url, '_blank', 'noopener') : store.toast('No web page for this title'))} />
           <IconButton icon="more" label="Entry options" glass onClick={() => store.toast('Edit, migrate and sources menu comes later')} />
         </div>
       </div>
 
       <div className="entry__hero">
-        <button type="button" className="entry__cover" aria-label="View cover"><Cover art={entry.art} title={entry.title} /></button>
+        <button type="button" className="entry__cover" aria-label="View cover"><Cover art={entry.art} title={entry.title} url={entry.coverUrl} /></button>
         <h1 className="entry__title">{entry.title}</h1>
         <div className="entry__author">{entry.author}</div>
         <div className="entry__meta">
@@ -156,16 +189,17 @@ export default function EntryPage() {
         <SectionHead title="Sources" count={entry.sources.length} action="Manage" onAction={() => store.toast('Source manager comes later')} />
         <div className="grid3">
           {entry.sources.map((s) => {
-            const src = store.source(s.sourceId)
+            // Server sources are not in the local list; their name and icon travel with the title.
+            const src = store.source(s.sourceId) ?? (s.name ? { name: s.name, letter: s.name[0], color: '#22222A', lang: '' } : undefined)
             if (!src) return null
             return (
               <div key={s.sourceId} className={`tile${s.main ? ' tile--main' : ''}`}>
                 <div className="split">
-                  <SourceIcon letter={src.letter} color={src.color} size={38} />
+                  <SourceIcon letter={src.letter} color={src.color} size={38} url={s.iconUrl} />
                   {s.main && <span className="tag tag--accent">Main</span>}
                 </div>
                 <div className="tile__name">{src.name}</div>
-                <div className="card-meta">{s.chapters} ch · {src.lang}</div>
+                <div className="card-meta">{s.chapters} ch{src.lang ? ` · ${src.lang}` : ''}</div>
                 <label className="switch-row">
                   <input type="checkbox" role="switch" className="switch" checked={s.following} onChange={() => store.toggleFollow(entry.id, s.sourceId)}
                     aria-label={`Follow new chapters from ${src.name}`} />
@@ -184,7 +218,7 @@ export default function EntryPage() {
             {kids.map((k) => (
               <Link key={k.id} to={`/entry/${k.id}`} className="card">
                 <div className="thumb">
-                  <Cover art={k.art} title={k.title} />
+                  <Cover art={k.art} title={k.title} url={k.coverUrl} />
                   {newCount(k) > 0 && <span className="badge badge--tr">{newCount(k)}</span>}
                 </div>
                 <div className="card-title card-title--2">{k.title}</div>
@@ -200,7 +234,7 @@ export default function EntryPage() {
 
       <section className="section pad-x">
         <div className="section-head">
-          <h2 className="h2">Chapters<span className="h2__count">{all.length}</span></h2>
+          <h2 className="h2">Chapters<span className="h2__count">{entry.remote && !entry.remote.chaptersLoaded ? '…' : all.length}</span></h2>
           <div className="row-gap">
             <IconButton icon="sort" label={descending ? 'Show oldest first' : 'Show newest first'} onClick={() => setDescending((d) => !d)} />
             <IconButton icon="select" label={selecting ? 'Done selecting' : 'Select chapters'} active={selecting}
@@ -214,6 +248,8 @@ export default function EntryPage() {
           <Chip on={filter === 'downloaded'} onClick={() => setFilter('downloaded')}>Downloaded {counts.downloaded}</Chip>
         </div>
 
+        {entry.remote && !entry.remote.chaptersLoaded && <p className="hint pad-t">{remote.error ? `Couldn't load chapters: ${remote.error}` : 'Loading chapters…'}</p>}
+        {entry.remote && remote.error && entry.remote.chaptersLoaded && <p className="hint pad-t">Refresh failed: {remote.error}</p>}
         <div className="grid3 pad-t">
           {chapters.slice(0, shown).map((c) => {
             const current = resume?.id === c.id

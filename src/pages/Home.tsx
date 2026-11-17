@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { TLink as Link, useNav } from '../components/Nav'
 import { Cover } from '../components/Art'
-import { IconButton, PageHead, SectionHead } from '../components/Chrome'
+import { IconButton, PageHead, SectionHead, ServerStatus } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { catalogFor } from '../data/mock'
 import { agoLabel, newCount, resumeChapter, useStore } from '../data/store'
@@ -44,7 +44,7 @@ export default function Home() {
               return (
                 <div key={e.id} className="hero" style={{ background: e.art.c1 }}>
                   <span className="hero__glow" style={{ background: e.art.c2 }} />
-                  <Link to={`/entry/${e.id}`} className="hero__cover"><Cover art={e.art} title={e.title} /></Link>
+                  <Link to={`/entry/${e.id}`} className="hero__cover"><Cover art={e.art} title={e.title} url={e.coverUrl} /></Link>
                   <div className="hero__body">
                     <span className="tag tag--glass">Continue · {agoLabel(e.lastReadAgo ?? 0)} ago</span>
                     <div className="hero__title">{e.title}</div>
@@ -67,21 +67,23 @@ export default function Home() {
         </section>
       )}
 
-      <section className="section">
+      <ServerStatus />
+
+      {queue.length > 0 && <section className="section">
         <SectionHead title="Reading queue" count={queue.length} />
         <div className="rail">
           {queue.map((id) => store.entry(id)).filter(Boolean).map((e) => {
             const ch = resumeChapter(e!)
             return (
               <Link key={e!.id} to={`/entry/${e!.id}`} className="rail__item">
-                <Cover art={e!.art} title={e!.title} />
+                <Cover art={e!.art} title={e!.title} url={e!.coverUrl} />
                 <div className="card-title">{e!.title}</div>
                 <div className="card-meta">{ch ? ch.label : 'Caught up'}</div>
               </Link>
             )
           })}
         </div>
-      </section>
+      </section>}
 
       <section className="section pad-x">
         <div className="section-head section-head--flush">
@@ -99,13 +101,13 @@ export default function Home() {
                 return (
                   <Link key={e.id} to={`/entry/${e.id}`} className="card">
                     <div className="thumb">
-                      <Cover art={e.art} title={e.title} plain />
+                      <Cover art={e.art} title={e.title} url={e.coverUrl} plain />
                       <span className="thumb__scrim" />
-                      <span className="thumb__label">{latest.label}</span>
+                      <span className="thumb__label">{latest?.label ?? `${newCount(e)} new`}</span>
                       <span className="badge badge--tr">+{newCount(e)}</span>
                     </div>
                     <div className="card-title">{e.title}</div>
-                    <div className="card-meta">{src?.name} · {agoLabel(e.updatedAgo)}</div>
+                    <div className="card-meta">{src?.name ?? e.sources[0]?.name}{e.updatedAgo < 1e5 ? ` · ${agoLabel(e.updatedAgo)}` : ''}</div>
                   </Link>
                 )
               })}
@@ -113,7 +115,7 @@ export default function Home() {
           </div>
         ))}
 
-        <div className="panel">
+        {store.server.status === 'off' && <div className="panel">
           <div className="panel__head">
             <span className="source-icon" style={{ width: 30, height: 30, background: '#5A3415', fontSize: 14 }} aria-hidden="true">M</span>
             <div className="grow">
@@ -131,7 +133,7 @@ export default function Home() {
               </Link>
             ))}
           </div>
-        </div>
+        </div>}
       </section>
     </div>
   )

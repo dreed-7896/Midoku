@@ -19,8 +19,5 @@ export default defineConfig({
       },
     },
   ],
-  server: {
-    host: true,
-    proxy: { '/api': process.env.SUWAYOMI_URL ?? 'http://localhost:4567' },
-  },
+  server: { host: true },
 })

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSettings } from '../data/settings'
+import { RemoteSearch } from './Remote'
 import { TLink as Link } from '../components/Nav'
 import { Cover, SourceIcon } from '../components/Art'
 import { Chip, PageHead } from '../components/Chrome'
@@ -8,7 +10,7 @@ import { useStore, visibleChapters } from '../data/store'
 
 type SourceState = 'loading' | 'done' | 'cloudflare'
 
-export default function Search() {
+function SampleSearch() {
   const store = useStore()
   const [query, setQuery] = useState('crown')
   const [debounced, setDebounced] = useState('crown')
@@ -82,7 +84,7 @@ export default function Search() {
               <div className="grid2">
                 {local.map((e) => (
                   <Link key={e.id} to={`/entry/${e.id}`} className="tile tile--row">
-                    <Cover art={e.art} title={e.title} className="tile__cover" />
+                    <Cover art={e.art} title={e.title} url={e.coverUrl} className="tile__cover" />
                     <span className="grow">
                       <span className="card-title card-title--2">{e.title}</span>
                       <span className="card-meta">
@@ -140,4 +142,10 @@ export default function Search() {
       )}
     </div>
   )
+}
+
+/** Sample data until a Suwayomi server is set in Settings. */
+export default function Search() {
+  const { serverUrl } = useSettings()
+  return serverUrl ? <RemoteSearch /> : <SampleSearch />
 }

@@ -7,10 +7,15 @@ export interface Settings {
   lockCredential: string
   /** Seconds in the background before the app locks again. */
   lockDelay: 0 | 60 | 300
+  /** Suwayomi server address, entered on this device. Empty shows sample data. */
+  serverUrl: string
+  /** Optional basic-auth login when the server has AUTH_MODE=basic_auth. */
+  serverUser: string
+  serverPass: string
 }
 
 const KEY = 'midoku.settings'
-const DEFAULTS: Settings = { readerMode: 'webtoon', lockCredential: '', lockDelay: 0 }
+const DEFAULTS: Settings = { readerMode: 'webtoon', lockCredential: '', lockDelay: 0, serverUrl: '', serverUser: '', serverPass: '' }
 
 function read(): Settings {
   try {

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { PageThumb } from '../components/Art'
+import { PageThumb, RemoteImage } from '../components/Art'
 import { Icon } from '../components/Icon'
 import { useNav } from '../components/Nav'
 import { updateSettings, useSettings } from '../data/settings'
 import { useStore, visibleChapters } from '../data/store'
+import { getPages } from '../data/suwayomi'
 import type { Chapter, CoverArt } from '../data/types'
 
 /**
@@ -52,9 +53,36 @@ export default function Reader() {
   const chapter = entry?.chapters.find((c) => c.id === chapterId)
   const ordered = entry ? [...visibleChapters(entry)].sort((a, b) => a.number - b.number) : []
   const index = ordered.findIndex((c) => c.id === chapterId)
+  // Measured page heights, so pages that leave the window keep their size (real images vary in height).
+  const heights = useRef(new Map<number, number>())
   const prev: Chapter | undefined = ordered[index - 1]
   const next: Chapter | undefined = ordered[index + 1]
-  const pages = chapter?.pages ?? 0
+
+  // Server chapters fetch their page list first; sample chapters draw placeholder pages.
+  const isRemote = !!chapter?.remoteId
+  const [urls, setUrls] = useState<string[] | null>(null)
+  const [pagesError, setPagesError] = useState<string>()
+  const [loadTry, setLoadTry] = useState(0)
+  const loaded = useRef(new Set<number>())
+  const [, bump] = useState(0)
+  useEffect(() => {
+    setUrls(null)
+    setPagesError(undefined)
+    loaded.current = new Set()
+    heights.current = new Map()
+    if (!chapter?.remoteId) return
+    let alive = true
+    getPages(chapter.remoteId)
+      .then((list) => {
+        if (!alive) return
+        setUrls(list)
+        if (chapter.pages !== list.length) store.editChapters(entryId, new Set([chapter.id]), { pages: list.length })
+      })
+      .catch((e: Error) => alive && setPagesError(e.message))
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterId, loadTry])
+  const pages = isRemote ? urls?.length ?? 0 : chapter?.pages ?? 0
 
   const scroller = useRef<HTMLDivElement>(null)
   const lastTop = useRef(0)
@@ -62,8 +90,6 @@ export default function Reader() {
   const startPage = useRef(1)
   const [page, setPage] = useState(1)
   const [ui, setUi] = useState(true)
-  // Measured page heights, so pages that leave the window keep their size (real images vary in height).
-  const heights = useRef(new Map<number, number>())
 
   // When a page above the viewport changes height, shift the scroll so the visible page stays put.
   useEffect(() => {
@@ -101,7 +127,7 @@ export default function Reader() {
     scrollToPage(startPage.current)
     setUi(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId, mode])
+  }, [chapterId, mode, pages])
 
   // The page crossing the middle of the screen is the current page.
   useEffect(() => {
@@ -150,9 +176,33 @@ export default function Reader() {
   return (
     <div className={`reader reader--${mode}`}>
       <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => setUi((v) => !v)}>
+        {isRemote && !urls && (
+          <div className="reader__loading" onClick={(e) => e.stopPropagation()}>
+            {pagesError ? (
+              <>
+                <p>{pagesError}</p>
+                <button type="button" className="btn btn--ghost" onClick={() => setLoadTry((n) => n + 1)}>Try again</button>
+              </>
+            ) : <p className="hint">Loading pages…</p>}
+          </div>
+        )}
         {list.map((n) => {
           const near = Math.abs(n - page) <= WINDOW
           const known = heights.current.get(n)
+          if (isRemote && urls) {
+            const onLoad = () => { loaded.current.add(n); bump((x) => x + 1) }
+            // Until an image has loaded the box keeps a page-like shape (or its measured height), so scrolling stays steady.
+            const style = near
+              ? (loaded.current.has(n) ? { aspectRatio: 'auto', minHeight: known } : known ? { height: known, aspectRatio: 'auto' } : undefined)
+              : (known ? { height: known, aspectRatio: 'auto' } : undefined)
+            return mode === 'webtoon' ? (
+              <div key={n} className="wt-page wt-page--img" data-page={n} style={style}>
+                {near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="wt-img" onLoad={onLoad} />}
+              </div>
+            ) : (
+              <div key={n} className="pg-page" data-page={n}>{near && <RemoteImage src={urls[n - 1]} alt={`Page ${n}`} className="pg-img" />}</div>
+            )
+          }
           return mode === 'webtoon' ? (
             <div key={n} className="wt-page" data-page={n} style={!near && known ? { height: known, aspectRatio: 'auto' } : undefined}>
               {near && <WebtoonContent n={n} art={entry.art} />}
@@ -161,7 +211,7 @@ export default function Reader() {
             <div key={n} className="pg-page" data-page={n}>{near && <PagedContent n={n} />}</div>
           )
         })}
-        <div className="reader__end" onClick={(e) => e.stopPropagation()}>
+        {(!isRemote || urls) && <div className="reader__end" onClick={(e) => e.stopPropagation()}>
           <div className="label label--flush">Finished</div>
           <div className="reader__end-title">{chapter.label}</div>
           {next ? (
@@ -172,7 +222,7 @@ export default function Reader() {
             <p className="hint">You're caught up on {entry.title}.</p>
           )}
           <button type="button" className="btn btn--ghost" onClick={close}>Back to {entry.title}</button>
-        </div>
+        </div>}
       </div>
 
       <header className={`reader__top${ui ? '' : ' is-hidden'}`}>
@@ -192,15 +242,15 @@ export default function Reader() {
           <Icon name="prev" />
         </button>
         <label className="reader__slider">
-          <input type="range" min={1} max={pages} value={Math.min(page, pages)} aria-label="Page"
+          <input type="range" min={1} max={Math.max(pages, 1)} value={Math.min(page, Math.max(pages, 1))} disabled={!pages} aria-label="Page"
             onChange={(e) => { const n = Number(e.target.value); setPage(n); scrollToPage(n) }} />
-          <span>{Math.min(page, pages)} / {pages}</span>
+          <span>{pages ? `${Math.min(page, pages)} / ${pages}` : '–'}</span>
         </label>
         <button type="button" className="icon-btn icon-btn--glass" aria-label="Next chapter" disabled={!next} onClick={() => next && goChapter(next)}>
           <Icon name="next" />
         </button>
       </footer>
-      <span className="reader__line" style={{ width: `${(Math.min(page, pages) / pages) * 100}%` }} aria-hidden="true" />
+      <span className="reader__line" style={{ width: `${pages ? (Math.min(page, pages) / pages) * 100 : 0}%` }} aria-hidden="true" />
     </div>
   )
 }

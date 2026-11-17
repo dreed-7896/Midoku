@@ -14,7 +14,7 @@ Web client for Midoku, backed by [Suwayomi-Server](https://github.com/Suwayomi/S
 
 ## Web app
 
-Mobile-only PWA (React + Vite). It currently runs on **dummy data** (`src/data/mock.ts`) and does not talk to Suwayomi yet.
+Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings → Server**; until then it shows sample data (`src/data/mock.ts`). The app talks to the server directly from the browser, so the server needs an https address.
 
 - `npm run dev` → open port 5173 (in the codespace, from the Ports tab).
 - `npm run build` renders the PWA icons from `public/icon.svg`, type-checks and builds to `dist/`.

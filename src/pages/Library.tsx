@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Art'
-import { Chip, IconButton, PageHead, Sheet } from '../components/Chrome'
+import { Chip, IconButton, PageHead, ServerStatus, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { EntryGrid } from '../components/LibraryCards'
 import { TLink as Link } from '../components/Nav'
@@ -112,6 +112,8 @@ export default function Library() {
         <IconButton icon="search" label="Search library" active={searching} onClick={() => { setSearching((s) => !s); setQuery('') }} />
         <IconButton icon="sliders" label={`Filter and sort, ${filterCount} filters active`} badge={filterCount || undefined} onClick={() => setSheet(true)} />
       </PageHead>
+
+      <ServerStatus />
 
       {searching && (
         <div className="pad-x pad-t-sm">
@@ -240,7 +242,7 @@ function TabPanel({ tab, filters, sort, groupBy, roots }: { tab: LibraryTab; fil
             </button>
             {isCollapsed ? (
               <div className="peek">
-                {sec.entries.slice(0, 6).map((e) => <Cover key={e.id} art={e.art} title={e.title} className="peek__cover" />)}
+                {sec.entries.slice(0, 6).map((e) => <Cover key={e.id} art={e.art} title={e.title} url={e.coverUrl} className="peek__cover" />)}
                 <span className="card-meta">{sec.entries.filter((e) => newCount(e) > 0).length || 'No'} with new chapters</span>
               </div>
             ) : (
@@ -285,7 +287,7 @@ function ReadingQueue() {
           return (
             <Link key={e.id} to={`/entry/${e.id}`} className="card">
               <div className="thumb">
-                <Cover art={e.art} title={e.title} />
+                <Cover art={e.art} title={e.title} url={e.coverUrl} />
                 <span className="badge badge--tl badge--light">{i + 1}</span>
                 {newCount(e) > 0 && <span className="badge badge--tr">{newCount(e)}</span>}
               </div>

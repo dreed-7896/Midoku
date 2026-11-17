@@ -1,5 +1,7 @@
-import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
+import { useSettings } from './settings'
+import { getLibrary, saveChapterProgress, setInLibrary, toEntry, updateChapters } from './suwayomi'
 import type { Chapter, Entry, LibraryFilters, LibraryTab, Source, Status } from './types'
 
 interface State {
@@ -10,6 +12,8 @@ interface State {
   updatesSeen: boolean
   toastMessage: string | null
   miniHidden: boolean
+  /** Sample data when no server is set; otherwise the state of the server library. */
+  server: { status: 'off' | 'loading' | 'ready' | 'error'; error?: string }
 }
 
 const initial: State = {
@@ -20,20 +24,50 @@ const initial: State = {
   updatesSeen: false,
   toastMessage: null,
   miniHidden: false,
+  server: { status: 'off' },
 }
 
-function useActions(set: (fn: (s: State) => State) => void) {
+const SAMPLE_QUEUE = initial.queue
+
+function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
   return useMemo(() => {
     const editEntry = (id: string, fn: (e: Entry) => Entry) =>
       set((s) => ({ ...s, entries: s.entries.map((e) => (e.id === id ? fn(e) : e)) }))
     let toastTimer: ReturnType<typeof setTimeout> | undefined
+    const toast = (message: string) => {
+      set((s) => ({ ...s, toastMessage: message }))
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => set((s) => ({ ...s, toastMessage: null })), 2200)
+    }
+    /** Server writes run after the local change; a failure is reported, the local change stays. */
+    const sync = (p: Promise<unknown>) => p.catch((e: Error) => toast(`Not saved on the server: ${e.message}`))
+    const find = (id: string) => get().entries.find((e) => e.id === id)
     return {
       editEntry,
-      toggleLibrary: (id: string) => editEntry(id, (e) => ({ ...e, inLibrary: !e.inLibrary })),
+      toggleLibrary: (id: string) => {
+        const e = find(id)
+        editEntry(id, (x) => ({ ...x, inLibrary: !x.inLibrary }))
+        if (e?.remote) sync(setInLibrary(e.remote.mangaId, !e.inLibrary))
+      },
+      /** Adds or refreshes a title loaded from the server, keeping the tabs it was filed in here. */
+      upsertEntry: (entry: Entry) =>
+        set((s) => {
+          const old = s.entries.find((e) => e.id === entry.id)
+          const next = old ? { ...entry, tabs: old.tabs } : entry
+          return { ...s, entries: old ? s.entries.map((e) => (e.id === entry.id ? next : e)) : [...s.entries, next] }
+        }),
       toggleFollow: (id: string, sourceId: string) =>
         editEntry(id, (e) => ({ ...e, sources: e.sources.map((s) => (s.sourceId === sourceId ? { ...s, following: !s.following } : s)) })),
-      editChapters: (id: string, chapterIds: Set<string>, patch: Partial<Chapter>) =>
-        editEntry(id, (e) => ({ ...e, chapters: e.chapters.map((c) => (chapterIds.has(c.id) ? { ...c, ...patch } : c)) })),
+      editChapters: (id: string, chapterIds: Set<string>, patch: Partial<Chapter>) => {
+        const e = find(id)
+        editEntry(id, (x) => ({ ...x, chapters: x.chapters.map((c) => (chapterIds.has(c.id) ? { ...c, ...patch } : c)) }))
+        if (!e?.remote || (patch.read === undefined && patch.bookmarked === undefined)) return
+        const ids = e.chapters.filter((c) => chapterIds.has(c.id) && c.remoteId).map((c) => c.remoteId!)
+        const serverPatch: { isRead?: boolean; isBookmarked?: boolean } = {}
+        if (patch.read !== undefined) serverPatch.isRead = patch.read
+        if (patch.bookmarked !== undefined) serverPatch.isBookmarked = patch.bookmarked
+        if (ids.length) sync(updateChapters(ids, serverPatch))
+      },
       toggleInstall: (sourceId: string) =>
         set((s) => ({ ...s, sources: s.sources.map((x) => (x.id === sourceId ? { ...x, installed: !x.installed, update: false } : x)) })),
       togglePin: (sourceId: string) =>
@@ -44,7 +78,9 @@ function useActions(set: (fn: (s: State) => State) => void) {
       markUpdatesSeen: () => set((s) => ({ ...s, updatesSeen: true })),
       dismissMini: () => set((s) => ({ ...s, miniHidden: true })),
       /** Saves the reader position; reaching the last page marks the chapter read. */
-      setProgress: (entryId: string, chapterId: string, page: number) =>
+      setProgress: (entryId: string, chapterId: string, page: number) => {
+        const c = find(entryId)?.chapters.find((x) => x.id === chapterId)
+        if (c?.remoteId && c.pages) sync(saveChapterProgress(c.remoteId, page, c.pages))
         set((s) => ({
           ...s,
           miniHidden: false,
@@ -57,7 +93,8 @@ function useActions(set: (fn: (s: State) => State) => void) {
               return { ...c, page: done ? 0 : page, read: c.read || done, isNew: done ? false : c.isNew }
             }),
           }),
-        })),
+        }))
+      },
       /** Adds a category tab and returns its id. */
       createTab: (name: string) => {
         const id = `tab-${Date.now().toString(36)}`
@@ -77,13 +114,9 @@ function useActions(set: (fn: (s: State) => State) => void) {
         editEntry(entryId, (e) => ({ ...e, tabs: e.tabs.includes(tabId) ? e.tabs.filter((t) => t !== tabId) : [...e.tabs, tabId] })),
       addTab: (name: string, filters: LibraryFilters) =>
         set((s) => ({ ...s, tabs: [...s.tabs, { id: `smart-${Date.now().toString(36)}`, kind: 'smart', name, filters }] })),
-      toast: (message: string) => {
-        set((s) => ({ ...s, toastMessage: message }))
-        clearTimeout(toastTimer)
-        toastTimer = setTimeout(() => set((s) => ({ ...s, toastMessage: null })), 2200)
-      },
+      toast,
     }
-  }, [set])
+  }, [set, get])
 }
 
 type Store = State & ReturnType<typeof useActions> & {
@@ -96,8 +129,26 @@ const Ctx = createContext<Store | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(initial)
+  const latest = useRef(state)
+  latest.current = state
   const set = useCallback((fn: (s: State) => State) => setState(fn), [])
-  const actions = useActions(set)
+  const get = useCallback(() => latest.current, [])
+  const actions = useActions(set, get)
+  const { serverUrl, serverUser, serverPass } = useSettings()
+
+  // With a server address the library comes from Suwayomi; without one the app shows sample data.
+  useEffect(() => {
+    if (!serverUrl) {
+      setState((s) => ({ ...s, entries: ENTRIES, sources: SOURCES, queue: SAMPLE_QUEUE, server: { status: 'off' } }))
+      return
+    }
+    let alive = true
+    setState((s) => ({ ...s, entries: [], queue: [], server: { status: 'loading' } }))
+    getLibrary()
+      .then((list) => alive && setState((s) => ({ ...s, entries: list.map((m) => toEntry(m)), server: { status: 'ready' } })))
+      .catch((e: Error) => alive && setState((s) => ({ ...s, server: { status: 'error', error: e.message } })))
+    return () => { alive = false }
+  }, [serverUrl, serverUser, serverPass])
   const value = useMemo<Store>(() => ({
     ...state,
     ...actions,
@@ -116,14 +167,17 @@ export function useStore(): Store {
 
 // Derived helpers shared by pages.
 export const visibleChapters = (e: Entry) => e.chapters.filter((c) => !c.removed)
-export const unreadCount = (e: Entry) => visibleChapters(e).filter((c) => !c.read).length
-export const newCount = (e: Entry) => visibleChapters(e).filter((c) => c.isNew && !c.read).length
-export const readCount = (e: Entry) => visibleChapters(e).filter((c) => c.read).length
+/** Server titles in the library list carry totals until their chapters are loaded. */
+const summaryOnly = (e: Entry) => e.chapters.length === 0 && !!e.counts
+export const totalCount = (e: Entry) => (summaryOnly(e) ? e.counts!.total : visibleChapters(e).length)
+export const unreadCount = (e: Entry) => (summaryOnly(e) ? e.counts!.unread : visibleChapters(e).filter((c) => !c.read).length)
+export const newCount = (e: Entry) => (summaryOnly(e) ? e.counts!.unread : visibleChapters(e).filter((c) => c.isNew && !c.read).length)
+export const readCount = (e: Entry) => (summaryOnly(e) ? e.counts!.total - e.counts!.unread : visibleChapters(e).filter((c) => c.read).length)
 
 /** Reading until every chapter is read; a new chapter turns a completed title back to reading. */
 export function statusOf(e: Entry): Status {
-  const all = visibleChapters(e)
-  return all.length > 0 && all.every((c) => c.read) ? 'completed' : 'reading'
+  const total = totalCount(e)
+  return total > 0 && readCount(e) === total ? 'completed' : 'reading'
 }
 
 /** The chapter the reader resumes: the first unread one in reading order. */
@@ -132,7 +186,7 @@ export function resumeChapter(e: Entry): Chapter | undefined {
 }
 
 export function progressPct(e: Entry): number {
-  const total = visibleChapters(e).length
+  const total = totalCount(e)
   return total ? Math.round((readCount(e) / total) * 100) : 0
 }
 

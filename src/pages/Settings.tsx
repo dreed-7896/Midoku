@@ -5,6 +5,7 @@ import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
 import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
+import { testServer } from '../data/suwayomi'
 import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
 const DELAYS: { value: Settings['lockDelay']; label: string }[] = [
@@ -52,6 +53,8 @@ export default function SettingsPage() {
       <header className="pad-x pad-t">
         <h1 className="h1">Settings</h1>
       </header>
+
+      <ServerSection />
 
       <section className="section pad-x">
         <div className="label label--flush">Reader</div>
@@ -114,5 +117,80 @@ export default function SettingsPage() {
         )}
       </section>
     </div>
+  )
+}
+
+/** The Suwayomi address lives on this device; the app talks to it directly, nothing in between. */
+function ServerSection() {
+  const settings = useSettings()
+  const store = useStore()
+  const [url, setUrl] = useState(settings.serverUrl)
+  const [user, setUser] = useState(settings.serverUser)
+  const [pass, setPass] = useState(settings.serverPass)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const connected = !!settings.serverUrl
+
+  const connect = async () => {
+    let address = url.trim()
+    if (address && !/^https?:\/\//.test(address)) address = `https://${address}`
+    if (!address) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const about = await testServer(address, user.trim(), pass)
+      updateSettings({ serverUrl: address.replace(/\/+$/, ''), serverUser: user.trim(), serverPass: pass })
+      store.toast(`Connected to ${about.name} ${about.version}`)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const disconnect = () => {
+    if (!window.confirm('Disconnect from this server? The app goes back to sample data. Nothing on the server changes.')) return
+    updateSettings({ serverUrl: '', serverUser: '', serverPass: '' })
+    setUrl(''); setUser(''); setPass('')
+  }
+
+  return (
+    <section className="section pad-x">
+      <div className="label label--flush">Server</div>
+      {connected ? (
+        <>
+          <div className="setting">
+            <span className="setting__icon"><Icon name="database" size={22} /></span>
+            <div className="setting__text">
+              <strong>Suwayomi</strong>
+              <span className="card-meta card-meta--wrap">{settings.serverUrl}</span>
+              <span className="card-meta card-meta--wrap">
+                {store.server.status === 'ready' ? `Connected · ${store.entries.filter((e) => e.inLibrary).length} titles in your library`
+                  : store.server.status === 'loading' ? 'Connecting…'
+                  : `Not reachable: ${store.server.error ?? ''}`}
+              </span>
+            </div>
+          </div>
+          <button type="button" className="btn btn--ghost btn--block" onClick={disconnect}>Disconnect</button>
+        </>
+      ) : (
+        <>
+          <p className="hint">Connect your Suwayomi server to use your real library, sources and chapters. Until then the app shows sample data.</p>
+          <div className="form">
+            <label className="form__row"><span>Address</span>
+              <input className="field-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-server:4567" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+            </label>
+            <label className="form__row"><span>Username <em>optional</em></span>
+              <input className="field-input" value={user} onChange={(e) => setUser(e.target.value)} autoCapitalize="none" autoCorrect="off" autoComplete="username" />
+            </label>
+            <label className="form__row"><span>Password <em>optional</em></span>
+              <input className="field-input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="current-password" />
+            </label>
+          </div>
+          {error && <p className="form__error">{error}</p>}
+          <button type="button" className="btn btn--accent btn--block" disabled={busy || !url.trim()} onClick={connect}>{busy ? 'Connecting…' : 'Connect'}</button>
+          <p className="hint pad-t-sm">The address stays on this device and the app talks to the server directly. Use an https address: the installed app can't load plain http.</p>
+        </>
+      )}
+    </section>
   )
 }

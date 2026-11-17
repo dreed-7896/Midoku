@@ -12,13 +12,17 @@ export function LibraryCard({ entry: e }: { entry: Entry }) {
   return (
     <Link to={`/entry/${e.id}`} className="card">
       <div className="thumb">
-        <Cover art={e.art} title={e.title} />
+        <Cover art={e.art} title={e.title} url={e.coverUrl} />
         {unread > 0 && <span className="badge badge--tr">{unread}</span>}
         {nested > 0 && <span className="badge badge--tl badge--glass"><Icon name="layers" size={11} stroke={2.4} />{nested}</span>}
         <span className="thumb__bar"><span style={{ width: `${progressPct(e)}%` }} /></span>
       </div>
       <div className="card-title">{e.title}</div>
-      <div className="card-meta">{ch ? `${ch.label} / ${visibleChapters(e).length}` : `${visibleChapters(e).length} ch · done`}</div>
+      <div className="card-meta">
+        {ch ? `${ch.label} / ${visibleChapters(e).length}`
+          : e.counts && !e.chapters.length ? `${e.counts.unread} unread · ${e.counts.total} ch`
+          : `${visibleChapters(e).length} ch · done`}
+      </div>
     </Link>
   )
 }
@@ -33,9 +37,9 @@ export function SeriesCard({ entry: e }: { entry: Entry }) {
     <Link to={`/entry/${e.id}`} className="series">
       <div className="series__stack">
         {kids.slice(0, 2).reverse().map((k, i) => (
-          <div key={k.id} className={`series__back series__back--${i}`}><Cover art={k.art} title={k.title} /></div>
+          <div key={k.id} className={`series__back series__back--${i}`}><Cover art={k.art} title={k.title} url={k.coverUrl} /></div>
         ))}
-        <div className="series__front"><Cover art={e.art} title={e.title} /></div>
+        <div className="series__front"><Cover art={e.art} title={e.title} url={e.coverUrl} /></div>
       </div>
       <div className="grow">
         <div className="eyebrow"><Icon name="layers" size={13} stroke={2.2} /> Series · {kids.length + 1} titles</div>

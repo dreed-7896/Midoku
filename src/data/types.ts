@@ -49,6 +49,8 @@ export interface Chapter {
   part?: string
   removed?: boolean
   layout: number
+  /** Suwayomi chapter id, for chapters that come from the server. */
+  remoteId?: number
 }
 
 export interface EntrySource {
@@ -56,6 +58,9 @@ export interface EntrySource {
   chapters: number
   following: boolean
   main?: boolean
+  /** Shown when the source is not in the local source list (server sources). */
+  name?: string
+  iconUrl?: string
 }
 
 export interface Entry {
@@ -77,6 +82,12 @@ export interface Entry {
   /** Hours since new chapters arrived. */
   updatedAgo: number
   addedOrder: number
+  /** Real cover image; the drawn placeholder is used until it loads. */
+  coverUrl?: string
+  /** Set for titles that come from the Suwayomi server. */
+  remote?: { mangaId: number; url?: string; chaptersLoaded: boolean }
+  /** Chapter totals from the library list, used before the chapters themselves are loaded. */
+  counts?: { total: number; unread: number }
 }
 
 export interface CatalogItem {

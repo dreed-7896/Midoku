@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useSettings } from '../data/settings'
+import { RemoteSources } from './Remote'
 import { TLink as Link } from '../components/Nav'
 import { SourceIcon } from '../components/Art'
 import { IconButton, PageHead } from '../components/Chrome'
@@ -8,7 +10,7 @@ import type { Source } from '../data/types'
 
 const LANGS = ['All', 'EN', 'Multi', 'JA', 'ES', 'ID']
 
-export default function Sources() {
+function SampleSources() {
   const store = useStore()
   const [tab, setTab] = useState<'installed' | 'available'>('installed')
   const [query, setQuery] = useState('')
@@ -133,4 +135,10 @@ export default function Sources() {
       </section>
     </div>
   )
+}
+
+/** Sample data until a Suwayomi server is set in Settings. */
+export default function Sources() {
+  const { serverUrl } = useSettings()
+  return serverUrl ? <RemoteSources /> : <SampleSources />
 }

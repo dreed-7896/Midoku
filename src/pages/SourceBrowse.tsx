@@ -1,4 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react'
+import { useSettings } from '../data/settings'
+import { RemoteBrowse } from './Remote'
 import { useParams } from 'react-router-dom'
 import { TLink as Link, useNav } from '../components/Nav'
 import { Cover, SourceIcon } from '../components/Art'
@@ -7,7 +9,7 @@ import { Icon } from '../components/Icon'
 import { catalogFor } from '../data/mock'
 import { useStore } from '../data/store'
 
-export default function SourceBrowse() {
+function SampleSourceBrowse() {
   const { id = '' } = useParams()
   const store = useStore()
   const nav = useNav()
@@ -103,4 +105,10 @@ export default function SourceBrowse() {
       )}
     </div>
   )
+}
+
+/** Sample data until a Suwayomi server is set in Settings. */
+export default function SourceBrowse() {
+  const { serverUrl } = useSettings()
+  return serverUrl ? <RemoteBrowse /> : <SampleSourceBrowse />
 }

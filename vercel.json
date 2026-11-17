@@ -1,6 +1,8 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/suwayomi?path=:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }
