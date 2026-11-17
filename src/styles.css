@@ -27,7 +27,9 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; background: #000; color: var(--text); height: 100%; overflow: hidden; overscroll-behavior: none; }
+/* No height or overflow lock on html/body: in the installed iOS app that leaves the home-indicator strip
+   outside the app. Screens are fixed layers, so the document itself has nothing to scroll. */
+html, body { margin: 0; background: var(--bg); color: var(--text); overscroll-behavior: none; }
 body { font: 15px/1.4 Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -35,7 +37,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 a { color: inherit; text-decoration: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.app { max-width: 520px; margin: 0 auto; height: 100%; position: relative; }
+.app { max-width: 520px; margin: 0 auto; position: relative; }
 .page { padding-bottom: calc(var(--tab-h) + var(--mini-h) + var(--dock-pad) + 32px); }
 .pad-x { padding-left: 16px; padding-right: 16px; }
 .pad-t { padding-top: 16px; }
@@ -113,10 +115,7 @@ a { color: inherit; text-decoration: none; }
 .dot--completed { background: #7fa7ff; }
 .dot--hiatus { background: var(--amber); }
 .dot--status-reading { background: var(--amber); }
-.dot--status-planned { background: #7fa7ff; }
 .dot--status-completed { background: var(--mint); }
-.dot--status-onHold { background: #b48cff; }
-.dot--status-dropped { background: var(--text-3); }
 
 /* Fields */
 .field { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; background: var(--s1); border: 1px solid var(--line); color: var(--text-3); }
@@ -128,6 +127,7 @@ a { color: inherit; text-decoration: none; }
 .select-box select, .select-chip select { appearance: none; -webkit-appearance: none; border: 0; background: transparent; outline: 0; font-size: 13px; font-weight: 600; padding-right: 2px; }
 .select-box select option, .select-chip select option { background: var(--s2); }
 .select-chip { height: 34px; background: var(--s3); border-color: var(--s3); }
+.chip--static { cursor: default; color: var(--text); font-weight: 600; background: var(--s3); border-color: var(--s3); }
 
 .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border: 1px solid var(--line-2); }
 .segmented button { min-height: 38px; border: 0; border-left: 1px solid var(--line-2); background: transparent; color: var(--text-2); font-size: 13px; font-weight: 500; padding: 4px 6px; line-height: 1.2; }

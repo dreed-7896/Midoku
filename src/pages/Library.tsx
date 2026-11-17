@@ -4,22 +4,17 @@ import { Chip, IconButton, PageHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { EntryGrid } from '../components/LibraryCards'
 import { TLink as Link } from '../components/Nav'
-import { newCount, readCount, resumeChapter, unreadCount, useStore, visibleChapters } from '../data/store'
+import { newCount, resumeChapter, statusOf, unreadCount, useStore } from '../data/store'
 import { Entry, GroupBy, LibraryFilters, LibraryTab, SortBy, Status, STATUS_LABEL } from '../data/types'
 
-const EMPTY: LibraryFilters = { statuses: [], newOnly: false, progress: 'any' }
+const EMPTY: LibraryFilters = { statuses: [], newOnly: false }
 const SORT_LABEL: Record<SortBy, string> = { recent: 'Recently read', title: 'Title', added: 'Recently added', updated: 'Recently updated' }
 const GROUP_LABEL: Record<GroupBy, string> = { none: 'None', tab: 'Tab', status: 'Status', source: 'Source' }
-const PROGRESS_LABEL: Record<LibraryFilters['progress'], string> = { any: 'Any', notStarted: 'Not started', inProgress: 'In progress', completed: 'Fully read' }
 
 function matches(e: Entry, f: LibraryFilters) {
-  if (f.statuses.length && !f.statuses.includes(e.status)) return false
+  if (f.statuses.length && !f.statuses.includes(statusOf(e))) return false
   if (f.newOnly && newCount(e) === 0) return false
   if (f.tag && !e.tags.includes(f.tag)) return false
-  const read = readCount(e), total = visibleChapters(e).length
-  if (f.progress === 'notStarted' && read > 0) return false
-  if (f.progress === 'inProgress' && !(read > 0 && read < total)) return false
-  if (f.progress === 'completed' && !(total > 0 && read === total)) return false
   return true
 }
 
@@ -48,7 +43,7 @@ export default function Library() {
   const strip = useRef<HTMLDivElement>(null)
 
   const roots = store.entries.filter((e) => e.inLibrary && !e.parentId)
-  const filterCount = filters.statuses.length + (filters.newOnly ? 1 : 0) + (filters.progress !== 'any' ? 1 : 0)
+  const filterCount = filters.statuses.length + (filters.newOnly ? 1 : 0)
   const unreadTotal = roots.reduce((n, e) => n + unreadCount(e), 0)
   const tab = tabs[Math.min(active, tabs.length - 1)]
   const q = query.trim().toLowerCase()
@@ -145,7 +140,6 @@ export default function Library() {
         <div className="chips pad-x pad-t-sm">
           {filters.statuses.map((s) => <Chip key={s} removable onClick={() => toggleStatus(s)}>Status: {STATUS_LABEL[s]}</Chip>)}
           {filters.newOnly && <Chip removable onClick={() => setFilters((f) => ({ ...f, newOnly: false }))}>New chapters</Chip>}
-          {filters.progress !== 'any' && <Chip removable onClick={() => setFilters((f) => ({ ...f, progress: 'any' }))}>{PROGRESS_LABEL[filters.progress]}</Chip>}
         </div>
       )}
 
@@ -168,12 +162,6 @@ export default function Library() {
         <div className="label label--flush">Status</div>
         <div className="chips wrap">
           {(Object.keys(STATUS_LABEL) as Status[]).map((s) => <Chip key={s} on={filters.statuses.includes(s)} onClick={() => toggleStatus(s)}>{STATUS_LABEL[s]}</Chip>)}
-        </div>
-        <div className="label">Reading progress</div>
-        <div className="segmented">
-          {(Object.keys(PROGRESS_LABEL) as LibraryFilters['progress'][]).map((p) => (
-            <button key={p} type="button" className={filters.progress === p ? 'is-on' : ''} onClick={() => setFilters((f) => ({ ...f, progress: p }))}>{PROGRESS_LABEL[p]}</button>
-          ))}
         </div>
         <label className="toggle-row">
           <span><Icon name="sparkle" size={16} stroke={2} /> Only titles with new chapters</span>
@@ -269,7 +257,6 @@ function mergeUser(f: LibraryFilters): Partial<LibraryFilters> {
   const out: Partial<LibraryFilters> = {}
   if (f.statuses.length) out.statuses = f.statuses
   if (f.newOnly) out.newOnly = true
-  if (f.progress !== 'any') out.progress = f.progress
   return out
 }
 
@@ -277,7 +264,7 @@ function group(list: Entry[], by: GroupBy, sourceName: (id: string) => string, t
   const map = new Map<string, Entry[]>()
   const add = (k: string, e: Entry) => map.set(k, [...(map.get(k) ?? []), e])
   for (const e of list) {
-    if (by === 'status') add(STATUS_LABEL[e.status], e)
+    if (by === 'status') add(STATUS_LABEL[statusOf(e)], e)
     else if (by === 'source') add(sourceName(e.sources.find((s) => s.main)?.sourceId ?? ''), e)
     else if (e.tabs.length === 0) add('No tab', e)
     else e.tabs.forEach((t) => add(tabName(t), e))

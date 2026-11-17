@@ -4,8 +4,8 @@ import { TLink as Link, useNav } from '../components/Nav'
 import { Cover, PageThumb, SourceIcon } from '../components/Art'
 import { Chip, IconButton, SectionHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
-import { agoLabel, newCount, progressPct, readCount, resumeChapter, unreadCount, useStore, visibleChapters } from '../data/store'
-import { Chapter, Status, STATUS_LABEL } from '../data/types'
+import { agoLabel, newCount, progressPct, readCount, resumeChapter, statusOf, unreadCount, useStore, visibleChapters } from '../data/store'
+import { Chapter, STATUS_LABEL } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
 
@@ -119,13 +119,9 @@ export default function EntryPage() {
       </div>
 
       <div className="chips pad-x pad-t">
-        <label className="select-chip">
-          <span className={`dot dot--status-${entry.status}`} />
-          <select value={entry.status} onChange={(e) => store.setStatus(entry.id, e.target.value as Status)} aria-label="Reading status">
-            {(Object.keys(STATUS_LABEL) as Status[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-          </select>
-          <Icon name="chevronDown" size={14} stroke={2} />
-        </label>
+        <span className="chip chip--static" title="Set automatically from your reading progress">
+          <span className={`dot dot--status-${statusOf(entry)}`} />{STATUS_LABEL[statusOf(entry)]}
+        </span>
         {userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => (
           <button key={t.id} type="button" className="chip" onClick={() => setFiling(true)}>{t.name}</button>
         ))}

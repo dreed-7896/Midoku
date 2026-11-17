@@ -29,7 +29,6 @@ function useActions(set: (fn: (s: State) => State) => void) {
     let toastTimer: ReturnType<typeof setTimeout> | undefined
     return {
       editEntry,
-      setStatus: (id: string, status: Status) => editEntry(id, (e) => ({ ...e, status })),
       toggleLibrary: (id: string) => editEntry(id, (e) => ({ ...e, inLibrary: !e.inLibrary })),
       toggleFollow: (id: string, sourceId: string) =>
         editEntry(id, (e) => ({ ...e, sources: e.sources.map((s) => (s.sourceId === sourceId ? { ...s, following: !s.following } : s)) })),
@@ -120,6 +119,12 @@ export const visibleChapters = (e: Entry) => e.chapters.filter((c) => !c.removed
 export const unreadCount = (e: Entry) => visibleChapters(e).filter((c) => !c.read).length
 export const newCount = (e: Entry) => visibleChapters(e).filter((c) => c.isNew && !c.read).length
 export const readCount = (e: Entry) => visibleChapters(e).filter((c) => c.read).length
+
+/** Reading until every chapter is read; a new chapter turns a completed title back to reading. */
+export function statusOf(e: Entry): Status {
+  const all = visibleChapters(e)
+  return all.length > 0 && all.every((c) => c.read) ? 'completed' : 'reading'
+}
 
 /** The chapter the reader resumes: the first unread one in reading order. */
 export function resumeChapter(e: Entry): Chapter | undefined {

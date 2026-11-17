@@ -1,11 +1,9 @@
-export type Status = 'planned' | 'reading' | 'completed' | 'onHold' | 'dropped'
+/** Worked out from reading progress: completed once every chapter is read. */
+export type Status = 'reading' | 'completed'
 
 export const STATUS_LABEL: Record<Status, string> = {
-  planned: 'Planned',
   reading: 'Reading',
   completed: 'Completed',
-  onHold: 'On hold',
-  dropped: 'Dropped',
 }
 
 export interface CoverArt {
@@ -66,7 +64,6 @@ export interface Entry {
   author: string
   art: CoverArt
   publishing: 'Ongoing' | 'Completed' | 'Hiatus'
-  status: Status
   /** Ids of the library tabs (categories) this entry shows in. */
   tabs: string[]
   tags: string[]
@@ -93,7 +90,6 @@ export interface CatalogItem {
 export interface LibraryFilters {
   statuses: Status[]
   newOnly: boolean
-  progress: 'any' | 'notStarted' | 'inProgress' | 'completed'
   tag?: string
 }
 
