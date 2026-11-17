@@ -1,18 +1,18 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
-  DbLibrary, deleteEntrySource, deleteInserted, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
+  DbLibrary, deleteEntryRow, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
   saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
 import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
 import {
-  applyStates, entriesFromDb, entryRow, expandSplits, insertedFromRow, shownPages, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
+  applyCustom, applyStates, entriesFromDb, LOCAL, entryRow, expandSplits, insertedFromRow, shownPages, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
   sourceRow, stateRow, statesOf, tabRow, toTab, withDownloads, withInserted,
 } from './library'
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
 import { useSettings } from './settings'
 import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
-import type { Chapter, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
+import type { Chapter, CopiedChapter, CustomDetails, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
 
 /*
  * Where things live:
@@ -70,13 +70,15 @@ const newestUpload = (lists: { chapters: SChapter[] }[]) =>
 function enrich(e: Entry, m: SManga): Entry {
   const total = m.chapters?.totalCount ?? 0
   const read = e.counts ? e.counts.total - e.counts.unread : 0
-  return {
+  const cover = assetUrl(m.thumbnailUrl) || e.original?.coverUrl
+  return applyCustom({
     ...e,
-    coverUrl: assetUrl(m.thumbnailUrl) || e.coverUrl,
+    original: e.original && { ...e.original, coverUrl: cover },
+    coverUrl: e.original ? e.coverUrl : cover,
     updatedAgo: hoursSince(m.latestUploadedChapter?.uploadDate) ?? e.updatedAgo,
     sources: e.sources.map((x) => (x.main ? { ...x, chapters: total, name: m.source?.displayName ?? x.name, iconUrl: m.source?.iconUrl ? assetUrl(m.source.iconUrl) : x.iconUrl } : x)),
     counts: e.chapters.length ? e.counts : { total: Math.max(total, read), unread: Math.max(0, total - read) },
-  }
+  })
 }
 
 // Store
@@ -103,6 +105,8 @@ interface State {
   offline: boolean
   /** Progress of the check for new chapters. */
   updating: { done: number; total: number } | null
+  /** Chapters copied from a title, ready to paste into another. */
+  clipboard: CopiedChapter[]
 }
 
 const initial: State = {
@@ -115,9 +119,15 @@ const initial: State = {
   server: { status: 'off' },
   offline: false,
   updating: null,
+  clipboard: [],
 }
 
 const SAMPLE_QUEUE = initial.queue
+
+/** Copied chapters stay on the device until pasted or discarded, across reloads. */
+const CLIPBOARD_KEY = 'midoku.clipboard'
+const keepClipboard = (list: CopiedChapter[]) => { try { localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(list)) } catch { /* kept for this session */ } }
+try { initial.clipboard = JSON.parse(localStorage.getItem(CLIPBOARD_KEY) ?? '[]') } catch { /* starts empty */ }
 
 /** Finds a title by app id, or by the server id of any of its linked sources. */
 function findIn(entries: Entry[], id: string) {
@@ -155,8 +165,9 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
     /** Saves the title in the database the first time it matters; returns its row id. */
     const ensureEntry = (id: string): string | undefined => {
       const e = find(id)
-      if (!e?.remote || !canSave()) return undefined
+      if (!e || !canSave()) return undefined
       if (e.dbId) return e.dbId
+      if (!e.remote) return undefined
       const dbId = crypto.randomUUID()
       editEntry(e.id, (x) => ({ ...x, dbId }))
       saveEntry(entryRow(e, dbId))
@@ -224,8 +235,12 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       set((s) => {
         const prev = findIn(s.entries, fresh.id)
         if (!prev) return { ...s, entries: [...s.entries, { ...fresh, chapters: withDownloads(fresh.chapters) }] }
-        const next: Entry = {
+        const next: Entry = applyCustom({
           ...fresh,
+          original: undefined,
+          custom: prev.custom,
+          position: prev.position,
+          renumber: prev.renumber,
           id: prev.id,
           dbId: prev.dbId,
           tabs: prev.tabs,
@@ -245,7 +260,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           splits: prev.splits ?? fresh.splits,
           inserted: prev.inserted ?? fresh.inserted,
           chapters: fresh.remote?.chaptersLoaded ? withDownloads(applyStates(withInserted(fresh.chapters, prev.inserted ?? fresh.inserted), statesOf(prev.chapters))) : prev.chapters,
-        }
+        })
         return { ...s, entries: s.entries.map((e) => (e === prev ? next : e)) }
       })
 
@@ -265,12 +280,12 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.mangaId != null)
         const lists = await Promise.all(sources.map((s, i) =>
           getChapters(s.mangaId!, refresh)
-            .then((chapters) => ({ sourceId: s.sourceId, mangaUrl: s.mangaUrl, name: s.name, chapters }))
+            .then((chapters) => ({ sourceId: s.sourceId, mangaUrl: s.mangaUrl, name: s.name, segment: s.segment, chapters }))
             // Only the main source has to answer; another source failing just leaves its versions out.
             .catch((err) => { if (i === 0) throw err; return null })))
         const ok = lists.filter((l): l is NonNullable<typeof l> => !!l)
         const fresh = toEntry(manga)
-        mergeEntry({ ...fresh, chapters: mergeChapters(ok), remote: { ...fresh.remote!, chaptersLoaded: true } })
+        mergeEntry({ ...fresh, chapters: mergeChapters(ok, e.renumber), remote: { ...fresh.remote!, chaptersLoaded: true } })
         editEntry(e.id, (x) => ({
           ...x,
           updatedAgo: hoursSince(newestUpload(ok)) ?? x.updatedAgo,
@@ -310,8 +325,8 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           try {
             const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.following && s.mangaId != null)
             if (!sources.length) throw new Error('No followed source')
-            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, name: s.name, chapters }))))
-            const merged = mergeChapters(lists)
+            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, name: s.name, segment: s.segment, chapters }))))
+            const merged = mergeChapters(lists, e.renumber)
             const cur = find(e.id)
             if (cur) {
               const before = cur.chapters.length || (cur.counts?.total ?? 0)
@@ -571,6 +586,170 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         set((s) => ({ ...s, tabs: [...s.tabs, { id, kind: 'smart', name, filters }] }))
         writeTab(id)
       },
+      /** Edits a title's details; empty values go back to the server's. */
+      editDetails: (id: string, patch: CustomDetails) => {
+        const e = find(id)
+        if (!e) return
+        const custom: CustomDetails = { ...e.custom, ...patch }
+        for (const k of Object.keys(custom) as (keyof CustomDetails)[]) if (custom[k] === undefined || custom[k] === '') delete custom[k]
+        // A series made in Midoku has nothing from a server: its details are all its own.
+        if (e.sources.length === 0 && !custom.title) custom.title = e.title
+        editEntry(e.id, (x) => applyCustom(x, custom))
+        const dbId = ensureEntry(e.id)
+        if (dbId) updateEntry(dbId, { custom })
+      },
+      /** Removes titles from the library (they stay in the database with their progress). */
+      removeFromLibrary: (ids: string[]) => {
+        for (const id of ids) {
+          const e = find(id)
+          if (!e?.inLibrary) continue
+          editEntry(e.id, (x) => ({ ...x, inLibrary: false }))
+          if (e.dbId && canSave()) updateEntry(e.dbId, { in_library: false })
+        }
+      },
+      /**
+       * Groups titles (in the given order) into a new series that holds them, or merges them into one title
+       * whose chapters follow each other. Returns the id of the title to open.
+       */
+      groupTitles: async (ids: string[], opts: { mode: 'nest' | 'merge'; title?: string; inheritFrom?: string; renumber?: boolean }): Promise<string | undefined> => {
+        const parts = ids.map(find).filter((e): e is Entry => !!e)
+        if (parts.length < 2) return undefined
+        const from = (opts.inheritFrom && find(opts.inheritFrom)) || parts[0]
+        const details: CustomDetails = { title: opts.title?.trim() || from.title, author: from.author, description: from.description, cover: from.coverUrl }
+        const server = get().server.status !== 'off'
+        if (server && !canSave()) return undefined
+
+        if (opts.mode === 'nest') {
+          const dbId = server ? crypto.randomUUID() : undefined
+          const id = server ? `${LOCAL}${dbId}` : `${LOCAL}-${Date.now().toString(36)}`
+          const tabs = [...new Set(parts.flatMap((p) => p.tabs))]
+          const series = applyCustom({
+            id, dbId, title: '', author: '', description: '', art: from.art, publishing: from.publishing, tabs, tags: [], sources: [], chapters: [],
+            inLibrary: true, updatedAgo: Math.min(...parts.map((p) => p.updatedAgo)), addedOrder: Date.now(), counts: { total: 0, unread: 0 },
+            original: { title: '', author: '', description: '' },
+          }, details)
+          set((s) => ({
+            ...s,
+            entries: [...s.entries.map((e) => { const i = parts.findIndex((p) => p.id === e.id); return i < 0 ? e : { ...e, parentId: id, position: i } }), series],
+          }))
+          if (dbId) {
+            saveEntry(entryRow(series, dbId))
+            tabs.forEach((t) => setEntryTab(dbId, t, true))
+            parts.forEach((p, i) => { const childDb = ensureEntry(p.id); if (childDb) updateEntry(childDb, { parent_id: dbId, position: i }) })
+          }
+          toast(`Grouped ${parts.length} titles`)
+          return id
+        }
+
+        // Merge: the first title keeps its row; the others' sources follow as later segments.
+        const [keep, ...rest] = parts
+        if (server && parts.some((p) => !p.remote)) { toast('Only titles from the server can be merged'); return undefined }
+        const keepDb = server ? ensureEntry(keep.id) : undefined
+        const restDb = rest.map((p) => (server ? ensureEntry(p.id) : undefined))
+        const segOf = (p: Entry) => Math.max(0, ...p.sources.map((x) => x.segment ?? 0))
+        let next = segOf(keep) + 1
+        const offsets: number[] = []
+        const sources = [...keep.sources]
+        for (const p of rest) {
+          offsets.push(next)
+          for (const x of p.sources) {
+            if (!sources.some((y) => y.sourceId === x.sourceId && y.mangaUrl === x.mangaUrl)) sources.push({ ...x, main: false, segment: next + (x.segment ?? 0) })
+          }
+          next += segOf(p) + 1
+        }
+        const custom: CustomDetails = { ...keep.custom, ...(from !== keep || opts.title?.trim() ? details : {}) }
+        const restIds = new Set(rest.map((p) => p.id))
+        // Sample titles have their chapters in memory: they are put one after another.
+        const chapters = server ? [] : parts.flatMap((p, i) => [...p.chapters].sort((a, b) => a.number - b.number).map((c) => ({ ...c, id: i ? `m${i}-${c.id}` : c.id })))
+          .map((c, i) => ({ ...c, number: i + 1, label: opts.renumber ? `Chapter ${i + 1}` : c.label }))
+        set((s) => ({
+          ...s,
+          entries: s.entries.filter((e) => !restIds.has(e.id)).map((e) => {
+            if (e.parentId && restIds.has(e.parentId)) return { ...e, parentId: keep.id }
+            if (e.id !== keep.id) return e
+            return applyCustom({
+              ...e, sources, renumber: !!opts.renumber, inLibrary: true,
+              tabs: [...new Set(parts.flatMap((p) => p.tabs))],
+              chapters: server ? [] : chapters,
+              remote: e.remote && { ...e.remote, chaptersLoaded: false },
+            }, custom)
+          }),
+        }))
+        if (keepDb && restDb.every(Boolean)) {
+          updateEntry(keepDb, { custom, renumber: !!opts.renumber, in_library: true })
+          mergeEntryRows(keepDb, restDb as string[], offsets)
+          await flushWrites().catch(() => false)
+          await loadEntry(keep.id).catch(() => {})
+        }
+        toast(`Merged ${parts.length} titles`)
+        return keep.id
+      },
+      /** Keeps chapters to paste into another title. */
+      copyChapters: (id: string, chapterIds: Set<string>) => {
+        const e = find(id)
+        if (!e) return
+        const ids = new Set([...chapterIds].map(physicalIdOf))
+        const copied: CopiedChapter[] = e.chapters.filter((c) => ids.has(c.id) && c.sourceUrl && c.remoteId).map((c) => ({
+          sourceId: c.sourceId,
+          mangaUrl: e.inserted?.find((i) => i.id === c.insertId)?.mangaUrl ?? e.sources.find((x) => x.sourceId === c.sourceId)?.mangaUrl ?? '',
+          chapterUrl: c.sourceUrl!, remoteId: c.remoteId, number: c.number, label: c.label, fromTitle: e.title,
+        }))
+        if (!copied.length) { toast(e.remote ? 'Nothing to copy' : 'Copying chapters needs a server'); return }
+        set((s) => ({ ...s, clipboard: copied }))
+        keepClipboard(copied)
+        toast(`Copied ${copied.length} chapter${copied.length === 1 ? '' : 's'} · paste from another title's ⋯ menu`)
+      },
+      clearClipboard: () => { set((s) => ({ ...s, clipboard: [] })); keepClipboard([]) },
+      /**
+       * Pastes copied chapters: as chapters of their own, as another version of the chapter with that number,
+       * or replacing it (the old one is hidden and can be restored).
+       */
+      pasteChapters: (id: string, plan: { copy: CopiedChapter; action: 'add' | 'separate' | 'version' | 'replace'; number: number; replaces?: string }[]) => {
+        const e = find(id)
+        if (!e || !plan.length) return
+        const added: InsertedChapter[] = plan.map(({ copy, action, number }) => ({
+          id: crypto.randomUUID(), sourceId: copy.sourceId, mangaUrl: copy.mangaUrl, chapterUrl: copy.chapterUrl, remoteId: copy.remoteId,
+          number, label: copy.label, fromTitle: copy.fromTitle, mode: action === 'version' ? 'version' : 'chapter',
+        }))
+        editEntry(e.id, (x) => {
+          const inserted = [...(x.inserted ?? []), ...added]
+          return { ...x, inserted, chapters: withDownloads(applyStates(withInserted(x.chapters, inserted), [])) }
+        })
+        const dbId = ensureEntry(e.id)
+        if (dbId) added.forEach((i) => saveInserted(insertedRow(dbId, i)))
+        const replaced = new Set(plan.map((p) => p.replaces).filter((r): r is string => !!r))
+        if (replaced.size) {
+          editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (replaced.has(c.id) ? { ...c, removed: true } : c)) }))
+          saveChapters(e.id, replaced)
+        }
+        toast(`Pasted ${added.length} chapter${added.length === 1 ? '' : 's'}`)
+      },
+      /** Moves a chapter in the reading order: after another chapter, or first when `afterId` is null. */
+      moveChapter: (id: string, chapterId: string, afterId: string | null) => {
+        const e = find(id)
+        if (!e) return
+        const moving = physicalIdOf(chapterId)
+        const list = e.chapters.filter((c) => !c.removed && c.id !== moving).sort((a, b) => a.number - b.number)
+        const i = afterId ? list.findIndex((c) => c.id === physicalIdOf(afterId)) : -1
+        if (afterId && i < 0) return
+        const before = list[i]?.number
+        const after = list[i + 1]?.number
+        const order = before === undefined ? (after ?? 1) - 1 : after === undefined ? before + 1 : (before + after) / 2
+        editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (c.id === moving ? { ...c, order, number: order, sourceNumber: c.sourceNumber ?? c.number } : c)) }))
+        saveChapters(e.id, new Set([moving]))
+        const c = e.chapters.find((x) => x.id === moving)
+        toast(`Moved ${c?.label ?? 'chapter'}${afterId ? ` after ${list[i].label}` : ' to the start'}`)
+      },
+      /** Puts moved chapters back where their source has them (one chapter, or all of them). */
+      resetOrder: (id: string, chapterId?: string) => {
+        const e = find(id)
+        if (!e) return
+        const ids = new Set(e.chapters.filter((c) => c.order != null && (!chapterId || c.id === physicalIdOf(chapterId))).map((c) => c.id))
+        if (!ids.size) return
+        editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (ids.has(c.id) ? { ...c, order: undefined, number: c.sourceNumber ?? c.number } : c)) }))
+        saveChapters(e.id, ids)
+        toast(ids.size === 1 ? 'Back in its original place' : `${ids.size} chapters back in their original places`)
+      },
       toast,
     }
   }, [set, get])
@@ -780,7 +959,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...actions,
     entry: (id) => findIn(state.entries, id),
     source: (id) => state.sources.find((s) => s.id === id),
-    children: (id) => state.entries.filter((e) => e.parentId === id && e.inLibrary),
+    children: (id) => state.entries.filter((e) => e.parentId === id && e.inLibrary).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
   }), [state, queue, actions])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
@@ -801,8 +980,9 @@ export const unreadCount = (e: Entry) => (summaryOnly(e) ? e.counts!.unread : vi
 export const newCount = (e: Entry) => (summaryOnly(e) ? e.counts!.unread : visibleChapters(e).filter((c) => c.isNew && !c.read).length)
 export const readCount = (e: Entry) => (summaryOnly(e) ? e.counts!.total - e.counts!.unread : visibleChapters(e).filter((c) => c.read).length)
 
-/** Reading until every chapter is read; a new chapter turns a completed title back to reading. */
+/** A status set by hand wins; otherwise reading until every chapter is read (a new chapter turns it back to reading). */
 export function statusOf(e: Entry): Status {
+  if (e.custom?.status) return e.custom.status
   const total = totalCount(e)
   return total > 0 && readCount(e) === total ? 'completed' : 'reading'
 }

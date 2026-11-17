@@ -5,7 +5,7 @@ import {
   FilterHorizontalIcon, FilterIcon, Folder01Icon, Globe02Icon, Home09Icon, Layers01Icon, LibraryIcon, MoreHorizontalIcon,
   Notification03Icon, PinIcon, PlayIcon, PuzzleIcon, Refresh01Icon, Search01Icon, SecurityWarningIcon, Sorting01Icon,
   SparklesIcon, Tick02Icon, Undo02Icon, Settings01Icon, FaceIdIcon, SquareLock02Icon, PreviousIcon, NextIcon,
-  ScrollVerticalIcon, BookOpen02Icon, InformationCircleIcon,
+  ScrollVerticalIcon, BookOpen02Icon, InformationCircleIcon, ShuffleIcon,
 } from '@hugeicons/core-free-icons'
 
 const ICONS = {
@@ -52,6 +52,7 @@ const ICONS = {
   webtoon: ScrollVerticalIcon,
   paged: BookOpen02Icon,
   info: InformationCircleIcon,
+  shuffle: ShuffleIcon,
 } satisfies Record<string, IconSvgElement>
 
 /** Icons drawn solid instead of outlined. */

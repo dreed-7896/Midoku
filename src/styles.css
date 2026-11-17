@@ -525,3 +525,38 @@ button.check-row { width: 100%; background: none; border-left: 0; border-right: 
 .splitter__sum { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .splitter__sum strong { font-size: 14px; }
 .splitter__sum small { color: var(--text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Edit details, grouping, pasting */
+.form-input { display: block; width: 100%; min-height: 46px; padding: 11px 14px; background: var(--s1); border: 1px solid var(--line); border-radius: 0; color: var(--text); font: inherit; font-size: 16px; outline: 0; }
+.form-input:focus { border-color: var(--accent); }
+.form-input--area { min-height: 110px; resize: vertical; line-height: 1.45; }
+.edit-cover { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 10px; }
+.edit-cover__img { width: 96px; flex: none; }
+.edit-cover__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.edit-cover__actions .btn { cursor: pointer; }
+.segmented--sm button { min-height: 32px; font-size: 12px; padding: 2px 8px; }
+.paste-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.paste-row:first-child { border-top: 0; }
+.order-row { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 6px 10px; border-top: 1px solid var(--line); }
+.order-row:first-child { border-top: 0; }
+.order-row__cover { width: 34px; flex: none; }
+.order-row .grow { min-width: 0; }
+.order-row .icon-btn:disabled { opacity: 0.3; }
+.icon-btn--up svg { transform: rotate(180deg); }
+.plain-btn { background: transparent; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; }
+.dupe-group { border: 1px solid var(--line); margin-bottom: 14px; padding-bottom: 10px; }
+.dupe-group .btn--block { width: calc(100% - 20px); margin: 6px 10px 0; }
+.btn--flush { margin-top: 0; }
+input[type='radio'] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0; border: 2px solid var(--line-2); flex: none; position: relative; }
+input[type='radio']:checked { border-color: var(--accent); }
+input[type='radio']:checked::after { content: ''; position: absolute; inset: 4px; background: var(--accent); }
+
+/* Picking titles in the library */
+.card.is-picking, .series.is-picking { position: relative; text-align: left; font: inherit; background: transparent; border: 0; padding: 0; width: 100%; }
+.series.is-picking { background: var(--s1); }
+.is-picking.is-picked .thumb, .is-picking.is-picked .series__front { outline: 2px solid var(--text); outline-offset: 2px; }
+.pick-check { position: absolute; top: 6px; left: 6px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); border: 2px solid var(--text); color: var(--on-accent); z-index: 2; }
+.pick-check.is-on { background: var(--accent); border-color: var(--accent); }
+
+/* The selection bar takes the place of the floating resume card. */
+body:has(.action-bar) .mini { display: none; }

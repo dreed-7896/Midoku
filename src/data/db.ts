@@ -1,6 +1,6 @@
 import { createClient, type Session } from '@supabase/supabase-js'
 import { useSyncExternalStore } from 'react'
-import type { LibraryFilters, LibraryTab } from './types'
+import type { CustomDetails, LibraryFilters, LibraryTab } from './types'
 
 /**
  * Midoku's own database (Supabase). It holds the library, tabs, reading progress and chapter marks
@@ -92,6 +92,9 @@ export interface EntryRow {
   in_library: boolean
   added_at?: string
   last_read_at: string | null
+  custom: CustomDetails
+  position: number
+  renumber: boolean
 }
 export interface EntrySourceRow {
   entry_id: string
@@ -101,6 +104,7 @@ export interface EntrySourceRow {
   source_name: string | null
   following: boolean
   is_main: boolean
+  segment: number
 }
 export interface ChapterStateRow {
   entry_id: string
@@ -112,6 +116,7 @@ export interface ChapterStateRow {
   bookmarked: boolean
   removed: boolean
   preferred: boolean
+  position: number | null
 }
 export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }
 export interface InsertedRow {
@@ -124,6 +129,7 @@ export interface InsertedRow {
   number: number
   label: string
   from_title: string
+  mode: 'chapter' | 'version'
 }
 export interface TabRow {
   id: string
@@ -149,8 +155,8 @@ async function all<T>(q: PromiseLike<{ data: T[] | null; error: { message: strin
 
 export async function loadLibrary(): Promise<DbLibrary> {
   const [entries, sources, tabs, entryTabs, progress] = await Promise.all([
-    all<EntryRow>(db.from('entries').select('id, title, author, cover_path, description, tags, publishing, parent_id, in_library, added_at, last_read_at')),
-    all<EntrySourceRow>(db.from('entry_sources').select('entry_id, source_id, manga_url, server_manga_id, source_name, following, is_main')),
+    all<EntryRow>(db.from('entries').select('id, title, author, cover_path, description, tags, publishing, parent_id, in_library, added_at, last_read_at, custom, position, renumber')),
+    all<EntrySourceRow>(db.from('entry_sources').select('entry_id, source_id, manga_url, server_manga_id, source_name, following, is_main, segment')),
     all<TabRow>(db.from('tabs').select('id, kind, name, filters, position').order('position')),
     all<{ entry_id: string; tab_id: string }>(db.from('entry_tabs').select('entry_id, tab_id')),
     all<{ entry_id: string; read_count: number }>(db.from('entry_progress').select('entry_id, read_count')),
@@ -161,9 +167,9 @@ export async function loadLibrary(): Promise<DbLibrary> {
 /** A saved title's reading state, split chapters and inserted chapters. */
 export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
-    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred').eq('entry_id', entryId)),
+    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
-    all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
+    all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title, mode').eq('entry_id', entryId)),
   ])
   return { states, splits, inserts }
 }
@@ -177,6 +183,7 @@ type Op =
   | { kind: 'upsert'; table: string; rows: object[]; onConflict?: string }
   | { kind: 'update'; table: string; patch: object; match: Match }
   | { kind: 'delete'; table: string; match: Match }
+  | { kind: 'rpc'; fn: string; args: object }
 
 const OUTBOX_KEY = 'midoku.outbox'
 let outbox: Op[] = (() => { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) ?? '[]') } catch { return [] } })()
@@ -197,6 +204,7 @@ export const onWriteError = (fn: (message: string) => void) => { errorListeners.
 const networkError = (message: string) => !navigator.onLine || /fetch|network|load failed|timed? ?out/i.test(message)
 
 async function send(op: Op) {
+  if (op.kind === 'rpc') { fail((await db.rpc(op.fn, op.args)).error); return }
   const t = db.from(op.table)
   const { error } = await (op.kind === 'upsert' ? t.upsert(op.rows, op.onConflict ? { onConflict: op.onConflict } : undefined)
     : op.kind === 'update' ? t.update(op.patch).match(op.match)
@@ -256,3 +264,7 @@ export const deleteSplit = (entryId: string, sourceId: string, chapterUrl: strin
   enqueue({ kind: 'delete', table: 'chapter_splits', match: { entry_id: entryId, source_id: sourceId, chapter_url: chapterUrl } })
 export const saveInserted = (row: InsertedRow) => enqueue({ kind: 'upsert', table: 'inserted_chapters', rows: [row] })
 export const deleteInserted = (id: string) => enqueue({ kind: 'delete', table: 'inserted_chapters', match: { id } })
+export const deleteEntryRow = (id: string) => enqueue({ kind: 'delete', table: 'entries', match: { id } })
+/** Merges titles into `keep` in the database (see merge_entries in the migrations). */
+export const mergeEntryRows = (keep: string, parts: string[], segments: number[]) =>
+  enqueue({ kind: 'rpc', fn: 'merge_entries', args: { keep, parts, segments } })

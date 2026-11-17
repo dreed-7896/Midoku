@@ -3,8 +3,9 @@ import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, ServerStatus, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { Banner, Empty, Loading } from '../components/Status'
-import { EntryGrid } from '../components/LibraryCards'
-import { TLink as Link } from '../components/Nav'
+import { EntryGrid, type Pick } from '../components/LibraryCards'
+import { DuplicatesSheet, GroupSheet } from '../components/LibraryTools'
+import { TLink as Link, useNav } from '../components/Nav'
 import { newCount, resumeChapter, statusOf, unreadCount, useStore } from '../data/store'
 import { Entry, GroupBy, LibraryFilters, LibraryTab, SortBy, Status, STATUS_LABEL } from '../data/types'
 
@@ -40,6 +41,12 @@ export default function Library() {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [sheet, setSheet] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
+  const [tool, setTool] = useState<null | 'group' | 'tabs' | 'dupes'>(null)
+  const nav = useNav()
+  const shuffleTimer = useRef<ReturnType<typeof setTimeout>>()
+  const shuffleLong = useRef(false)
   const pager = useRef<HTMLDivElement>(null)
   const strip = useRef<HTMLDivElement>(null)
 
@@ -105,6 +112,29 @@ export default function Library() {
     goTab(Math.max(0, active - 1))
   }
 
+  const pick: Pick | undefined = picking ? {
+    selected: new Set(picked),
+    toggle: (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])),
+  } : undefined
+  const stopPicking = () => { setPicking(false); setPicked([]) }
+
+  /** Titles a tab shows, with the titles nested inside them. */
+  const inTab = (t: LibraryTab): Entry[] => {
+    const base = t.kind === 'reading' ? store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
+      : t.kind === 'tab' ? roots.filter((e) => e.tabs.includes(t.id))
+      : t.kind === 'smart' ? roots.filter((e) => matches(e, t.filters))
+      : roots
+    return [...base, ...base.flatMap((e) => store.children(e.id))]
+  }
+  /** Opens a random title from this tab; a long press picks from the whole library. */
+  const shuffle = (everything: boolean) => {
+    const pool = (everything ? store.entries.filter((e) => e.inLibrary) : inTab(tab)).filter((e) => e.sources.length || e.chapters.length)
+    if (!pool.length) { store.toast('Nothing to pick from'); return }
+    const e = pool[Math.floor(Math.random() * pool.length)]
+    if (everything) store.toast('Picked from your whole library')
+    nav.go(`/entry/${e.id}`)
+  }
+
   const search = useMemo(() => (q ? roots.filter((e) => e.title.toLowerCase().includes(q) || e.author.toLowerCase().includes(q)).sort(sorter(sort)) : []), [roots, q, sort])
 
   return (
@@ -114,6 +144,14 @@ export default function Library() {
           <IconButton icon="refresh" label={store.updating ? `Checking ${store.updating.done} of ${store.updating.total}` : 'Check for new chapters'}
             active={!!store.updating} onClick={() => void store.checkUpdates()} />
         )}
+        <button type="button" className="icon-btn" aria-label="Random title from this tab (hold for the whole library)" title="Hold for the whole library"
+          onPointerDown={() => { shuffleLong.current = false; shuffleTimer.current = setTimeout(() => { shuffleLong.current = true; navigator.vibrate?.(10); shuffle(true) }, 450) }}
+          onPointerUp={() => clearTimeout(shuffleTimer.current)} onPointerLeave={() => clearTimeout(shuffleTimer.current)}
+          onContextMenu={(e) => { e.preventDefault(); clearTimeout(shuffleTimer.current); shuffleLong.current = true; shuffle(true) }}
+          onClick={() => { if (!shuffleLong.current) shuffle(false); shuffleLong.current = false }}>
+          <Icon name="shuffle" />
+        </button>
+        <IconButton icon="select" label={picking ? 'Done selecting' : 'Select titles'} active={picking} onClick={() => (picking ? stopPicking() : setPicking(true))} />
         <IconButton icon="search" label="Search library" active={searching} onClick={() => { setSearching((s) => !s); setQuery('') }} />
         <IconButton icon="sliders" label={`Filter and sort, ${filterCount} filters active`} badge={filterCount || undefined} onClick={() => setSheet(true)} />
       </PageHead>
@@ -154,14 +192,14 @@ export default function Library() {
 
       {q ? (
         <div className="pager__panel pager__panel--solo pad-x" data-scroll-active="true">
-          {search.length ? <EntryGrid entries={search} /> : <Empty icon="search" title={`No titles match “${query}”`} detail="This searches titles and authors in your library. Use Search to find new titles." />}
+          {search.length ? <EntryGrid entries={search} pick={pick} /> : <Empty icon="search" title={`No titles match “${query}”`} detail="This searches titles and authors in your library. Use Search to find new titles." />}
         </div>
       ) : (
         <div className="pager" ref={pager} onScroll={onPagerScroll}>
           {tabs.map((t, i) => (
             <div key={t.id} className="pager__panel" data-scroll-active={i === active} role="tabpanel" aria-label={t.name}>
               {/* Only the visible tab and its neighbours are rendered. */}
-              {Math.abs(i - active) <= 1 && <TabPanel tab={t} filters={filters} sort={sort} groupBy={groupBy} roots={roots} />}
+              {Math.abs(i - active) <= 1 && <TabPanel tab={t} filters={filters} sort={sort} groupBy={groupBy} roots={roots} pick={pick} />}
             </div>
           ))}
         </div>
@@ -197,9 +235,43 @@ export default function Library() {
             </div>
           </>
         )}
+        <div className="label">Tidy up</div>
+        <button type="button" className="btn btn--ghost btn--block btn--flush" onClick={() => { setSheet(false); setTool('dupes') }}><Icon name="layers" size={16} />Find duplicates</button>
         <div className="sheet__actions">
           <button type="button" className="btn btn--ghost" onClick={() => setFilters(EMPTY)}>Clear filters</button>
           <button type="button" className="btn btn--accent" onClick={saveFiltersAsTab} disabled={!filterCount}>Save as tab</button>
+        </div>
+      </Sheet>
+
+      {picking && (
+        <div className="action-bar" role="toolbar" aria-label="Title actions">
+          <span className="action-bar__count">{picked.length} selected</span>
+          <button type="button" disabled={picked.length < 2} onClick={() => setTool('group')}><Icon name="layers" size={18} />Group</button>
+          <button type="button" disabled={!picked.length} onClick={() => setTool('tabs')}><Icon name="folder" size={18} />Tabs</button>
+          <button type="button" disabled={!picked.length} onClick={() => {
+            if (!window.confirm(`Remove ${picked.length} title${picked.length === 1 ? '' : 's'} from your library? Progress is kept if you add them back.`)) return
+            store.removeFromLibrary(picked)
+            store.toast(`Removed ${picked.length} title${picked.length === 1 ? '' : 's'}`)
+            stopPicking()
+          }}><Icon name="trash" size={18} />Remove</button>
+        </div>
+      )}
+      {tool === 'group' && <GroupSheet ids={picked} onClose={() => setTool(null)} onDone={stopPicking} />}
+      {tool === 'dupes' && <DuplicatesSheet onClose={() => setTool(null)} />}
+      <Sheet open={tool === 'tabs'} title={`Tabs for ${picked.length} title${picked.length === 1 ? '' : 's'}`} onClose={() => setTool(null)}>
+        <p className="hint">Tick a tab to add every selected title to it; untick to take them all out.</p>
+        {!tabs.some((t) => t.kind === 'tab') && <Empty compact icon="folder" title="No tabs yet" detail="Create one with + in the tab strip." />}
+        <div className="check-list">
+          {tabs.filter((t) => t.kind === 'tab').map((t) => {
+            const list = picked.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
+            const all = list.length > 0 && list.every((e) => e.tabs.includes(t.id))
+            return (
+              <label key={t.id} className="check-row">
+                <span className="check-row__name">{t.name}</span>
+                <input type="checkbox" checked={all} onChange={() => list.forEach((e) => { if (e.tabs.includes(t.id) === all) store.toggleInTab(e.id, t.id) })} />
+              </label>
+            )
+          })}
         </div>
       </Sheet>
     </div>
@@ -213,12 +285,14 @@ export default function Library() {
   }
 }
 
-function TabPanel({ tab, filters, sort, groupBy, roots }: { tab: LibraryTab; filters: LibraryFilters; sort: SortBy; groupBy: GroupBy; roots: Entry[] }) {
+function TabPanel({ tab, filters, sort, groupBy, roots, pick }: { tab: LibraryTab; filters: LibraryFilters; sort: SortBy; groupBy: GroupBy; roots: Entry[]; pick?: Pick }) {
   const store = useStore()
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
-  if (tab.kind === 'reading') return <ReadingQueue />
+  if (tab.kind === 'reading' && !pick) return <ReadingQueue />
 
-  const base = tab.kind === 'tab' ? roots.filter((e) => e.tabs.includes(tab.id)) : roots
+  const base = tab.kind === 'tab' ? roots.filter((e) => e.tabs.includes(tab.id))
+    : tab.kind === 'reading' ? store.queue.map((id) => store.entry(id)).filter((e): e is Entry => !!e)
+    : roots
   const f = tab.kind === 'smart' ? { ...tab.filters, ...mergeUser(filters) } : filters
   const list = base.filter((e) => matches(e, f)).sort(sorter(sort))
 
@@ -233,7 +307,7 @@ function TabPanel({ tab, filters, sort, groupBy, roots }: { tab: LibraryTab; fil
     )
   }
   if (tab.kind !== 'all' || groupBy === 'none') {
-    return <section className="section section--tight pad-x"><EntryGrid entries={list} /></section>
+    return <section className="section section--tight pad-x"><EntryGrid entries={list} pick={pick} /></section>
   }
 
   const tabName = (id: string) => store.tabs.find((t) => t.id === id)?.name ?? id
@@ -256,7 +330,7 @@ function TabPanel({ tab, filters, sort, groupBy, roots }: { tab: LibraryTab; fil
                 <span className="card-meta">{sec.entries.filter((e) => newCount(e) > 0).length || 'No'} with new chapters</span>
               </div>
             ) : (
-              <EntryGrid entries={sec.entries} />
+              <EntryGrid entries={sec.entries} pick={pick} />
             )}
           </section>
         )

@@ -23,6 +23,9 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - Library: tabs you can swipe between (Reading, All, your own tabs, saved filters).
 - Offline: download chapters from a title (or select chapters → Save); the library and titles opened in the last 3 days stay available offline, and changes made offline sync when back online. Settings → Storage shows what is kept.
 - Chapters: long-press a chapter to pick which version (source) to read, split a long chapter into parts, insert a chapter from another title or source, bookmark, download or hide it.
+- Titles: edit the title, author, description, cover and reading status (⋯ → Edit details, or tap the cover).
+- Library: Select titles to group them into a series or merge their chapters into one title, file them into tabs or remove them. The shuffle button opens a random title from the tab (hold for the whole library). Filter sheet → Find duplicates.
+- Chapter order: long-press a chapter → Move; copy chapters (Select → Copy) and paste them into another title from its ⋯ menu.
 - New chapters: checked on launch (every 6 hours) or with the refresh button in Library.
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".
 - App lock: a device passkey (Face ID / Touch ID / fingerprint) guards the app on this device. Turn it on in Settings.

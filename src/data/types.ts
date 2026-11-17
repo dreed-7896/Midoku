@@ -1,9 +1,23 @@
-/** Worked out from reading progress: completed once every chapter is read. */
-export type Status = 'reading' | 'completed'
+/** Reading and Completed are worked out from reading progress; the others are set by hand. */
+export type Status = 'reading' | 'planned' | 'onhold' | 'completed' | 'dropped'
+export type ManualStatus = Exclude<Status, 'reading' | 'completed'>
 
 export const STATUS_LABEL: Record<Status, string> = {
   reading: 'Reading',
+  planned: 'Planned',
+  onhold: 'On hold',
   completed: 'Completed',
+  dropped: 'Dropped',
+}
+
+/** Details edited in Midoku; they win over what the server says. */
+export interface CustomDetails {
+  title?: string
+  author?: string
+  description?: string
+  /** An image address or a picture saved as a data URL. */
+  cover?: string
+  status?: ManualStatus
 }
 
 export interface CoverArt {
@@ -65,9 +79,13 @@ export interface Chapter {
   physicalId?: string
   /** A chapter inserted from another title or source (row id in Midoku's database). */
   insertId?: string
+  /** Place in the reading order set by hand (replaces the number for ordering). */
+  order?: number
+  /** Number before any move, from the source. */
+  sourceNumber?: number
 }
 
-export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string }
+export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string; insertId?: string }
 
 export interface InsertedChapter {
   id: string
@@ -78,6 +96,8 @@ export interface InsertedChapter {
   number: number
   label: string
   fromTitle: string
+  /** 'version': another version of the chapter with the same number, instead of its own chapter. */
+  mode?: 'chapter' | 'version'
 }
 
 export interface EntrySource {
@@ -88,6 +108,8 @@ export interface EntrySource {
   chapters: number
   following: boolean
   main?: boolean
+  /** Merged titles: sources in the same segment are versions; segments follow each other. */
+  segment?: number
   /** Shown when the source is not in the local source list (server sources). */
   name?: string
   iconUrl?: string
@@ -126,6 +148,25 @@ export interface Entry {
   inserted?: InsertedChapter[]
   /** Chapter totals from the library list, used before the chapters themselves are loaded. */
   counts?: { total: number; unread: number }
+  /** Edited details, kept over the server's. */
+  custom?: CustomDetails
+  /** Order inside a series. */
+  position?: number
+  /** Merged titles: chapters numbered 1, 2, 3… */
+  renumber?: boolean
+  /** The details as the server gives them, before edits. */
+  original?: { title: string; author: string; description: string; coverUrl?: string }
+}
+
+/** Chapters copied from a title, waiting to be pasted into another. */
+export interface CopiedChapter {
+  sourceId: string
+  mangaUrl: string
+  chapterUrl: string
+  remoteId?: number
+  number: number
+  label: string
+  fromTitle: string
 }
 
 export interface CatalogItem {
