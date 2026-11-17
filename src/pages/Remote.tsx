@@ -19,7 +19,9 @@ export function sourceError(message: string): { title: string; detail: string } 
   if (/cloudflare|captcha|challenge|\b403\b|\b503\b/i.test(message)) {
     return { title: 'Verification needed', detail: 'This source is behind Cloudflare. Turn on FlareSolverr in Suwayomi, or open the source once in its WebView.' }
   }
-  return { title: "Couldn't load this source", detail: message }
+  // Server errors can carry a whole stack trace; keep the readable start.
+  const first = message.split(/\s+at\s+[\w$./]+\(|\n/)[0].replace(/^Exception while fetching data \([^)]*\)\s*:\s*/, '').trim()
+  return { title: "Couldn't load this source", detail: first.length > 160 ? `${first.slice(0, 160)}…` : first }
 }
 
 function Notice({ title, detail, onRetry }: { title: string; detail: string; onRetry?: () => void }) {
