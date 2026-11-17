@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { TLink as Link, useNav } from '../components/Nav'
 import { Cover } from '../components/Art'
 import { IconButton, PageHead, SectionHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'
@@ -10,6 +10,7 @@ const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
 export default function Home() {
   const store = useStore()
+  const nav = useNav()
   const { entries, queue, updatesSeen } = store
   const [slide, setSlide] = useState(0)
   const rail = useRef<HTMLDivElement>(null)
@@ -33,7 +34,7 @@ export default function Home() {
   return (
     <div className="page">
       <PageHead kicker={`${weekday} · ${totalNew} new chapters`} title="Feed">
-        <IconButton icon="stats" label="Reading stats" onClick={() => store.toast('Reading stats come later')} />
+        <IconButton icon="settings" label="Settings" onClick={() => nav.go('/settings')} />
         <IconButton icon="bell" label={`Notifications, ${totalNew} new`} badge={totalNew || undefined} />
       </PageHead>
 
@@ -55,7 +56,7 @@ export default function Home() {
                       <span className="bar bar--light"><span style={{ width: `${pct}%` }} /></span>
                       <span>{ch.page} / {ch.pages}</span>
                     </div>
-                    <button type="button" className="btn btn--light" onClick={() => store.toast(`Opening ${ch.label} — reader comes next`)}>
+                    <button type="button" className="btn btn--light" onClick={() => nav.go(`/read/${e.id}/${ch.id}`)}>
                       <Icon name="play" size={14} /> Resume
                     </button>
                   </div>

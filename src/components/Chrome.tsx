@@ -1,8 +1,9 @@
 import { ReactNode, useEffect } from 'react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { resumeChapter, useStore } from '../data/store'
 import { Cover } from './Art'
 import { Icon, IconName } from './Icon'
+import { TLink, useNav } from './Nav'
 
 const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: '/', label: 'Home', icon: 'home' },
@@ -12,10 +13,17 @@ const TABS: { to: string; label: string; icon: IconName }[] = [
 ]
 
 export function TabBar() {
+  const nav = useNav()
+  const { pathname } = useLocation()
   return (
     <nav className="tabbar" aria-label="Main">
       {TABS.map((t) => (
-        <NavLink key={t.to} to={t.to} end={t.to === '/'} className={({ isActive }) => `tabbar__item${isActive ? ' is-active' : ''}`}>
+        <NavLink key={t.to} to={t.to} end={t.to === '/'} className={({ isActive }) => `tabbar__item${isActive ? ' is-active' : ''}`}
+          onClick={(e) => {
+            e.preventDefault()
+            if (pathname === t.to) window.scrollTo({ top: 0, behavior: 'smooth' })
+            else nav.go(t.to, { tab: true })
+          }}>
           <Icon name={t.icon} size={22} />
           <span>{t.label}</span>
         </NavLink>
@@ -24,25 +32,33 @@ export function TabBar() {
   )
 }
 
-/** Docked "now reading" strip above the tab bar. */
+/** Floating "continue reading" card above the tab bar. Dismissable; it comes back after the next reading session. */
 export function MiniPlayer() {
-  const { entries } = useStore()
+  const { entries, miniHidden, dismissMini } = useStore()
+  const nav = useNav()
   const { pathname } = useLocation()
-  const current = [...entries].filter((e) => e.inLibrary && e.lastReadAgo !== undefined)
+  const current = [...entries].filter((e) => e.inLibrary && e.lastReadAgo !== undefined && resumeChapter(e))
     .sort((a, b) => (a.lastReadAgo ?? 0) - (b.lastReadAgo ?? 0))[0]
-  if (!current || pathname === '/' || pathname.startsWith('/entry/')) return null
-  const ch = resumeChapter(current)
-  const pct = ch && ch.pages ? Math.round((ch.page / ch.pages) * 100) : 0
+  if (!current || miniHidden || pathname === '/' || pathname.startsWith('/entry/') || pathname === '/settings') return null
+  const ch = resumeChapter(current)!
+  const pct = ch.pages ? Math.round((ch.page / ch.pages) * 100) : 0
   return (
-    <Link to={`/entry/${current.id}`} className="mini" style={{ background: current.art.c1 }}>
-      <Cover art={current.art} title={current.title} className="mini__cover" />
-      <span className="mini__text">
-        <span className="mini__title">{current.title}</span>
-        <span className="mini__sub">{ch ? `${ch.label} · page ${Math.max(ch.page, 1)} of ${ch.pages}` : 'All caught up'}</span>
-      </span>
-      <span className="mini__play" aria-label="Resume"><Icon name="play" size={16} /></span>
+    <div className="mini" style={{ background: current.art.c1 }}>
+      <TLink to={`/entry/${current.id}`} className="mini__main">
+        <Cover art={current.art} title={current.title} className="mini__cover" />
+        <span className="mini__text">
+          <span className="mini__title">{current.title}</span>
+          <span className="mini__sub">{ch.label} · page {Math.max(ch.page, 1)} of {ch.pages}</span>
+        </span>
+      </TLink>
+      <button type="button" className="mini__play" aria-label={`Resume ${current.title}`} onClick={() => nav.go(`/read/${current.id}/${ch.id}`)}>
+        <Icon name="play" size={16} />
+      </button>
+      <button type="button" className="mini__close" aria-label="Dismiss" onClick={dismissMini}>
+        <Icon name="x" size={16} />
+      </button>
       <span className="mini__progress" style={{ width: `${pct}%` }} />
-    </Link>
+    </div>
   )
 }
 

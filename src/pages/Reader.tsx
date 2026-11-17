@@ -1,0 +1,168 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { PageThumb } from '../components/Art'
+import { Icon } from '../components/Icon'
+import { useNav } from '../components/Nav'
+import { updateSettings, useSettings } from '../data/settings'
+import { useStore, visibleChapters } from '../data/store'
+import type { Chapter, CoverArt } from '../data/types'
+
+/** Placeholder webtoon strip: two panels with a figure and an occasional speech bubble. */
+function WebtoonPage({ n, art }: { n: number; art: CoverArt }) {
+  const a = (n * 37) % 100
+  const split = 38 + (a % 24)
+  const panels = [
+    { top: 4, h: split, fill: n % 2 ? art.c1 : '#2B2B31', shape: art.c2 },
+    { top: split + 8, h: 88 - split, fill: n % 3 === 0 ? art.c2 : '#DCD7CC', shape: art.c1 },
+  ]
+  return (
+    <div className="wt-page" data-page={n}>
+      {panels.map((p, i) => (
+        <div key={i} className="wt-panel" style={{ top: `${p.top}%`, height: `${p.h}%`, background: p.fill }}>
+          <span className="wt-shape" style={{ background: p.shape, left: `${(a + i * 30) % 55}%`, top: `${18 + (a % 30)}%` }} />
+          {(n + i) % 2 === 0 && <span className="wt-bubble" style={{ left: i ? '48%' : '8%' }}><i /><i /><i /></span>}
+        </div>
+      ))}
+      <span className="wt-num">{n}</span>
+    </div>
+  )
+}
+
+function PagedPage({ n }: { n: number }) {
+  return (
+    <div className="pg-page" data-page={n}>
+      <div className="pg-sheet"><PageThumb layout={n} /></div>
+      <span className="wt-num">{n}</span>
+    </div>
+  )
+}
+
+export default function Reader() {
+  const { entryId = '', chapterId = '' } = useParams()
+  const store = useStore()
+  const nav = useNav()
+  const { readerMode: mode } = useSettings()
+  const entry = store.entry(entryId)
+  const chapter = entry?.chapters.find((c) => c.id === chapterId)
+  const ordered = entry ? [...visibleChapters(entry)].sort((a, b) => a.number - b.number) : []
+  const index = ordered.findIndex((c) => c.id === chapterId)
+  const prev: Chapter | undefined = ordered[index - 1]
+  const next: Chapter | undefined = ordered[index + 1]
+  const pages = chapter?.pages ?? 0
+
+  const scroller = useRef<HTMLDivElement>(null)
+  const lastTop = useRef(0)
+  const jumping = useRef(false)
+  const startPage = useRef(1)
+  const [page, setPage] = useState(1)
+  const [ui, setUi] = useState(true)
+
+  // Jumps (opening at a saved page, the slider) must not count as reading-scroll that hides the controls.
+  const scrollToPage = useCallback((n: number, behavior: ScrollBehavior = 'auto') => {
+    jumping.current = true
+    scroller.current?.querySelector(`[data-page="${n}"]`)?.scrollIntoView({ behavior, block: 'start', inline: 'start' })
+    setTimeout(() => {
+      jumping.current = false
+      lastTop.current = scroller.current?.scrollTop ?? 0
+    }, behavior === 'smooth' ? 600 : 120)
+  }, [])
+
+  // Open at the saved page, or the first page for a finished chapter.
+  useLayoutEffect(() => {
+    if (!chapter) return
+    startPage.current = chapter.read || !chapter.page ? 1 : chapter.page
+    setPage(startPage.current)
+    scrollToPage(startPage.current)
+    setUi(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterId, mode])
+
+  // The page crossing the middle of the screen is the current page.
+  useEffect(() => {
+    const root = scroller.current
+    if (!root) return
+    const io = new IntersectionObserver((items) => {
+      for (const it of items) if (it.isIntersecting) setPage(Number((it.target as HTMLElement).dataset.page))
+    }, { root, rootMargin: mode === 'webtoon' ? '-50% 0px -50% 0px' : '0px -50% 0px -50%' })
+    root.querySelectorAll('[data-page]').forEach((el) => io.observe(el))
+    return () => io.disconnect()
+  }, [chapterId, mode, pages])
+
+  // Save progress shortly after the page settles; the last page marks the chapter read.
+  useEffect(() => {
+    if (!entry || !chapter || page === startPage.current && page !== pages) return
+    const t = setTimeout(() => store.setProgress(entry.id, chapter.id, page), 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page])
+
+  if (!entry || !chapter) {
+    return (
+      <div className="reader reader--empty">
+        <p>This chapter isn't available.</p>
+        <button type="button" className="btn btn--ghost" onClick={() => nav.back('/library')}>Go back</button>
+      </div>
+    )
+  }
+
+  const close = () => nav.back(`/entry/${entry.id}`)
+  const goChapter = (c: Chapter) => nav.go(`/read/${entry.id}/${c.id}`, { replace: true })
+
+  const onScroll = () => {
+    const el = scroller.current
+    if (!el || mode !== 'webtoon') return
+    const delta = el.scrollTop - lastTop.current
+    lastTop.current = el.scrollTop
+    if (jumping.current) return
+    if (delta > 12 && ui) setUi(false)
+  }
+
+  const list = Array.from({ length: pages }, (_, i) => i + 1)
+
+  return (
+    <div className={`reader reader--${mode}`}>
+      <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => setUi((v) => !v)}>
+        {list.map((n) => (mode === 'webtoon' ? <WebtoonPage key={n} n={n} art={entry.art} /> : <PagedPage key={n} n={n} />))}
+        <div className="reader__end" onClick={(e) => e.stopPropagation()}>
+          <div className="label label--flush">Finished</div>
+          <div className="reader__end-title">{chapter.label}</div>
+          {next ? (
+            <button type="button" className="btn btn--accent btn--xl" onClick={() => goChapter(next)}>
+              Next: {next.label} <Icon name="arrowRight" size={18} />
+            </button>
+          ) : (
+            <p className="hint">You're caught up on {entry.title}.</p>
+          )}
+          <button type="button" className="btn btn--ghost" onClick={close}>Back to {entry.title}</button>
+        </div>
+      </div>
+
+      <header className={`reader__top${ui ? '' : ' is-hidden'}`}>
+        <button type="button" className="icon-btn icon-btn--glass" aria-label="Close reader" onClick={close}><Icon name="back" /></button>
+        <div className="reader__titles">
+          <span className="reader__entry">{entry.title}</span>
+          <span className="reader__chapter">{chapter.label} · {chapter.part ?? chapter.title}</span>
+        </div>
+        <button type="button" className="icon-btn icon-btn--glass" aria-label={mode === 'webtoon' ? 'Switch to paged mode' : 'Switch to webtoon mode'}
+          onClick={() => updateSettings({ readerMode: mode === 'webtoon' ? 'paged' : 'webtoon' })}>
+          <Icon name={mode === 'webtoon' ? 'paged' : 'webtoon'} />
+        </button>
+      </header>
+
+      <footer className={`reader__bottom${ui ? '' : ' is-hidden'}`}>
+        <button type="button" className="icon-btn icon-btn--glass" aria-label="Previous chapter" disabled={!prev} onClick={() => prev && goChapter(prev)}>
+          <Icon name="prev" />
+        </button>
+        <label className="reader__slider">
+          <input type="range" min={1} max={pages} value={Math.min(page, pages)} aria-label="Page"
+            onChange={(e) => { const n = Number(e.target.value); setPage(n); scrollToPage(n) }} />
+          <span>{Math.min(page, pages)} / {pages}</span>
+        </label>
+        <button type="button" className="icon-btn icon-btn--glass" aria-label="Next chapter" disabled={!next} onClick={() => next && goChapter(next)}>
+          <Icon name="next" />
+        </button>
+      </footer>
+      <span className="reader__line" style={{ width: `${(Math.min(page, pages) / pages) * 100}%` }} aria-hidden="true" />
+    </div>
+  )
+}

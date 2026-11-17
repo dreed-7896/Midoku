@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
+import { TLink as Link, useNav } from '../components/Nav'
 import { Cover, PageThumb, SourceIcon } from '../components/Art'
 import { Chip, IconButton, SectionHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'
@@ -11,7 +12,7 @@ type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
 export default function EntryPage() {
   const { id = '' } = useParams()
   const store = useStore()
-  const navigate = useNavigate()
+  const nav = useNav()
   const entry = store.entry(id)
   const [expanded, setExpanded] = useState(false)
   const [filter, setFilter] = useState<ChapterFilter>('all')
@@ -56,7 +57,7 @@ export default function EntryPage() {
         return next
       })
     } else {
-      store.toast(`Opening ${c.label} — reader comes next`)
+      nav.go(`/read/${entry.id}/${c.id}`)
     }
   }
 
@@ -79,7 +80,7 @@ export default function EntryPage() {
       </div>
 
       <div className="entry__top">
-        <IconButton icon="back" label="Back" glass onClick={() => (history.length > 1 ? navigate(-1) : navigate('/library'))} />
+        <IconButton icon="back" label="Back" glass onClick={() => nav.back('/library')} />
         <div className="row-gap">
           <IconButton icon="globe" label="Open source website" glass onClick={() => store.toast('Opens the source page in the browser')} />
           <IconButton icon="more" label="Entry options" glass onClick={() => store.toast('Edit, migrate and sources menu comes later')} />

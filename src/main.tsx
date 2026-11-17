@@ -1,26 +1,26 @@
-import React, { useEffect } from 'react'
+import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { MiniPlayer, TabBar, Toast } from './components/Chrome'
+import { LockGate } from './components/Lock'
+import { useNavEffects } from './components/Nav'
 import { StoreProvider } from './data/store'
 import EntryPage from './pages/Entry'
 import Home from './pages/Home'
 import Library from './pages/Library'
+import Reader from './pages/Reader'
 import Search from './pages/Search'
+import SettingsPage from './pages/Settings'
 import SourceBrowse from './pages/SourceBrowse'
 import Sources from './pages/Sources'
 import './styles.css'
 
-function ScrollToTop() {
-  const { pathname } = useLocation()
-  useEffect(() => window.scrollTo(0, 0), [pathname])
-  return null
-}
-
 function App() {
+  useNavEffects()
+  const { pathname } = useLocation()
+  const reading = pathname.startsWith('/read/')
   return (
     <div className="app">
-      <ScrollToTop />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/library" element={<Library />} />
@@ -28,13 +28,18 @@ function App() {
         <Route path="/search" element={<Search />} />
         <Route path="/sources" element={<Sources />} />
         <Route path="/sources/:id" element={<SourceBrowse />} />
+        <Route path="/read/:entryId/:chapterId" element={<Reader />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Home />} />
       </Routes>
-      <div className="dock">
-        <MiniPlayer />
-        <TabBar />
-      </div>
+      {!reading && (
+        <div className="dock">
+          <MiniPlayer />
+          <TabBar />
+        </div>
+      )}
       <Toast />
+      <LockGate />
     </div>
   )
 }

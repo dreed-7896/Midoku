@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { TLink as Link } from '../components/Nav'
 import { SourceIcon } from '../components/Art'
 import { IconButton, PageHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'

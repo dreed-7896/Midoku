@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { TLink as Link } from '../components/Nav'
 import { Cover } from '../components/Art'
 import { Chip, IconButton, PageHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'

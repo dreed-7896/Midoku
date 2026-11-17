@@ -4,7 +4,8 @@ import {
   Bookmark01Icon, Cancel01Icon, ChartHistogramIcon, CheckmarkSquare02Icon, Database01Icon, Delete02Icon, Download04Icon,
   FilterHorizontalIcon, FilterIcon, Folder01Icon, Globe02Icon, Home09Icon, Layers01Icon, LibraryIcon, MoreHorizontalIcon,
   Notification03Icon, PinIcon, PlayIcon, PuzzleIcon, Refresh01Icon, Search01Icon, SecurityWarningIcon, Sorting01Icon,
-  SparklesIcon, Tick02Icon, Undo02Icon,
+  SparklesIcon, Tick02Icon, Undo02Icon, Settings01Icon, FaceIdIcon, SquareLock02Icon, PreviousIcon, NextIcon,
+  ScrollVerticalIcon, BookOpen02Icon, InformationCircleIcon,
 } from '@hugeicons/core-free-icons'
 
 const ICONS = {
@@ -43,6 +44,14 @@ const ICONS = {
   pin: PinIcon,
   play: PlayIcon,
   more: MoreHorizontalIcon,
+  settings: Settings01Icon,
+  faceId: FaceIdIcon,
+  lock: SquareLock02Icon,
+  prev: PreviousIcon,
+  next: NextIcon,
+  webtoon: ScrollVerticalIcon,
+  paged: BookOpen02Icon,
+  info: InformationCircleIcon,
 } satisfies Record<string, IconSvgElement>
 
 /** Icons drawn solid instead of outlined. */

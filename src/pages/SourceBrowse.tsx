@@ -1,5 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
+import { TLink as Link, useNav } from '../components/Nav'
 import { Cover, SourceIcon } from '../components/Art'
 import { Chip, IconButton } from '../components/Chrome'
 import { Icon } from '../components/Icon'
@@ -9,7 +10,7 @@ import { useStore } from '../data/store'
 export default function SourceBrowse() {
   const { id = '' } = useParams()
   const store = useStore()
-  const navigate = useNavigate()
+  const nav = useNav()
   const source = store.source(id)
   const [lang, setLang] = useState(source?.langs[0] ?? 'EN')
   const [mode, setMode] = useState<'popular' | 'latest'>('popular')
@@ -42,7 +43,7 @@ export default function SourceBrowse() {
         <span style={{ background: source.glow }} />
       </div>
       <div className="entry__top">
-        <IconButton icon="back" label="Back" glass onClick={() => (history.length > 1 ? navigate(-1) : navigate('/sources'))} />
+        <IconButton icon="back" label="Back" glass onClick={() => nav.back('/sources')} />
         <div className="row-gap">
           <IconButton icon="pin" label={source.pinned ? 'Unpin' : 'Pin'} glass active={source.pinned} onClick={() => store.togglePin(source.id)} />
           <IconButton icon="sliders" label="Source settings" glass onClick={() => store.toast('Source settings come later')} />

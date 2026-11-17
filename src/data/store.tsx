@@ -9,6 +9,7 @@ interface State {
   tabs: LibraryTab[]
   updatesSeen: boolean
   toastMessage: string | null
+  miniHidden: boolean
 }
 
 const initial: State = {
@@ -23,6 +24,7 @@ const initial: State = {
   ],
   updatesSeen: false,
   toastMessage: null,
+  miniHidden: false,
 }
 
 function useActions(set: (fn: (s: State) => State) => void) {
@@ -46,6 +48,22 @@ function useActions(set: (fn: (s: State) => State) => void) {
       clearWarning: (sourceId: string) =>
         set((s) => ({ ...s, sources: s.sources.map((x) => (x.id === sourceId ? { ...x, warn: undefined } : x)) })),
       markUpdatesSeen: () => set((s) => ({ ...s, updatesSeen: true })),
+      dismissMini: () => set((s) => ({ ...s, miniHidden: true })),
+      /** Saves the reader position; reaching the last page marks the chapter read. */
+      setProgress: (entryId: string, chapterId: string, page: number) =>
+        set((s) => ({
+          ...s,
+          miniHidden: false,
+          entries: s.entries.map((e) => e.id !== entryId ? e : {
+            ...e,
+            lastReadAgo: 0,
+            chapters: e.chapters.map((c) => {
+              if (c.id !== chapterId) return c
+              const done = page >= c.pages
+              return { ...c, page: done ? 0 : page, read: c.read || done, isNew: done ? false : c.isNew }
+            }),
+          }),
+        })),
       addTab: (name: string, filters: LibraryFilters) =>
         set((s) => ({ ...s, tabs: [...s.tabs, { id: `tab-${Date.now()}`, kind: 'smart', name, filters }] })),
       toast: (message: string) => {

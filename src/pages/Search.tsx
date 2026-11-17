@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { TLink as Link } from '../components/Nav'
 import { Cover, SourceIcon } from '../components/Art'
 import { Chip, PageHead } from '../components/Chrome'
 import { Icon } from '../components/Icon'
