@@ -173,7 +173,7 @@ export async function loadLibrary(): Promise<DbLibrary> {
 /** A saved title's reading state, split chapters and inserted chapters. */
 export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
-    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position').eq('entry_id', entryId)),
+    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
     all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
   ])

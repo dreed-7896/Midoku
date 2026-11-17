@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Cover, PageThumb } from '../components/Art'
 import { Chip, IconButton, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { TLink as Link, useNav } from '../components/Nav'
+import { useLongPress } from '../components/LongPress'
 import { PageSplitter } from '../components/PageSplitter'
 import { AddToEntrySheet, EditDetailsSheet, MoveSheet } from '../components/EntryTools'
 import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
@@ -16,28 +17,6 @@ import { STATUS_LABEL, type Chapter } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
 type Panel = null | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'addTo' | 'move'
-
-/** Long press (or right click) runs `onLong`; the click that ends a long press is ignored. */
-function useLongPress<T>(onLong: (item: T) => void) {
-  const timer = useRef<ReturnType<typeof setTimeout>>()
-  const fired = useRef(false)
-  const start = useRef<{ x: number; y: number } | null>(null)
-  const cancel = () => { clearTimeout(timer.current); start.current = null }
-  return (c: T) => ({
-    onPointerDown: (e: React.PointerEvent) => {
-      fired.current = false
-      start.current = { x: e.clientX, y: e.clientY }
-      timer.current = setTimeout(() => { fired.current = true; navigator.vibrate?.(10); onLong(c) }, 450)
-    },
-    onPointerMove: (e: React.PointerEvent) => {
-      if (start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 10) cancel()
-    },
-    onPointerUp: cancel,
-    onPointerLeave: cancel,
-    onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); cancel(); fired.current = true; onLong(c) },
-    wasLongPress: () => { const f = fired.current; fired.current = false; return f },
-  })
-}
 
 export default function EntryPage() {
   const { id = '' } = useParams()
@@ -328,6 +307,7 @@ export default function EntryPage() {
                   <PageThumb layout={c.layout} />
                   <span className="chapter__badges">
                     {c.isNew && !c.read && <span className="badge">New</span>}
+                    {!!c.newPages && <span className="badge">+{c.newPages} pages</span>}
                     {c.insertedFrom && <span className="badge badge--glass">Added</span>}
                     {c.physicalId && <span className="badge badge--glass">Part</span>}
                   </span>

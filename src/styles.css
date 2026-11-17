@@ -30,6 +30,9 @@
 /* No height or overflow lock on html/body: in the installed iOS app that leaves the home-indicator strip
    outside the app. Screens are fixed layers, so the document itself has nothing to scroll. */
 html, body { margin: 0; background: var(--bg); color: var(--text); overscroll-behavior: none; }
+/* iOS with the translucent status bar sizes the viewport short by the status bar's height when the page
+   itself has no height (every screen here is a fixed layer), leaving a band under the tab bar. */
+html { min-height: calc(100% + env(safe-area-inset-top, 0px)); }
 body { font: 15px/1.4 Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -589,3 +592,9 @@ body:has(.action-bar) .mini { display: none; }
 .select-box--inline { height: auto; border: 0; padding: 0; background: transparent; gap: 4px; color: var(--text-3); font-size: 12px; }
 .select-box--inline select { font-size: 12px; color: var(--text-3); padding: 0; }
 .rail--flush { padding-left: 0; padding-right: 0; margin: 0; }
+.dot-new { display: inline-block; width: 7px; height: 7px; margin-right: 7px; background: var(--accent); vertical-align: middle; }
+.dl-title { border-top: 1px solid var(--line); }
+.dl-title:first-child { border-top: 0; }
+.dl-title > .order-row { border-top: 0; }
+.dl-chapter { padding-left: 54px; min-height: 52px; background: var(--s1); }
+.history-row .bar { margin-top: 6px; }

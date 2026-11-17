@@ -556,7 +556,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
             chapters: x.chapters.map((c) => {
               if (c.id !== chapterId) return c
               const done = part ? lastPart && part.pages > 0 && pageIn >= part.pages : page >= c.pages
-              return { ...c, page: done ? 0 : page, read: c.read || done, isNew: done ? false : c.isNew }
+              return { ...c, page: done ? 0 : page, read: c.read || done, isNew: done ? false : c.isNew, newPages: undefined }
             }),
           }),
         }))
@@ -971,7 +971,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ...state,
     queue,
     ...actions,
-    entry: (id) => findIn(state.entries, id),
+    // The latest state, so code that awaited a load (e.g. loadEntry) sees the result.
+    entry: (id) => findIn(latest.current.entries, id),
     source: (id) => state.sources.find((s) => s.id === id),
     children: (id) => state.entries.filter((e) => e.parentId === id && e.inLibrary).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
   }), [state, queue, actions])

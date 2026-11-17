@@ -1,6 +1,18 @@
 import { visibleChapters, type Store } from './store'
 import type { Chapter } from './types'
 
+type Find = { chapterId?: string; sourceId?: string; url?: string }
+
+/** The chapter as the title holds it (loading the title's chapters when needed). */
+export async function findChapter(store: Store, entryId: string, find: Find): Promise<Chapter | undefined> {
+  const first = store.entry(entryId)
+  if (!first) return undefined
+  if (first.remote && !first.remote.chaptersLoaded) await store.loadEntry(entryId)
+  const e = store.entry(entryId) ?? first
+  return e.chapters.find((c) => find.chapterId ? c.id === find.chapterId
+    : (c.sourceId === find.sourceId && c.sourceUrl === find.url) || !!c.alts?.some((a) => a.sourceId === find.sourceId && a.url === find.url))
+}
+
 /**
  * Opens a chapter found by its id (sample data) or by source + address (server), loading the title's
  * chapters first when needed. `nextIfRead` goes on to the following chapter when that one is finished.

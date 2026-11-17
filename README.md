@@ -25,7 +25,8 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - Chapters: long-press a chapter to pick which version (source) to read, split a long chapter into parts, insert a chapter from another title or source, bookmark, download or hide it.
 - Titles: edit the title, author, description, cover and reading status (⋯ → Edit details, or tap the cover).
 - Library: the ⋯ button has Check for new chapters, Select titles (group into a series or merge chapters into one title, file into tabs, remove), Random title (this tab or the whole library), History and Find duplicates.
-- Updates (Home's bell): new chapters and chapters that got new pages, by day.
+- Updates (Home's bell, preview on Home): new chapters and chapters that got new pages, by day; long-press for read/unread, download, open title. The badge counts what's new since you last opened it.
+- Downloads (Settings → Manage downloads): queue, failures and saved chapters by title.
 - Sources: an extension's ⋯ has Open in WebView (for Cloudflare checks), Update and Uninstall.
 - History: recently read titles by day, with resume and remove (Home's clock button or Library ⋯).
 - Reader: Webtoon, Paged or Right to left, as a device default or per title (reader top bar). Pinch or double-tap to zoom (all modes); in paged modes tap the left or right edge to turn the page.

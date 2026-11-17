@@ -15,6 +15,7 @@ import './styles.css'
 const EntryPage = lazy(() => import('./pages/Entry'))
 const History = lazy(() => import('./pages/History'))
 const Updates = lazy(() => import('./pages/Updates'))
+const Downloads = lazy(() => import('./pages/Downloads'))
 const Reader = lazy(() => import('./pages/Reader'))
 const Search = lazy(() => import('./pages/Search'))
 const SettingsPage = lazy(() => import('./pages/Settings'))
@@ -43,6 +44,7 @@ function App() {
         <Route path="/sources/:id" element={<Screen page={SourceBrowse} />} />
         <Route path="/read/:entryId/:chapterId" element={<Screen page={Reader} />} />
         <Route path="/updates" element={<Screen page={Updates} />} />
+        <Route path="/downloads" element={<Screen page={Downloads} />} />
         <Route path="/history" element={<Screen page={History} />} />
         <Route path="/settings" element={<Screen page={SettingsPage} />} />
         <Route path="*" element={<Home />} />

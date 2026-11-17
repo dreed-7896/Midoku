@@ -27,12 +27,19 @@ let queue: DownloadJob[] = []
 /** Share of pages fetched for the chapter being downloaded, 0–1. */
 let active: { key: string; progress: number } | null = null
 let failed: Record<string, string> = {}
+/** Jobs by key, so the Downloads screen can name queued and failed chapters and retry them. */
+const jobIndex = new Map<string, DownloadJob>()
 
-interface Snapshot { saved: Record<string, SavedChapter>; queued: Set<string>; active: { key: string; progress: number } | null; failed: Record<string, string> }
-let snapshot: Snapshot = { saved, queued: new Set(), active, failed }
+interface Snapshot {
+  saved: Record<string, SavedChapter>; queued: Set<string>; active: { key: string; progress: number } | null; failed: Record<string, string>
+  /** The chapter downloading now, then the queue, in order. */
+  pending: DownloadJob[]
+}
+let snapshot: Snapshot = { saved, queued: new Set(), active, failed, pending: [] }
 const listeners = new Set<() => void>()
 function emit() {
-  snapshot = { saved, queued: new Set(queue.map((j) => j.key)), active, failed }
+  const current = active ? jobIndex.get(active.key) : undefined
+  snapshot = { saved, queued: new Set(queue.map((j) => j.key)), active, failed, pending: [...(current ? [current] : []), ...queue] }
   listeners.forEach((l) => l())
 }
 function persist() {
@@ -49,7 +56,7 @@ export function download(jobs: DownloadJob[]) {
   const skip = new Set([...queue.map((j) => j.key), ...Object.keys(saved), active?.key ?? ''])
   const fresh = jobs.filter((j) => !skip.has(j.key))
   if (!fresh.length) return 0
-  fresh.forEach((j) => delete failed[j.key])
+  fresh.forEach((j) => { delete failed[j.key]; jobIndex.set(j.key, j) })
   queue.push(...fresh)
   // Ask the browser not to clear downloads under storage pressure.
   navigator.storage?.persist?.().catch(() => {})
@@ -60,6 +67,17 @@ export function download(jobs: DownloadJob[]) {
 
 export function cancel(key: string) {
   queue = queue.filter((j) => j.key !== key)
+  emit()
+}
+/** The failed chapter's job, to show its name. */
+export const jobFor = (key: string) => jobIndex.get(key)
+export function retry(key: string) {
+  const job = jobIndex.get(key)
+  if (job) download([job])
+}
+export function dismissFailed(key: string) {
+  const { [key]: _gone, ...rest } = failed
+  failed = rest
   emit()
 }
 
@@ -126,6 +144,7 @@ export async function removeDownload(key: string) {
 
 export async function removeAllDownloads() {
   queue = []
+  failed = {}
   saved = {}
   persist()
   emit()

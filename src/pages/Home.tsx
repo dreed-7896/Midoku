@@ -3,25 +3,35 @@ import { TLink as Link, useNav } from '../components/Nav'
 import { Cover } from '../components/Art'
 import { IconButton, PageHead, SectionHead, ServerStatus } from '../components/Chrome'
 import { Icon } from '../components/Icon'
-import { Empty } from '../components/Status'
+import { Empty, Loading } from '../components/Status'
+import { UpdateRow } from '../components/UpdateRow'
+import { openChapter } from '../data/openChapter'
+import { useUpdates, type Update } from '../data/updates'
 import { catalogFor } from '../data/mock'
 import { artFor, assetUrl, browseSource, getSources, type SMangaCard, type SSource } from '../data/suwayomi'
-import { agoLabel, agoText, newCount, resumeChapter, useStore } from '../data/store'
+import { agoText, resumeChapter, useStore } from '../data/store'
 
 export default function Home() {
   const store = useStore()
   const nav = useNav()
-  const { entries, queue, updatesSeen } = store
+  const { entries, queue } = store
+  const feed = useUpdates(store)
+  const [opening, setOpening] = useState<string>()
   const [slide, setSlide] = useState(0)
   const rail = useRef<HTMLDivElement>(null)
 
   const library = entries.filter((e) => e.inLibrary)
   const continuing = library.filter((e) => e.lastReadAgo !== undefined && resumeChapter(e))
     .sort((a, b) => (a.lastReadAgo ?? 0) - (b.lastReadAgo ?? 0)).slice(0, 3)
-  const updates = updatesSeen ? [] : library.filter((e) => newCount(e) > 0).sort((a, b) => a.updatedAgo - b.updatedAgo)
-  const today = updates.filter((e) => e.updatedAgo < 24)
-  const earlier = updates.filter((e) => e.updatedAgo >= 24)
-  const totalNew = updates.reduce((n, e) => n + newCount(e), 0)
+  const totalNew = feed.unseen
+  // Home previews the newest updates; the full list (and its actions) is on the Updates screen.
+  const preview = (feed.items ?? []).filter((u) => !u.read).slice(0, 6)
+  const open = async (u: Update) => {
+    setOpening(u.key)
+    try { await openChapter(store, (to) => nav.go(to), u.entryId, { chapterId: u.chapterId, sourceId: u.sourceId, url: u.url }) }
+    catch (err) { store.toast(`Couldn't open it: ${(err as Error).message}`) }
+    finally { setOpening(undefined) }
+  }
   const trending = useMemo(() => catalogFor('mangadex').slice(0, 3), [])
   const weekday = new Date().toLocaleDateString('en', { weekday: 'long' })
 
@@ -32,7 +42,7 @@ export default function Home() {
 
   return (
     <div className="page">
-      <PageHead kicker={`${weekday} · ${totalNew} new chapters`} title="Feed">
+      <PageHead kicker={`${weekday} · ${totalNew} new`} title="Feed">
         <IconButton icon="clock" label="History" onClick={() => nav.go('/history')} />
         <IconButton icon="settings" label="Settings" onClick={() => nav.go('/settings')} />
         <IconButton icon="bell" label={`Updates, ${totalNew} new`} badge={totalNew || undefined} onClick={() => nav.go('/updates')} />
@@ -90,34 +100,20 @@ export default function Home() {
 
       <section className="section pad-x">
         <div className="section-head section-head--flush">
-          <h2 className="h2">New chapters<span className="h2__count">{totalNew}</span></h2>
-          {updates.length > 0 && <button type="button" className="link-btn" onClick={store.markUpdatesSeen}>Mark all seen</button>}
+          <h2 className="h2">Updates{totalNew > 0 && <span className="h2__count">{totalNew} new</span>}</h2>
+          <button type="button" className="link-btn" onClick={() => nav.go('/updates')}>See all</button>
         </div>
-        {updates.length === 0 && <Empty icon="check" tone="done" title="All caught up" detail="New chapters from your library show up here." />}
-        {[{ label: 'Today', list: today }, { label: 'Earlier', list: earlier }].filter((g) => g.list.length).map((g) => (
-          <div key={g.label}>
-            <div className="label">{g.label}</div>
-            <div className="grid3">
-              {g.list.map((e) => {
-                const latest = [...e.chapters].sort((a, b) => b.number - a.number)[0]
-                const src = store.source(e.sources.find((s) => s.main)?.sourceId ?? '')
-                return (
-                  <Link key={e.id} to={`/entry/${e.id}`} className="card">
-                    <div className="thumb">
-                      <Cover art={e.art} title={e.title} url={e.coverUrl} plain />
-                      <span className="thumb__scrim" />
-                      <span className="thumb__label">{latest?.label ?? `${newCount(e)} new`}</span>
-                      <span className="badge badge--tr">+{newCount(e)}</span>
-                    </div>
-                    <div className="card-title">{e.title}</div>
-                    <div className="card-meta">{src?.name ?? e.sources[0]?.name}{e.updatedAgo < 1e5 ? ` · ${agoLabel(e.updatedAgo)}` : ''}</div>
-                  </Link>
-                )
-              })}
-            </div>
+        {!feed.items && !feed.error && <Loading label="Loading updates" shape="rows" count={2} />}
+        {feed.error && <Empty compact icon="alert" tone="error" title="Couldn't load updates" detail={feed.error.slice(0, 140)} />}
+        {feed.items && !preview.length && <Empty compact icon="check" tone="done" title="All caught up" detail="New chapters, and new pages in recent chapters, show up here." />}
+        {preview.length > 0 && (
+          <div className="check-list">
+            {preview.map((u) => <UpdateRow key={u.key} u={u} fresh={u.at > feed.seenAt} busy={opening === u.key} onOpen={() => void open(u)} />)}
           </div>
-        ))}
+        )}
+      </section>
 
+      <section className="section pad-x">
         {store.server.status !== 'off' && <PopularPanel />}
 
         {store.server.status === 'off' && <div className="panel">

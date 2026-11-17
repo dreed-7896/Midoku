@@ -8,7 +8,7 @@ import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
 import { clearData } from '../data/cache'
 import { changePassword, lockApp, usePendingWrites } from '../data/db'
-import { removeAllDownloads, savedBytes, useDownloads } from '../data/downloads'
+import { savedBytes, useDownloads } from '../data/downloads'
 import { testServer } from '../data/suwayomi'
 import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
@@ -230,6 +230,7 @@ const mb = (bytes: number) => (bytes < 1e6 ? `${Math.round(bytes / 1e3)} KB` : `
 /** What is kept on this device for offline use, and changes still waiting to be saved. */
 function StorageSection() {
   const store = useStore()
+  const nav = useNav()
   const downloads = useDownloads()
   const pending = usePendingWrites()
   const [usage, setUsage] = useState<{ used: number; quota: number }>()
@@ -238,11 +239,6 @@ function StorageSection() {
     navigator.storage?.estimate?.().then((e) => setUsage({ used: e.usage ?? 0, quota: e.quota ?? 0 })).catch(() => {})
   }, [count])
 
-  const clearDownloads = async () => {
-    if (!window.confirm(`Remove all ${count} downloaded chapters from this device?`)) return
-    await removeAllDownloads()
-    store.toast('Downloads removed')
-  }
   const clearCache = async () => {
     await Promise.all([clearData(), caches.delete('midoku-images').catch(() => false)])
     store.toast('Cache cleared')
@@ -269,7 +265,7 @@ function StorageSection() {
         </div>
       </div>
       <div className="row-btns">
-        <button type="button" className="btn btn--ghost" disabled={!count} onClick={clearDownloads}>Remove downloads</button>
+        <button type="button" className="btn btn--ghost" onClick={() => nav.go('/downloads')}>Manage downloads</button>
         <button type="button" className="btn btn--ghost" onClick={clearCache}>Clear cache</button>
       </div>
     </section>
