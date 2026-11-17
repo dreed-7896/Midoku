@@ -5,6 +5,7 @@ import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
 import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
+import { APP_VERSION, checkForUpdate, restartToUpdate, useUpdateReady } from '../data/update'
 
 const DELAYS: { value: Settings['lockDelay']; label: string }[] = [
   { value: 0, label: 'Immediately' },
@@ -18,6 +19,8 @@ export default function SettingsPage() {
   const nav = useNav()
   const [supported, setSupported] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const updateReady = useUpdateReady()
   const lockOn = !!settings.lockCredential
 
   useEffect(() => { lockSupported().then(setSupported) }, [])
@@ -93,10 +96,22 @@ export default function SettingsPage() {
         <div className="setting">
           <span className="setting__icon"><Icon name="info" size={22} /></span>
           <div className="setting__text">
-            <strong>Midoku Web</strong>
-            <span className="card-meta card-meta--wrap">Preview build · sample data, not connected to a server yet</span>
+            <strong>Midoku Web · {APP_VERSION}</strong>
+            <span className="card-meta card-meta--wrap">
+              {updateReady ? 'A new version is ready.' : 'Preview build · sample data, not connected to a server yet'}
+            </span>
           </div>
         </div>
+        {updateReady ? (
+          <button type="button" className="btn btn--accent btn--block" onClick={restartToUpdate}><Icon name="refresh" size={16} />Restart to update</button>
+        ) : (
+          <button type="button" className="btn btn--ghost btn--block" disabled={checking} onClick={async () => {
+            setChecking(true)
+            const found = await checkForUpdate()
+            setChecking(false)
+            if (!found) store.toast("You're on the latest version")
+          }}><Icon name="refresh" size={16} />{checking ? 'Checking…' : 'Check for updates'}</button>
+        )}
       </section>
     </div>
   )

@@ -1,5 +1,5 @@
 // Dummy data until the app is wired to a Suwayomi server.
-import type { CatalogItem, Chapter, Collection, CoverArt, Entry, Source } from './types'
+import type { CatalogItem, Chapter, CoverArt, Entry, LibraryTab, Source } from './types'
 
 const art = (c1: string, c2: string, ink: string, motif: CoverArt['motif']): CoverArt => ({ c1, c2, ink, motif })
 
@@ -122,7 +122,7 @@ function hollowChapters(): Chapter[] {
 export const ENTRIES: Entry[] = [
   {
     id: 'hollow-crown', title: 'Hollow Crown', author: 'Saeki Ren', art: ART.hollow, publishing: 'Ongoing', status: 'reading',
-    collections: ['action', 'favourites'], tags: ['Fantasy', 'Political', 'Drama', 'Royalty', 'Slow burn'],
+    tabs: ['action', 'favourites'], tags: ['Fantasy', 'Political', 'Drama', 'Royalty', 'Slow burn'],
     description: 'An exiled heir returns to a capital built on glass and debt, carrying a crown that remembers every ruler who wore it. Court intrigue, quiet magic, and a slow-burning rivalry with the regent who replaced her. The longer she wears it, the less certain she is whose memories are her own.',
     sources: [
       { sourceId: 'mangadex', chapters: 113, following: true, main: true },
@@ -133,116 +133,119 @@ export const ENTRIES: Entry[] = [
   },
   {
     id: 'hollow-side', title: 'Hollow Crown: Side Tales', author: 'Saeki Ren', art: ART.hollowSide, publishing: 'Ongoing', status: 'reading',
-    collections: ['action'], tags: ['Fantasy', 'Anthology'], parentId: 'hollow-crown',
+    tabs: ['action'], tags: ['Fantasy', 'Anthology'], parentId: 'hollow-crown',
     description: 'Short stories from the margins of the glass capital.',
     sources: [{ sourceId: 'mangadex', chapters: 12, following: true, main: true }],
     chapters: makeChapters('hcs', { total: 12, read: 9, sourceId: 'mangadex', newCount: 1 }), inLibrary: true, lastReadAgo: 50, updatedAgo: 30, addedOrder: 2,
   },
   {
     id: 'hollow-color', title: 'Hollow Crown (Color)', author: 'Saeki Ren', art: ART.hollowColor, publishing: 'Ongoing', status: 'planned',
-    collections: ['action'], tags: ['Fantasy', 'Full color', 'Webtoon'], parentId: 'hollow-crown',
+    tabs: ['action'], tags: ['Fantasy', 'Full color', 'Webtoon'], parentId: 'hollow-crown',
     description: 'The official full-colour vertical edition.',
     sources: [{ sourceId: 'comick', chapters: 40, following: true, main: true }],
     chapters: makeChapters('hcc', { total: 40, read: 31, sourceId: 'comick' }), inLibrary: true, lastReadAgo: 300, updatedAgo: 90, addedOrder: 3,
   },
   {
     id: 'salt-static', title: 'Salt & Static', author: 'Ona Vale', art: ART.salt, publishing: 'Ongoing', status: 'reading',
-    collections: ['action'], tags: ['Sci-fi', 'Mystery', 'Webtoon'],
+    tabs: ['action'], tags: ['Sci-fi', 'Mystery', 'Webtoon'],
     description: 'A radio operator on a salt flat starts receiving broadcasts from a town that drowned forty years ago.',
     sources: [{ sourceId: 'mangadex', chapters: 50, following: true, main: true }, { sourceId: 'bato', chapters: 49, following: false }],
     chapters: makeChapters('ss', { total: 50, read: 47, newCount: 3, sourceId: 'mangadex', page: 6, downloads: [48, 49, 50] }), inLibrary: true, lastReadAgo: 20, updatedAgo: 2, addedOrder: 4,
   },
   {
     id: 'paper-tigers', title: 'Paper Tigers', author: 'Kaito Mura', art: ART.tigers, publishing: 'Ongoing', status: 'reading',
-    collections: ['action', 'favourites'], tags: ['Martial arts', 'Comedy'],
+    tabs: ['action', 'favourites'], tags: ['Martial arts', 'Comedy'],
     description: 'Two rival origami clubs settle their differences the only reasonable way: tournament combat.',
     sources: [{ sourceId: 'comick', chapters: 201, following: true, main: true }],
     chapters: makeChapters('pt', { total: 201, read: 200, newCount: 1, sourceId: 'comick', cadence: 3 }), inLibrary: true, lastReadAgo: 26, updatedAgo: 5, addedOrder: 5,
   },
   {
     id: 'night-bus', title: 'Night Bus 9', author: 'Lune Park', art: ART.bus, publishing: 'Ongoing', status: 'reading',
-    collections: ['action'], tags: ['Supernatural', 'Horror', 'Webtoon'],
+    tabs: ['action'], tags: ['Supernatural', 'Horror', 'Webtoon'],
     description: 'The last bus of the night only stops for passengers who are not quite alive.',
     sources: [{ sourceId: 'asura', chapters: 13, following: true, main: true }],
     chapters: makeChapters('nb', { total: 13, read: 11, newCount: 2, sourceId: 'asura', page: 12 }), inLibrary: true, lastReadAgo: 40, updatedAgo: 9, addedOrder: 6,
   },
   {
     id: 'night-bus-extra', title: 'Night Bus 9: Transfers', author: 'Lune Park', art: ART.busExtra, publishing: 'Completed', status: 'completed',
-    collections: ['action'], tags: ['Supernatural'], parentId: 'night-bus',
+    tabs: ['action'], tags: ['Supernatural'], parentId: 'night-bus',
     description: 'Bonus stories.',
     sources: [{ sourceId: 'asura', chapters: 6, following: false, main: true }],
     chapters: makeChapters('nbx', { total: 6, read: 6, sourceId: 'asura' }), inLibrary: true, lastReadAgo: 400, updatedAgo: 900, addedOrder: 7,
   },
   {
     id: 'glasswing', title: 'Glasswing', author: 'Mire Asano', art: ART.glass, publishing: 'Ongoing', status: 'reading',
-    collections: ['action', 'romance'], tags: ['Fantasy', 'Romance'],
+    tabs: ['action', 'romance'], tags: ['Fantasy', 'Romance'],
     description: 'A glassblower apprentices herself to a dragon who collects broken things.',
     sources: [{ sourceId: 'mangadex', chapters: 88, following: true, main: true }],
     chapters: makeChapters('gw', { total: 88, read: 81, newCount: 1, sourceId: 'mangadex' }), inLibrary: true, lastReadAgo: 72, updatedAgo: 11, addedOrder: 8,
   },
   {
     id: 'ember-shrine', title: 'Ember Shrine', author: 'Toma Iori', art: ART.ember, publishing: 'Ongoing', status: 'onHold',
-    collections: ['action'], tags: ['Supernatural', 'Action'],
+    tabs: ['action'], tags: ['Supernatural', 'Action'],
     description: 'A shrine keeper who can only fight while it is raining.',
     sources: [{ sourceId: 'bato', chapters: 64, following: true, main: true }],
     chapters: makeChapters('es', { total: 64, read: 60, newCount: 4, sourceId: 'bato' }), inLibrary: true, lastReadAgo: 160, updatedAgo: 14, addedOrder: 9,
   },
   {
     id: 'low-orbit', title: 'Low Orbit Lullaby', author: 'Pell Nakamura', art: ART.orbit, publishing: 'Ongoing', status: 'planned',
-    collections: ['slice'], tags: ['Sci-fi', 'Slice of life'],
+    tabs: ['slice'], tags: ['Sci-fi', 'Slice of life'],
     description: 'A night-shift crew on a space station keeps a garden alive.',
     sources: [{ sourceId: 'mangadex', chapters: 40, following: true, main: true }],
     chapters: makeChapters('lo', { total: 40, read: 7, sourceId: 'mangadex' }), inLibrary: true, lastReadAgo: 120, updatedAgo: 200, addedOrder: 10,
   },
   {
     id: 'quiet-tide', title: 'Quiet Tide', author: 'Nao Ferris', art: ART.tide, publishing: 'Ongoing', status: 'reading',
-    collections: ['slice'], tags: ['Slice of life', 'Seaside'],
+    tabs: ['slice'], tags: ['Slice of life', 'Seaside'],
     description: 'A ferry, a lighthouse, and a town that only exists at low tide.',
     sources: [{ sourceId: 'comick', chapters: 30, following: true, main: true }],
     chapters: makeChapters('qt', { total: 30, read: 29, newCount: 1, sourceId: 'comick' }), inLibrary: true, lastReadAgo: 30, updatedAgo: 20, addedOrder: 11,
   },
   {
     id: 'neon-monastery', title: 'Neon Monastery', author: 'Ivo Sato', art: ART.neon, publishing: 'Ongoing', status: 'planned',
-    collections: ['slice'], tags: ['Cyberpunk', 'Webtoon'],
+    tabs: ['slice'], tags: ['Cyberpunk', 'Webtoon'],
     description: 'Monks maintain the last analog servers in a city that has forgotten them.',
     sources: [{ sourceId: 'webtoons', chapters: 22, following: true, main: true }],
     chapters: makeChapters('nm', { total: 22, read: 0, sourceId: 'mangadex' }), inLibrary: true, updatedAgo: 48, addedOrder: 12,
   },
   {
     id: 'rust-belt', title: 'Rust Belt Saints', author: 'Dee Okafor', art: ART.rust, publishing: 'Completed', status: 'completed',
-    collections: ['slice'], tags: ['Drama'],
+    tabs: ['slice'], tags: ['Drama'],
     description: 'Three friends restore a dead factory town one storefront at a time.',
     sources: [{ sourceId: 'mangaplus', chapters: 60, following: false, main: true }],
     chapters: makeChapters('rb', { total: 60, read: 60, sourceId: 'mangaplus' }), inLibrary: true, lastReadAgo: 800, updatedAgo: 2000, addedOrder: 13,
   },
   {
     id: 'crown-ash', title: 'Crown of Ash', author: 'Hal Brenner', art: ART.ash, publishing: 'Hiatus', status: 'dropped',
-    collections: ['romance'], tags: ['Fantasy', 'Romance'],
+    tabs: ['romance'], tags: ['Fantasy', 'Romance'],
     description: 'A political marriage between two people who have each been ordered to kill the other.',
     sources: [{ sourceId: 'mangadex', chapters: 34, following: false, main: true }],
     chapters: makeChapters('ca', { total: 34, read: 12, sourceId: 'mangadex' }), inLibrary: true, lastReadAgo: 1200, updatedAgo: 3000, addedOrder: 14,
   },
   {
     id: 'vapor-hearts', title: 'Vapor Hearts', author: 'Rio Tan', art: ART.vapor, publishing: 'Ongoing', status: 'reading',
-    collections: ['romance', 'favourites'], tags: ['Romance', 'Webtoon'],
+    tabs: ['romance', 'favourites'], tags: ['Romance', 'Webtoon'],
     description: 'Two rival bakers share a single industrial oven.',
     sources: [{ sourceId: 'webtoons', chapters: 70, following: true, main: true }],
     chapters: makeChapters('vh', { total: 70, read: 70, sourceId: 'mangadex' }), inLibrary: true, lastReadAgo: 90, updatedAgo: 100, addedOrder: 15,
   },
   {
     id: 'iron-moth', title: 'Iron Moth', author: 'Sena Holt', art: ART.moth, publishing: 'Ongoing', status: 'planned',
-    collections: [], tags: ['Mecha'],
+    tabs: [], tags: ['Mecha'],
     description: 'A pilot whose mech only works at night.',
     sources: [{ sourceId: 'bato', chapters: 18, following: true, main: true }],
     chapters: makeChapters('im', { total: 18, read: 0, sourceId: 'bato' }), inLibrary: true, updatedAgo: 400, addedOrder: 16,
   },
 ]
 
-export const COLLECTIONS: Collection[] = [
-  { id: 'favourites', name: 'Favourites' },
-  { id: 'action', name: 'Action' },
-  { id: 'slice', name: 'Slice of life' },
-  { id: 'romance', name: 'Romance' },
+export const LIBRARY_TABS: LibraryTab[] = [
+  { id: 'reading', kind: 'reading', name: 'Reading' },
+  { id: 'all', kind: 'all', name: 'All' },
+  { id: 'favourites', kind: 'tab', name: 'Favourites' },
+  { id: 'action', kind: 'tab', name: 'Action' },
+  { id: 'slice', kind: 'tab', name: 'Slice of life' },
+  { id: 'romance', kind: 'tab', name: 'Romance' },
+  { id: 'webtoons', kind: 'smart', name: 'Webtoons', filters: { statuses: [], newOnly: false, progress: 'any', tag: 'Webtoon' } },
 ]
 
 // One very long chapter to exercise the reader with hundreds of pages.

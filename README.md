@@ -19,8 +19,9 @@ Mobile-only PWA (React + Vite). It currently runs on **dummy data** (`src/data/m
 - `npm run dev` → open port 5173 (in the codespace, from the Ports tab).
 - `npm run build` renders the PWA icons from `public/icon.svg`, type-checks and builds to `dist/`.
 - Screens: Home feed, Library (tabs, filters, groups, collections), Entry details, Search, Sources, Source browse, Reader (webtoon by default, paged optional), Settings.
-- Navigation uses the View Transitions API: pushes slide in from the right, back slides out to the right. In the installed app, swiping from the left edge goes back.
-- Library: collections are root folders; titles outside any collection sit below them.
+- Navigation is a native-style screen stack: pushes slide in from the right over the darkened previous screen; back reverses it. In the installed app, swiping from the left edge drags the screen away and reveals the real previous one.
+- Library: tabs you can swipe between (Reading, All, your own tabs, saved filters).
+- Updates: each deploy ships a new service worker; the app shows "New version available · Restart".
 - App lock: a device passkey (Face ID / Touch ID / fingerprint) guards the app on this device. Turn it on in Settings.
 - State lives in `src/data/store.tsx`; swapping the mock for Suwayomi only needs that layer to change.
 - Icons: Hugeicons (`@hugeicons/react` + `@hugeicons/core-free-icons`).

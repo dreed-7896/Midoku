@@ -1,12 +1,12 @@
-import React, { useRef } from 'react'
+import React, { useCallback } from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { MiniPlayer, TabBar, Toast } from './components/Chrome'
+import { BrowserRouter, Route, useLocation } from 'react-router-dom'
+import { MiniPlayer, TabBar, Toast, UpdateCard } from './components/Chrome'
 import { LockGate } from './components/Lock'
-import { useEdgeSwipeBack, useNavEffects } from './components/Nav'
-import { useSettings } from './data/settings'
+import { StackRoutes } from './components/Nav'
+import { getSettings } from './data/settings'
 import { StoreProvider } from './data/store'
-import CollectionPage from './pages/CollectionPage'
+import { registerServiceWorker } from './data/update'
 import EntryPage from './pages/Entry'
 import Home from './pages/Home'
 import Library from './pages/Library'
@@ -20,20 +20,18 @@ import './styles.css'
 const TAB_ROOTS = ['/', '/library', '/search', '/sources']
 
 function App() {
-  useNavEffects()
   const { pathname } = useLocation()
-  const { readerMode } = useSettings()
-  const screen = useRef<HTMLDivElement>(null)
   const reading = pathname.startsWith('/read/')
   // Paged reading swipes sideways, so the edge-back gesture stays off there.
-  useEdgeSwipeBack(screen, !TAB_ROOTS.includes(pathname) && !(reading && readerMode === 'paged'), '/library')
+  const canSwipeBack = useCallback(
+    (path: string) => !TAB_ROOTS.includes(path) && !(path.startsWith('/read/') && getSettings().readerMode === 'paged'),
+    [],
+  )
   return (
     <div className="app">
-      <div className="screen" ref={screen}>
-      <Routes>
+      <StackRoutes canSwipeBack={canSwipeBack}>
         <Route path="/" element={<Home />} />
         <Route path="/library" element={<Library />} />
-        <Route path="/library/c/:id" element={<CollectionPage />} />
         <Route path="/entry/:id" element={<EntryPage />} />
         <Route path="/search" element={<Search />} />
         <Route path="/sources" element={<Sources />} />
@@ -41,10 +39,10 @@ function App() {
         <Route path="/read/:entryId/:chapterId" element={<Reader />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Home />} />
-      </Routes>
-      </div>
+      </StackRoutes>
       {!reading && (
         <div className="dock">
+          <UpdateCard />
           <MiniPlayer />
           <TabBar />
         </div>
@@ -65,6 +63,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 )
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
-}
+if (import.meta.env.PROD) registerServiceWorker()

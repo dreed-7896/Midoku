@@ -1,9 +1,11 @@
-import { ReactNode, useEffect } from 'react'
+import { ReactNode, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
 import { resumeChapter, useStore } from '../data/store'
 import { Cover } from './Art'
 import { Icon, IconName } from './Icon'
-import { TLink, useNav } from './Nav'
+import { currentScroller, TLink, useNav } from './Nav'
+import { restartToUpdate, useUpdateReady } from '../data/update'
 
 const TABS: { to: string; label: string; icon: IconName }[] = [
   { to: '/', label: 'Home', icon: 'home' },
@@ -21,7 +23,7 @@ export function TabBar() {
         <NavLink key={t.to} to={t.to} end={t.to === '/'} className={({ isActive }) => `tabbar__item${isActive ? ' is-active' : ''}`}
           onClick={(e) => {
             e.preventDefault()
-            if (pathname === t.to) window.scrollTo({ top: 0, behavior: 'smooth' })
+            if (pathname === t.to) currentScroller()?.scrollTo({ top: 0, behavior: 'smooth' })
             else nav.go(t.to, { tab: true })
           }}>
           <Icon name={t.icon} size={22} />
@@ -62,6 +64,21 @@ export function MiniPlayer() {
   )
 }
 
+/** Shown when a new deploy has been downloaded; restarting switches to it. */
+export function UpdateCard() {
+  const ready = useUpdateReady()
+  const [hidden, setHidden] = useState(false)
+  if (!ready || hidden) return null
+  return (
+    <div className="update" role="status">
+      <span className="update__icon"><Icon name="refresh" size={18} /></span>
+      <span className="update__text"><strong>New version available</strong><span>Restart to update</span></span>
+      <button type="button" className="btn btn--accent btn--sm" onClick={restartToUpdate}>Restart</button>
+      <button type="button" className="mini__close" aria-label="Later" onClick={() => setHidden(true)}><Icon name="x" size={16} /></button>
+    </div>
+  )
+}
+
 export function Toast() {
   const { toastMessage } = useStore()
   return <div className={`toast${toastMessage ? ' is-on' : ''}`} role="status" aria-live="polite">{toastMessage}</div>
@@ -96,7 +113,8 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
     return () => { document.body.style.overflow = '' }
   }, [open])
   if (!open) return null
-  return (
+  // Rendered at the top level so it sits above the tab bar, not inside the screen's layer.
+  return createPortal(
     <div className="sheet-wrap">
       <button type="button" className="sheet-scrim" aria-label="Close" onClick={onClose} />
       <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
@@ -106,7 +124,8 @@ export function Sheet({ open, title, onClose, children }: { open: boolean; title
         </div>
         <div className="sheet__body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -1,5 +1,5 @@
 import { newCount, progressPct, readCount, resumeChapter, useStore, visibleChapters } from '../data/store'
-import type { Collection, Entry } from '../data/types'
+import type { Entry } from '../data/types'
 import { Cover } from './Art'
 import { Icon } from './Icon'
 import { TLink as Link } from './Nav'
@@ -61,24 +61,5 @@ export function EntryGrid({ entries }: { entries: Entry[] }) {
       {series.map((e) => <SeriesCard key={e.id} entry={e} />)}
       {singles.length > 0 && <div className="grid3">{singles.map((e) => <LibraryCard key={e.id} entry={e} />)}</div>}
     </>
-  )
-}
-
-/** A collection shown as a folder with a shelf of its first covers. */
-export function FolderTile({ collection, entries }: { collection: Collection; entries: Entry[] }) {
-  const fresh = entries.reduce((n, e) => n + newCount(e), 0)
-  const shelf = entries.slice(0, 3)
-  return (
-    <Link to={`/library/c/${collection.id}`} className="folder">
-      <div className="folder__shelf">
-        {shelf.map((e) => <Cover key={e.id} art={e.art} title={e.title} plain />)}
-        {Array.from({ length: 3 - shelf.length }, (_, i) => <span key={i} className="folder__empty" />)}
-      </div>
-      <div className="folder__body">
-        <span className="folder__name"><Icon name="folder" size={16} stroke={2} />{collection.name}</span>
-        <span className="card-meta">{entries.length} title{entries.length === 1 ? '' : 's'}{fresh ? ` · ${fresh} new` : ''}</span>
-      </div>
-      {fresh > 0 && <span className="badge badge--tr">{fresh}</span>}
-    </Link>
   )
 }

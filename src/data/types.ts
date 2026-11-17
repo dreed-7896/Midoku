@@ -67,8 +67,8 @@ export interface Entry {
   art: CoverArt
   publishing: 'Ongoing' | 'Completed' | 'Hiatus'
   status: Status
-  /** Ids of the collections (root folders) this entry is filed in. */
-  collections: string[]
+  /** Ids of the library tabs (categories) this entry shows in. */
+  tabs: string[]
   tags: string[]
   description: string
   sources: EntrySource[]
@@ -80,12 +80,6 @@ export interface Entry {
   /** Hours since new chapters arrived. */
   updatedAgo: number
   addedOrder: number
-}
-
-/** A root folder in the library. An entry can sit in more than one. */
-export interface Collection {
-  id: string
-  name: string
 }
 
 export interface CatalogItem {
@@ -103,11 +97,13 @@ export interface LibraryFilters {
   tag?: string
 }
 
-export type GroupBy = 'collection' | 'status' | 'source' | 'none'
+export type GroupBy = 'tab' | 'status' | 'source' | 'none'
 export type SortBy = 'recent' | 'title' | 'added' | 'updated'
 
 export type LibraryTab =
   | { id: string; kind: 'reading'; name: string }
-  | { id: string; kind: 'collections'; name: string }
   | { id: string; kind: 'all'; name: string }
+  /** A category the person files titles into. */
+  | { id: string; kind: 'tab'; name: string }
+  /** Saved filters that update as the library changes. */
   | { id: string; kind: 'smart'; name: string; filters: LibraryFilters }

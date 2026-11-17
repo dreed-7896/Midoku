@@ -41,6 +41,7 @@ export default function EntryPage() {
   }
 
   const all = visibleChapters(entry)
+  const userTabs = store.tabs.filter((t) => t.kind === 'tab')
   const removed = entry.chapters.filter((c) => c.removed)
   const kids = store.children(entry.id)
   const resume = resumeChapter(entry)
@@ -125,11 +126,11 @@ export default function EntryPage() {
           </select>
           <Icon name="chevronDown" size={14} stroke={2} />
         </label>
-        {entry.collections.map((id) => store.collection(id)).filter(Boolean).map((c) => (
-          <Link key={c!.id} to={`/library/c/${c!.id}`} className="chip"><Icon name="folder" size={14} stroke={2} />{c!.name}</Link>
+        {userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => (
+          <button key={t.id} type="button" className="chip" onClick={() => setFiling(true)}>{t.name}</button>
         ))}
         <button type="button" className="chip chip--dashed" onClick={() => setFiling(true)}>
-          <Icon name="plus" size={15} />{entry.collections.length ? '' : 'Add to collection'}
+          <Icon name="plus" size={15} />{entry.tabs.length ? '' : 'Add to tab'}
         </button>
       </div>
 
@@ -268,20 +269,20 @@ export default function EntryPage() {
         )}
       </section>
 
-      <Sheet open={filing} title="Collections" onClose={() => setFiling(false)}>
-        <p className="hint">Collections are folders at the top of your library. A title can be in more than one.</p>
+      <Sheet open={filing} title="Library tabs" onClose={() => setFiling(false)}>
+        <p className="hint">Pick the tabs this title shows in. A title can be in more than one.</p>
         <div className="check-list">
-          {store.collections.map((c) => (
-            <label key={c.id} className="check-row">
-              <span className="check-row__name"><Icon name="folder" size={18} stroke={2} />{c.name}</span>
-              <input type="checkbox" checked={entry.collections.includes(c.id)} onChange={() => store.toggleInCollection(entry.id, c.id)} />
+          {userTabs.map((t) => (
+            <label key={t.id} className="check-row">
+              <span className="check-row__name">{t.name}</span>
+              <input type="checkbox" checked={entry.tabs.includes(t.id)} onChange={() => store.toggleInTab(entry.id, t.id)} />
             </label>
           ))}
         </div>
         <button type="button" className="btn btn--ghost btn--block" onClick={() => {
-          const name = window.prompt('Name the new collection')
-          if (name?.trim()) store.toggleInCollection(entry.id, store.createCollection(name.trim()))
-        }}><Icon name="plus" size={16} />New collection</button>
+          const name = window.prompt('Name the new tab')
+          if (name?.trim()) store.toggleInTab(entry.id, store.createTab(name.trim()))
+        }}><Icon name="plus" size={16} />New tab</button>
       </Sheet>
 
       {selecting && (

@@ -1,9 +1,16 @@
 // App-shell cache: built assets are cache-first, page loads fall back to the cached shell offline.
-const CACHE = 'midoku-v1'
+// __VERSION__ is replaced at build time, so every deploy ships a changed worker the app can offer as an update.
+const VERSION = '__VERSION__'
+const CACHE = `midoku-${VERSION}`
 const SHELL = ['/', '/manifest.webmanifest', '/icon.svg']
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()))
+  // No skipWaiting here: the new worker waits until the person taps Restart.
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)))
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
