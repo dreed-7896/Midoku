@@ -294,21 +294,28 @@ export function RemoteSearch() {
     return () => clearTimeout(t)
   }, [query])
 
+  // An extension's "All" source covers every language in one search; only extensions without one
+  // fall back to searching each language. "English only" uses the English source instead.
   const groups = useMemo(() => {
     const map = new Map<string, SearchGroup>()
     for (const s of sources ?? []) {
-      if ((english && s.lang !== 'en' && s.lang !== 'all') || (hideNsfw && s.isNsfw)) continue
+      if (hideNsfw && s.isNsfw) continue
       const key = s.extension?.pkgName ?? s.id
       const g = map.get(key) ?? { key, pkg: s.extension?.pkgName ?? '', name: s.name, iconUrl: s.iconUrl, sources: [] }
       g.sources.push(s)
       map.set(key, g)
     }
-    return [...map.values()].map((g) => ({ ...g, sources: byLanguage(g.sources) }))
+    const pick = (list: SearchSource[]) => {
+      const of = (lang: string) => list.filter((s) => s.lang === lang)
+      if (english) return of('en').length ? of('en') : of('all')
+      return of('all').length ? of('all') : byLanguage(list)
+    }
+    return [...map.values()].map((g) => ({ ...g, sources: pick(g.sources) })).filter((g) => g.sources.length)
   }, [sources, english, hideNsfw])
   const groupsKey = groups.map((g) => g.sources.map((s) => s.id).join()).join('|')
 
-  // Every extension's main language goes first so each section fills in quickly; the other
-  // languages follow and are merged in, skipping titles already shown. Four requests at a time.
+  // One request per extension first so each section fills in quickly; extra languages (for
+  // extensions without an "All" source) follow and are merged in without duplicates. Four at a time.
   useEffect(() => {
     if (!debounced || !groups.length) return
     const id = ++run.current
