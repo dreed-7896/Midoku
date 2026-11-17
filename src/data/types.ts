@@ -61,6 +61,8 @@ export interface Chapter {
   bookmarked: boolean
   downloaded: boolean
   isNew: boolean
+  /** Pages added since the server last fetched this chapter (found by the update check). */
+  newPages?: number
   /** Number of physical chapters (source variants) stacked in this slot. */
   versions: number
   sourceId: string

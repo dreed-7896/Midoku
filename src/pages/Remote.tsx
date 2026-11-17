@@ -2,32 +2,47 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Cover, SourceIcon } from '../components/Art'
-import { Chip, IconButton, PageHead } from '../components/Chrome'
+import { Chip, IconButton, PageHead, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { Banner, Empty, Loading } from '../components/Status'
 import { TLink as Link, useNav } from '../components/Nav'
 import { useStore } from '../data/store'
 import {
   artFor, assetUrl, browseSource, byLanguage, changeExtension, getExtensions, getExtensionSources, getSources, refreshExtensions,
-  SExtension, SMangaCard, SSource,
+  SExtension, SMangaCard, SSource, webviewUrl,
 } from '../data/suwayomi'
 
 const PAGE_SIZE = 60
+
+// Kept for the session so Sources and Search open straight away; they refresh quietly in the background.
+let extCache: SExtension[] | null = null
+let sourceCache: SearchSource[] | null = null
+let lastSearch: { query: string; results: Record<string, SearchResult> } = { query: '', results: {} }
 const ICON_BG = '#22222A'
 
 /** Turns source errors into something readable; Cloudflare blocks get advice. */
 export function sourceError(message: string): { title: string; detail: string } {
   if (/cloudflare|captcha|challenge|\b403\b|\b503\b/i.test(message)) {
-    return { title: 'Verification needed', detail: 'This source is behind Cloudflare. Turn on FlareSolverr in Suwayomi, or open the source once in its WebView.' }
+    return { title: 'Verification needed', detail: 'This source is behind a Cloudflare check that FlareSolverr couldn\'t pass. Open it in WebView, solve the check there, close it and press Retry.' }
   }
   // Server errors can carry a whole stack trace; keep the readable start.
   const first = message.split(/\s+at\s+[\w$./]+\(|\n/)[0].replace(/^Exception while fetching data \([^)]*\)\s*:\s*/, '').trim()
   return { title: "Couldn't load this source", detail: first.length > 160 ? `${first.slice(0, 160)}…` : first }
 }
 
-function Notice({ title, detail, onRetry }: { title: string; detail: string; onRetry?: () => void }) {
-  return <Empty icon="alert" tone="error" title={title} detail={detail} action={onRetry ? { label: 'Retry', onClick: onRetry } : undefined} />
+function Notice({ title, detail, onRetry, webview }: { title: string; detail: string; onRetry?: () => void; webview?: string | null }) {
+  return (
+    <>
+      <Empty icon="alert" tone="error" title={title} detail={detail} action={onRetry ? { label: 'Retry', onClick: onRetry } : undefined} />
+      {webview && title === 'Verification needed' && (
+        <div className="center pad-t-sm"><button type="button" className="btn btn--ghost" onClick={() => openWebview(webview)}><Icon name="globe" size={16} />Open in WebView</button></div>
+      )}
+    </>
+  )
 }
+
+/** Opens the source in Suwayomi's WebView, in a new tab. */
+const openWebview = (url: string) => window.open(webviewUrl(url), '_blank', 'noopener')
 
 const langLabel = (lang: string) => (lang === 'all' ? 'Multi' : lang.toUpperCase())
 
@@ -49,7 +64,8 @@ export function RemoteSources() {
   const [tab, setTab] = useState<'installed' | 'available'>('installed')
   const [query, setQuery] = useState('')
   const [lang, setLang] = useState('all-langs')
-  const [exts, setExts] = useState<SExtension[] | null>(null)
+  const [exts, setExtsState] = useState<SExtension[] | null>(extCache)
+  const setExts = (list: SExtension[]) => { extCache = list; setExtsState(list) }
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState<string | null>(null)
   const [limit, setLimit] = useState(PAGE_SIZE)
@@ -59,8 +75,9 @@ export function RemoteSources() {
     try {
       setExts(refresh ? await refreshExtensions() : await getExtensions())
     } catch (e) {
-      setError((e as Error).message)
+      if (!extCache) setError((e as Error).message)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -184,6 +201,26 @@ export function RemoteBrowse() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
+  const [actions, setActions] = useState(false)
+  const [busy, setBusy] = useState<'update' | 'uninstall' | null>(null)
+
+  const extAction = async (action: 'update' | 'uninstall') => {
+    if (!ext) return
+    if (action === 'uninstall' && !window.confirm(`Uninstall ${ext.name}? Titles from it stay in your library, but can't load until it's installed again.`)) return
+    setBusy(action)
+    try {
+      await changeExtension(ext.pkgName, action)
+      extCache = null
+      setActions(false)
+      store.toast(action === 'update' ? `${ext.name} updated` : `${ext.name} uninstalled`)
+      if (action === 'uninstall') nav.back('/sources')
+      else setExt({ ...ext, hasUpdate: false })
+    } catch (e) {
+      store.toast((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   useEffect(() => {
     setExt(undefined); setExtError(undefined); setSourceId(undefined); setItems([]); setPage(1)
@@ -222,7 +259,33 @@ export function RemoteBrowse() {
       <div className="entry__backdrop entry__backdrop--short" style={{ background: '#1A1A22' }} aria-hidden="true"><span style={{ background: '#FF6B5E' }} /></div>
       <div className="entry__top">
         <IconButton icon="back" label="Back" glass onClick={() => nav.back('/sources')} />
+        {ext && (
+          <span className="row-gap">
+            {source?.baseUrl && <IconButton icon="globe" label="Open in WebView" glass onClick={() => openWebview(source.baseUrl!)} />}
+            <IconButton icon="more" label="Extension actions" glass onClick={() => setActions(true)} />
+          </span>
+        )}
       </div>
+      <Sheet open={actions} title={ext?.name ?? 'Extension'} onClose={() => setActions(false)}>
+        <div className="menu">
+          {source?.baseUrl && (
+            <button type="button" className="menu__row" onClick={() => { setActions(false); openWebview(source.baseUrl!) }}>
+              <span className="menu__icon"><Icon name="globe" size={20} /></span>
+              <span className="menu__text"><strong>Open in WebView</strong><span>Solve Cloudflare checks or log in to the site</span></span>
+            </button>
+          )}
+          {ext?.hasUpdate && (
+            <button type="button" className="menu__row" disabled={!!busy} onClick={() => void extAction('update')}>
+              <span className="menu__icon"><Icon name="refresh" size={20} /></span>
+              <span className="menu__text"><strong>{busy === 'update' ? 'Updating…' : 'Update'}</strong><span>A newer version is available</span></span>
+            </button>
+          )}
+          <button type="button" className="menu__row" disabled={!!busy} onClick={() => void extAction('uninstall')}>
+            <span className="menu__icon"><Icon name="trash" size={20} /></span>
+            <span className="menu__text"><strong>{busy === 'uninstall' ? 'Uninstalling…' : 'Uninstall'}</strong><span>Titles in your library keep their progress</span></span>
+          </button>
+        </div>
+      </Sheet>
       <div className="source-head pad-x">
         <SourceIcon letter={(ext?.name ?? pkg)[0] ?? '?'} color={ICON_BG} size={68} url={ext ? assetUrl(ext.iconUrl) : undefined} />
         <div>
@@ -256,7 +319,7 @@ export function RemoteBrowse() {
         )}
       </div>
 
-      {error && <div className="pad-x pad-t"><Notice {...sourceError(error)} onRetry={() => setAttempt((n) => n + 1)} /></div>}
+      {error && <div className="pad-x pad-t"><Notice {...sourceError(error)} webview={source?.baseUrl} onRetry={() => setAttempt((n) => n + 1)} /></div>}
       <div className="grid3 pad-x pad-t">
         {items.map((m, i) => <MangaCard key={`${m.id}-${i}`} m={m} />)}
       </div>
@@ -279,14 +342,19 @@ const titleKey = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 
 export function RemoteSearch() {
   const store = useStore()
-  const [query, setQuery] = useState('')
-  const [debounced, setDebounced] = useState('')
-  const [sources, setSources] = useState<SearchSource[] | null>(null)
+  const [query, setQuery] = useState(lastSearch.query)
+  const [debounced, setDebounced] = useState(lastSearch.query)
+  const [sources, setSources] = useState<SearchSource[] | null>(sourceCache)
   const [error, setError] = useState<string>()
-  const [results, setResults] = useState<Record<string, SearchResult>>({})
+  const [results, setResults] = useState<Record<string, SearchResult>>(lastSearch.results)
   const run = useRef(0)
+  // The search shown when the screen opens again is the one left behind, not run again.
+  const restored = useRef(lastSearch.query)
+  useEffect(() => { lastSearch = { query: debounced, results } }, [debounced, results])
 
-  useEffect(() => { getSources().then(setSources).catch((e: Error) => setError(e.message)) }, [])
+  useEffect(() => {
+    getSources().then((list) => { sourceCache = list; setSources(list) }).catch((e: Error) => { if (!sourceCache) setError(e.message) })
+  }, [])
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 400)
     return () => clearTimeout(t)
@@ -314,6 +382,9 @@ export function RemoteSearch() {
   // extensions without an "All" source) follow and are merged in without duplicates. Four at a time.
   useEffect(() => {
     if (!debounced || !groups.length) return
+    const finished = Object.values(results).length > 0 && Object.values(results).every((r) => r.done >= r.total)
+    if (restored.current && restored.current === debounced && finished) { restored.current = ''; return }
+    restored.current = ''
     const id = ++run.current
     setResults(Object.fromEntries(groups.map((g) => [g.key, { done: 0, total: g.sources.length, items: [], errors: [] } as SearchResult])))
     const depth = Math.max(...groups.map((g) => g.sources.length))
@@ -415,7 +486,7 @@ export function RemoteSearch() {
                   <Icon name="chevronRight" size={18} />
                 </Link>
                 {!r.items.length && searching && <div className="pad-x"><Loading label={`Searching ${g.name}`} shape="rail" /></div>}
-                {failed && <div className="pad-x"><Notice {...sourceError(r.errors[0] ?? '')} /></div>}
+                {failed && <div className="pad-x"><Notice {...sourceError(r.errors[0] ?? '')} webview={g.sources[0]?.baseUrl} /></div>}
                 {r.items.length > 0 && <div className="rail">{r.items.map((m) => <MangaCard key={m.id} m={m} rail />)}</div>}
               </section>
             )

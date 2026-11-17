@@ -2,7 +2,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
   DbLibrary, deleteEntryRow, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
-  saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
+  notePageGrowth, saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
 import type { ChapterStateRow } from './db'
 import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
@@ -13,7 +13,7 @@ import {
 import { ENTRIES, LIBRARY_TABS, SOURCES } from './mock'
 import { recordLocalHistory } from './history'
 import { useSettings } from './settings'
-import { assetUrl, getChapters, getManga, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toEntry } from './suwayomi'
+import { assetUrl, getChapters, getManga, getPages, getMangaSummaries, hoursSince, resolveManga, SChapter, SManga, toChapter, toEntry } from './suwayomi'
 import type { Chapter, CustomDetails, ReaderMode, Entry, EntrySource, InsertedChapter, LibraryFilters, LibraryTab, PageLayout, Source, Status } from './types'
 
 /*
@@ -312,6 +312,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       checking = true
       set((s) => ({ ...s, updating: { done: 0, total: list.length } }))
       let found = 0
+      let grew = 0
       let failures = 0
       const jobs = [...list]
       const worker = async () => {
@@ -322,6 +323,19 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
             if (!sources.length) throw new Error('No followed source')
             const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, true).then((chapters) => ({ sourceId: s.sourceId, name: s.name, segment: s.segment, chapters }))))
             const merged = mergeChapters(lists, e.renumber)
+            // The newest chapter can gain pages after it comes out. When the server has fetched its pages
+            // before, they are fetched again and compared; more pages are noted for Updates.
+            const main = lists[0]
+            const latest = [...main.chapters].sort((a, b) => b.chapterNumber - a.chapterNumber || Number(b.uploadDate) - Number(a.uploadDate))[0]
+            if (latest && latest.pageCount > 0 && e.dbId) {
+              const now = await getPages(latest.id).then((p) => p.length).catch(() => 0)
+              if (now > latest.pageCount) {
+                grew++
+                const c = toChapter(latest, main.sourceId)
+                notePageGrowth({ entry_id: e.dbId, source_id: main.sourceId, chapter_url: latest.url, chapter_number: c.number, chapter_label: c.label, pages: now, pages_before: latest.pageCount })
+                editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((ch) => (ch.remoteId === latest.id ? { ...ch, pages: now, newPages: now - latest.pageCount } : ch)) }))
+              }
+            }
             const cur = find(e.id)
             if (cur) {
               const before = cur.chapters.length || (cur.counts?.total ?? 0)
@@ -342,9 +356,11 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       }
       await Promise.all([worker(), worker(), worker()])
       checking = false
-      set((s) => ({ ...s, updating: null, updatesSeen: found ? false : s.updatesSeen }))
+      set((s) => ({ ...s, updating: null, updatesSeen: found || grew ? false : s.updatesSeen }))
       try { localStorage.setItem(UPDATED_KEY, String(Date.now())) } catch { /* checked again next launch */ }
-      if (found) toast(`${found} title${found === 1 ? ' has' : 's have'} new chapters`)
+      const pagesNote = grew ? `${grew} chapter${grew === 1 ? '' : 's'} got new pages` : ''
+      if (found) toast(`${found} title${found === 1 ? ' has' : 's have'} new chapters${pagesNote ? ` · ${pagesNote}` : ''}`)
+      else if (grew) toast(pagesNote)
       else if (failures === list.length) toast("Couldn't reach the server")
       else if (!quiet) toast('No new chapters')
     }
@@ -753,7 +769,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
   }, [set, get])
 }
 
-type Store = State & ReturnType<typeof useActions> & {
+export type Store = State & ReturnType<typeof useActions> & {
   entry: (id: string) => Entry | undefined
   source: (id: string) => Source | undefined
   children: (id: string) => Entry[]
@@ -994,6 +1010,9 @@ export function progressPct(e: Entry): number {
   const total = totalCount(e)
   return total ? Math.round((readCount(e) / total) * 100) : 0
 }
+
+/** "just now", "3h ago", "2d ago". */
+export const agoText = (hours: number) => (hours < 1 ? 'just now' : `${agoLabel(hours)} ago`)
 
 export function agoLabel(hours: number): string {
   if (hours < 1) return 'now'

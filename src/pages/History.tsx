@@ -6,8 +6,10 @@ import { useNav } from '../components/Nav'
 import { Empty, Loading } from '../components/Status'
 import { clearHistoryRows, loadHistory } from '../data/db'
 import { clearLocalHistory, readLocalHistory } from '../data/history'
-import { useStore, visibleChapters } from '../data/store'
-import type { Chapter, Entry } from '../data/types'
+import { dayLabel, timeLabel } from '../data/dates'
+import { openChapter } from '../data/openChapter'
+import { useStore } from '../data/store'
+import type { Entry } from '../data/types'
 
 /** One title's latest read: the History screen shows one row per title, newest first. */
 interface Item {
@@ -21,17 +23,6 @@ interface Item {
   sourceId?: string
   chapterUrl?: string
 }
-
-const dayLabel = (t: number) => {
-  const d = new Date(t)
-  const start = new Date(); start.setHours(0, 0, 0, 0)
-  const diff = Math.round((start.getTime() - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000)
-  if (diff <= 0) return 'Today'
-  if (diff === 1) return 'Yesterday'
-  if (diff < 7) return d.toLocaleDateString('en', { weekday: 'long' })
-  return d.toLocaleDateString('en', { day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' })
-}
-const timeLabel = (t: number) => new Date(t).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })
 
 export default function History() {
   const store = useStore()
@@ -97,16 +88,7 @@ export default function History() {
   const resume = async (it: Item) => {
     setOpening(it.entry.id)
     try {
-      if (server && !it.entry.remote?.chaptersLoaded && it.entry.remote) await store.loadEntry(it.entry.id)
-      const e = store.entry(it.entry.id) ?? it.entry
-      const shown = [...visibleChapters(e)].sort((a, b) => a.number - b.number)
-      const matches = (c: Chapter) => it.chapterId ? c.id === it.chapterId
-        : (c.sourceId === it.sourceId && c.sourceUrl === it.chapterUrl) || !!c.alts?.some((a) => a.sourceId === it.sourceId && a.url === it.chapterUrl)
-      const whole = e.chapters.find(matches)
-      const i = shown.findIndex((c) => matches(c) || (!!whole && c.physicalId === whole.id && !c.read))
-      if (i < 0) { nav.go(`/entry/${e.id}`); return }
-      const c = shown[i].read && shown[i + 1] ? shown[i + 1] : shown[i]
-      nav.go(`/read/${e.id}/${c.id}`)
+      await openChapter(store, (to) => nav.go(to), it.entry.id, { chapterId: it.chapterId, sourceId: it.sourceId, url: it.chapterUrl }, true)
     } catch (err) {
       store.toast(`Couldn't open it: ${(err as Error).message}`)
     } finally {

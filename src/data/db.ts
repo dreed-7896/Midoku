@@ -120,6 +120,10 @@ export interface ChapterStateRow {
   /** Set when the chapter is read in the reader; drives the History screen. */
   read_at?: string | null
   chapter_label?: string | null
+  /** Set by the update check when a chapter gets more pages. */
+  pages?: number | null
+  pages_before?: number | null
+  pages_grew_at?: string | null
 }
 export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }
 export interface InsertedRow {
@@ -281,3 +285,18 @@ export async function loadHistory(limit = 400): Promise<HistoryRow[]> {
   return all<HistoryRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_label, chapter_number, page, read, read_at')
     .not('read_at', 'is', null).order('read_at', { ascending: false }).limit(limit))
 }
+
+/** Chapters that got new pages, newest first. */
+export const loadPageUpdates = (limit = 100) =>
+  all<HistoryRow & { pages: number; pages_before: number; pages_grew_at: string }>(db.from('chapter_states')
+    .select('entry_id, source_id, chapter_url, chapter_label, chapter_number, page, read, read_at, pages, pages_before, pages_grew_at')
+    .not('pages_grew_at', 'is', null).order('pages_grew_at', { ascending: false }).limit(limit))
+
+/** Read marks for these source chapters. */
+export const loadReadMarks = (urls: string[]) =>
+  urls.length ? all<{ entry_id: string; source_id: string; chapter_url: string; read: boolean; page: number }>(
+    db.from('chapter_states').select('entry_id, source_id, chapter_url, read, page').in('chapter_url', urls)) : Promise.resolve([])
+
+/** Notes that a chapter got more pages (only these columns, so progress on an existing row is kept). */
+export const notePageGrowth = (row: { entry_id: string; source_id: string; chapter_url: string; chapter_number: number; chapter_label: string; pages: number; pages_before: number }) =>
+  enqueue({ kind: 'upsert', table: 'chapter_states', rows: [{ ...row, pages_grew_at: now() }], onConflict: 'entry_id,source_id,chapter_url' })

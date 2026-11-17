@@ -10,7 +10,7 @@ import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
 import { Banner, Empty, Loading } from '../components/Status'
 import { chapterKey, getSaved, useDownloads } from '../data/downloads'
 import { layoutOf, physicalIdOf } from '../data/library'
-import { agoLabel, newCount, progressPct, readCount, resumeChapter, statusOf, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
+import { agoText, newCount, progressPct, readCount, resumeChapter, statusOf, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
 import { getChapters, getPages, SChapter, toChapter } from '../data/suwayomi'
 import { STATUS_LABEL, type Chapter } from '../data/types'
 
@@ -259,7 +259,7 @@ export default function EntryPage() {
           {entry.sources.length > 1 && <em>+{entry.sources.length - 1} more</em>}
         </button>
         <div className="fact"><span>Status</span><strong><span className={`dot dot--${entry.publishing.toLowerCase()}`} />{entry.publishing}</strong></div>
-        <button type="button" className="fact fact--btn" onClick={() => setPanel('edit')}><span>Reading</span><strong>{STATUS_LABEL[statusOf(entry)]}</strong><em>{entry.custom?.status ? 'set by you · ' : ''}{entry.lastReadAgo !== undefined ? `read ${agoLabel(entry.lastReadAgo)} ago` : 'never read'}</em></button>
+        <button type="button" className="fact fact--btn" onClick={() => setPanel('edit')}><span>Reading</span><strong>{STATUS_LABEL[statusOf(entry)]}</strong><em>{entry.custom?.status ? 'set by you · ' : ''}{entry.lastReadAgo !== undefined ? `read ${agoText(entry.lastReadAgo)}` : 'never read'}</em></button>
       </div>}
 
       {(entry.description || entry.tags.length > 0) && (

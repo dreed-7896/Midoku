@@ -61,6 +61,11 @@ export default function Reader() {
   const [modes, setModes] = useState(false)
   const [zoomed, setZoomed] = useState(false)
   const tapTimer = useRef<ReturnType<typeof setTimeout>>()
+  // Webtoon zoom: the strip is scaled inside a sizer as big as the scaled strip, so the scroller pans it natively.
+  const sizer = useRef<HTMLDivElement>(null)
+  const strip = useRef<HTMLDivElement>(null)
+  const wtScale = useRef(1)
+  const pinch = useRef<{ d0: number; s0: number } | null>(null)
   // Parts of split chapters and inserted chapters are found among the shown chapters.
   const chapter = entry ? visibleChapters(entry).find((c) => c.id === chapterId) ?? entry.chapters.find((c) => c.id === chapterId) : undefined
   const [versions, setVersions] = useState(false)
@@ -121,12 +126,24 @@ export default function Reader() {
         const before = heights.current.get(n)
         const after = el.offsetHeight
         heights.current.set(n, after)
-        if (before !== undefined && before !== after && el.offsetTop + before <= root.scrollTop) root.scrollTop += after - before
+        const z = wtScale.current
+        if (before !== undefined && before !== after && (el.offsetTop + before) * z <= root.scrollTop) root.scrollTop += (after - before) * z
       }
     })
     root.querySelectorAll('[data-page]').forEach((el) => ro.observe(el))
     return () => ro.disconnect()
   }, [chapterId, mode, pages])
+
+  // The sizer follows the strip as pages load and change height.
+  useEffect(() => {
+    const box = strip.current, size = sizer.current
+    if (!box || !size || mode !== 'webtoon') return
+    const ro = new ResizeObserver(() => { if (wtScale.current > 1) size.style.height = `${box.offsetHeight * wtScale.current}px` })
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [mode, chapterId, pages])
+  // A new chapter or mode starts unzoomed.
+  useEffect(() => { wtScale.current = 1; setZoomed(false) }, [chapterId, chosen])
 
   // Jumps (opening at a saved page, the slider) must not count as reading-scroll that hides the controls.
   const scrollToPage = useCallback((n: number, behavior: ScrollBehavior = 'auto') => {
@@ -184,6 +201,77 @@ export default function Reader() {
   const goChapter = (c: Chapter) =>
     nav.go(`/read/${entry.id}/${c.id}`, { replace: true, direction: c.number < chapter.number ? 'back' : 'forward' })
 
+  /** Scales the webtoon strip around a point of the screen (fx, fy from the scroller's top left). */
+  const zoomStrip = (target: number, fx: number, fy: number) => {
+    const root = scroller.current, box = strip.current, size = sizer.current
+    if (!root || !box || !size) return
+    const old = wtScale.current
+    const s = Math.min(4, Math.max(1, target))
+    const cx = (root.scrollLeft + fx) / old, cy = (root.scrollTop + fy) / old
+    wtScale.current = s
+    if (s <= 1.01) {
+      wtScale.current = 1
+      box.style.transform = ''; box.style.width = ''; size.style.width = ''; size.style.height = ''
+    } else {
+      const w = root.clientWidth
+      box.style.width = `${w}px`
+      box.style.transform = `scale(${s})`
+      size.style.width = `${w * s}px`
+      size.style.height = `${box.offsetHeight * s}px`
+    }
+    root.scrollLeft = cx * wtScale.current - fx
+    root.scrollTop = cy * wtScale.current - fy
+    setZoomed(wtScale.current > 1)
+  }
+  const rel = (x: number, y: number) => {
+    const r = scroller.current!.getBoundingClientRect()
+    return { fx: x - r.left, fy: y - r.top, w: r.width }
+  }
+  const onWtTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2) return
+    const [a, b] = [e.touches[0], e.touches[1]]
+    pinch.current = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), s0: wtScale.current }
+  }
+  const onWtTouchMove = (e: React.TouchEvent) => {
+    const p = pinch.current
+    if (!p || e.touches.length !== 2) return
+    const [a, b] = [e.touches[0], e.touches[1]]
+    const { fx, fy } = rel((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2)
+    zoomStrip(p.s0 * (Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / p.d0), fx, fy)
+  }
+  const onWtTouchEnd = (e: React.TouchEvent) => { if (e.touches.length < 2) pinch.current = null }
+
+  /**
+   * Taps. Paged: the left and right edges turn the page (reversed for right to left); elsewhere a tap shows or
+   * hides the controls. A double tap zooms, so the controls wait a moment for a second tap.
+   */
+  const onTap = (e: React.MouseEvent) => {
+    const { fx, fy, w } = rel(e.clientX, e.clientY)
+    if (mode === 'paged' && !zoomed && (fx < w * 0.3 || fx > w * 0.7)) {
+      const forward = (fx > w * 0.7) !== (chosen === 'rtl')
+      if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = undefined }
+      turn(forward ? 1 : -1)
+      return
+    }
+    if (tapTimer.current) {
+      clearTimeout(tapTimer.current); tapTimer.current = undefined
+      // Paged pages handle their own double tap (Zoomable); the webtoon strip zooms here.
+      if (mode === 'webtoon') zoomStrip(wtScale.current > 1 ? 1 : 2.5, fx, fy)
+      return
+    }
+    tapTimer.current = setTimeout(() => { tapTimer.current = undefined; setUi((v) => !v) }, 260)
+  }
+  const turn = (by: number) => {
+    const n = page + by
+    if (n < 1) return
+    if (n > pages) { scroller.current?.querySelector('.reader__end')?.scrollIntoView({ behavior: 'smooth', inline: 'start' }); return }
+    setPage(n)
+    scrollToPage(n, 'smooth')
+  }
+  const wrapStrip = (content: React.ReactNode) => mode === 'webtoon'
+    ? <div ref={sizer} className="wt-sizer"><div ref={strip} className="wt-strip">{content}</div></div>
+    : content
+
   const onScroll = () => {
     const el = scroller.current
     if (!el || mode !== 'webtoon') return
@@ -197,12 +285,9 @@ export default function Reader() {
 
   return (
     <div className={`reader reader--${mode}${chosen === 'rtl' ? ' reader--rtl' : ''}${zoomed ? ' is-zoomed' : ''}`}>
-      <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={() => {
-        // Paged pages zoom on a double tap, so a single tap waits a moment before toggling the controls.
-        if (mode === 'webtoon') { setUi((v) => !v); return }
-        if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = undefined; return }
-        tapTimer.current = setTimeout(() => { tapTimer.current = undefined; setUi((v) => !v) }, 260)
-      }}>
+      <div ref={scroller} className="reader__scroll" onScroll={onScroll} onClick={onTap}
+        onTouchStart={mode === 'webtoon' ? onWtTouchStart : undefined} onTouchMove={mode === 'webtoon' ? onWtTouchMove : undefined}
+        onTouchEnd={mode === 'webtoon' ? onWtTouchEnd : undefined} onTouchCancel={mode === 'webtoon' ? onWtTouchEnd : undefined}>
         {isRemote && !urls && (
           <div className="reader__loading" onClick={(e) => e.stopPropagation()}>
             {pagesError
@@ -210,6 +295,7 @@ export default function Reader() {
               : <Loading label={`Loading ${chapter.label}`} shape="page" />}
           </div>
         )}
+        {wrapStrip(<>
         {list.map((n) => {
           const near = Math.abs(n - page) <= WINDOW
           const known = heights.current.get(n)
@@ -247,6 +333,7 @@ export default function Reader() {
           )}
           <button type="button" className="btn btn--ghost" onClick={close}>Back to {entry.title}</button>
         </div>}
+        </>)}
       </div>
 
       <header className={`reader__top${ui ? '' : ' is-hidden'}`}>
@@ -392,6 +479,9 @@ function Zoomable({ active, onZoom, children }: { active: boolean; onZoom: (zoom
     if (view.current.s < 1.05) apply(1, 0, 0, true)
     if (!st || st.moved || st.d0 || Date.now() - st.t > 250) return
     const now = Date.now()
+    // The edges turn pages; only the middle zooms.
+    const r = box.current!.getBoundingClientRect()
+    if (st.px! < r.left + r.width * 0.3 || st.px! > r.left + r.width * 0.7) { lastTap.current = 0; return }
     if (now - lastTap.current < 300) {
       lastTap.current = 0
       const el = box.current!

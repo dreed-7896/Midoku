@@ -23,6 +23,7 @@ export interface SSource {
   iconUrl: string
   supportsLatest: boolean
   isNsfw: boolean
+  baseUrl?: string | null
 }
 
 export interface SMangaCard {
@@ -58,7 +59,7 @@ export interface SChapter {
 }
 
 const EXT = 'pkgName name lang iconUrl versionName isInstalled hasUpdate isNsfw'
-const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw'
+const SRC = 'id name displayName lang iconUrl supportsLatest isNsfw baseUrl'
 const CARD = 'id url title thumbnailUrl'
 const MANGA = `${CARD} author artist description genre status realUrl sourceId initialized source { id displayName iconUrl lang }`
 // Only what the source says. Reading state on the server is ignored; Midoku keeps its own.
@@ -81,6 +82,12 @@ export function assetUrl(path?: string | null): string {
   if (!path) return ''
   return /^https?:\/\//.test(path) ? path : `${serverBase()}${path.startsWith('/') ? '' : '/'}${path}`
 }
+
+/**
+ * Suwayomi's own WebView page for an address. The page runs in the server's browser, so a Cloudflare
+ * check solved there leaves its cookies on the server, where the source uses them.
+ */
+export const webviewUrl = (url: string) => `${serverBase()}/api/v1/webview#${encodeURIComponent(url)}`
 
 /** Fetches an image with the login attached (for servers with basic auth). */
 export async function fetchImage(url: string, signal?: AbortSignal): Promise<Blob> {
@@ -204,6 +211,16 @@ export async function resolveManga(sourceId: string, url: string, title: string)
   await browseSource(sourceId, 'SEARCH', 1, title)
   return findManga(sourceId, url)
 }
+
+export type SRecentChapter = SChapter & { mangaId: number }
+/** The newest chapters of these titles, across all of them. */
+export const getRecentChapters = (mangaIds: number[], first = 150) =>
+  mangaIds.length
+    ? gql<{ chapters: { nodes: SRecentChapter[] } }>(
+      `query($ids: [Int!], $first: Int) { chapters(filter: { mangaId: { in: $ids } }, orderBy: UPLOAD_DATE, orderByType: DESC, first: $first) { nodes { ${CHAPTER} mangaId } } }`,
+      { ids: mangaIds, first },
+    ).then((d) => d.chapters.nodes)
+    : Promise.resolve([])
 
 /** Page image URLs for a chapter. */
 export const getPages = (chapterId: number) =>
