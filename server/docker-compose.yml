@@ -1,8 +1,15 @@
 # Reachable only inside your Tailscale network (no public ports). Setup: server/README.md
 # Neutral names so it doesn't stand out in `docker ps` on a shared machine.
 name: ${STACK_NAME:-cache}
+
+# No container output is kept (docker logs stays empty).
+x-quiet: &quiet
+  logging:
+    driver: none
+
 services:
   net:
+    <<: *quiet
     container_name: ${STACK_NAME:-cache}-net
     image: tailscale/tailscale:stable
     hostname: ${TS_HOSTNAME:-node}
@@ -12,12 +19,15 @@ services:
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
       TS_SERVE_CONFIG: /config/serve.json
+      # Don't send Tailscale's own diagnostic logs to Tailscale.
+      TS_TAILSCALED_EXTRA_ARGS: --no-logs-no-support
     volumes:
       - ./data/n:/var/lib/tailscale
       - ./serve.json:/config/serve.json:ro
     restart: unless-stopped
 
   app:
+    <<: *quiet
     container_name: ${STACK_NAME:-cache}-app
     image: ${APP_IMAGE:-ghcr.io/suwayomi/suwayomi-server:stable}
     network_mode: service:net
@@ -43,14 +53,22 @@ services:
       SOCKS_PROXY_PASSWORD: ${SOCKS_PROXY_PASSWORD:-}
     volumes:
       - ./data/a:/home/suwayomi/.local/share/Tachidesk
+    # Logs and the page/image cache live in memory and vanish on restart.
+    tmpfs:
+      - /home/suwayomi/.local/share/Tachidesk/logs
+      - /tmp
     restart: unless-stopped
 
   helper:
+    <<: *quiet
     container_name: ${STACK_NAME:-cache}-helper
     image: ${HELPER_IMAGE:-ghcr.io/flaresolverr/flaresolverr:latest}
     network_mode: service:net
     depends_on: [net]
     environment:
       HOST: 127.0.0.1
-      LOG_LEVEL: warning
+      LOG_LEVEL: error
+      LOG_HTML: "false"
+    tmpfs:
+      - /tmp
     restart: unless-stopped

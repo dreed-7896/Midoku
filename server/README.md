@@ -46,6 +46,15 @@ Turn Tailscale on on the phone, then Midoku → Settings → Server:
 - Anyone with root, or in the `docker` group, can see and open everything. Renaming hides it from a
   casual look, not from an admin who goes looking.
 
+## What is kept
+
+- **Not kept:** container output (`docker logs` is empty), Suwayomi's log files and page/image cache
+  (in memory, gone on restart), FlareSolverr logs, Tailscale's diagnostic uploads.
+- **Kept in `data/a`:** Suwayomi's database (installed extensions, and a row for every title you open
+  or browse, with its chapter list) and the extension files. Suwayomi needs these to work.
+- **Fully in memory instead:** replace `./data/a:` with a `tmpfs` entry. Nothing touches the disk,
+  but extensions must be reinstalled after every restart.
+
 ## Extra privacy
 
 - **Hide the server's IP from sites:** fill in the `SOCKS_PROXY_*` values (e.g. a VPN provider's SOCKS5).
