@@ -1,4 +1,4 @@
-import type { ChapterStateRow, DbLibrary, EntryRow, EntrySourceRow, InsertedRow, SplitRow, TabRow } from './db'
+import type { ChapterStateRow, DbLibrary, EntryRow, EntrySourceRow, InsertedRow, TabRow } from './db'
 import { chapterKey, isSaved } from './downloads'
 import { artFor, assetUrl, hoursSince, SChapter, toChapter } from './suwayomi'
 import type { Chapter, ChapterVersion, CustomDetails, Entry, EntrySource, InsertedChapter, LibraryTab, PageLayout } from './types'
@@ -134,9 +134,10 @@ export const stateRow = (dbId: string, c: Chapter): ChapterStateRow => ({
   removed: !!c.removed,
   preferred: !!c.preferred,
   position: c.order ?? null,
+  thumb: c.thumb ?? null,
 })
 
-export type ChapterState = Pick<Chapter, 'page' | 'read' | 'bookmarked' | 'removed' | 'preferred' | 'order' | 'newPages'> & { sourceId: string; sourceUrl?: string }
+export type ChapterState = Pick<Chapter, 'page' | 'read' | 'bookmarked' | 'removed' | 'preferred' | 'order' | 'newPages' | 'thumb'> & { sourceId: string; sourceUrl?: string }
 /** Pages a chapter gained, while it hasn't been opened since (and for a month at most). */
 const grownPages = (r: ChapterStateRow) => {
   if (!r.pages_grew_at || r.pages == null || r.pages_before == null) return undefined
@@ -145,7 +146,7 @@ const grownPages = (r: ChapterStateRow) => {
   return r.pages - r.pages_before > 0 ? r.pages - r.pages_before : undefined
 }
 export const rowState = (r: ChapterStateRow): ChapterState =>
-  ({ sourceId: r.source_id, sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed, preferred: r.preferred, order: r.position == null ? undefined : Number(r.position), newPages: grownPages(r) })
+  ({ sourceId: r.source_id, sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed, preferred: r.preferred, order: r.position == null ? undefined : Number(r.position), newPages: grownPages(r), thumb: r.thumb ?? undefined })
 
 /** Shows a different version (physical chapter) of a slot. */
 export const showVersion = (c: Chapter, v: ChapterVersion, preferred: boolean): Chapter =>
@@ -166,12 +167,12 @@ export function applyStates(chapters: Chapter[], states: ChapterState[]): Chapte
     const s = (picked && byKey.get(chapterKey(picked.sourceId, picked.url))) || keys.map((k) => byKey.get(k)).find(Boolean)
     if (!s) return shown
     const moved = s.order != null ? { order: s.order, number: s.order, sourceNumber: c.sourceNumber ?? c.number } : {}
-    return { ...shown, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined, newPages: s.newPages ?? shown.newPages, ...moved }
+    return { ...shown, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined, newPages: s.newPages ?? shown.newPages, thumb: s.thumb, ...moved }
   })
 }
 
 export const statesOf = (chapters: Chapter[]): ChapterState[] =>
-  chapters.filter((c) => c.sourceUrl).map((c) => ({ sourceId: c.sourceId, sourceUrl: c.sourceUrl, page: c.page, read: c.read, bookmarked: c.bookmarked, removed: c.removed, preferred: c.preferred, order: c.order, newPages: c.newPages }))
+  chapters.filter((c) => c.sourceUrl).map((c) => ({ sourceId: c.sourceId, sourceUrl: c.sourceUrl, page: c.page, read: c.read, bookmarked: c.bookmarked, removed: c.removed, preferred: c.preferred, order: c.order, newPages: c.newPages, thumb: c.thumb }))
 
 /** Marks chapters saved on this device. */
 export const withDownloads = (chapters: Chapter[]): Chapter[] =>
@@ -218,10 +219,6 @@ function mergeSegment(lists: SourceChapters[]): Chapter[] {
 
 /** Library snapshot kept for offline launches. */
 export interface LibrarySnapshot { entries: Entry[]; tabs: LibraryTab[] }
-export const snapshotOf = (entries: Entry[], tabs: LibraryTab[]): LibrarySnapshot => ({
-  entries: entries.filter((e) => e.dbId).map((e) => ({ ...e, chapters: [], remote: e.remote && { ...e.remote, chaptersLoaded: false } })),
-  tabs,
-})
 
 // Inserted chapters
 

@@ -14,7 +14,6 @@ function SampleSearch() {
   const store = useStore()
   const [query, setQuery] = useState('crown')
   const [debounced, setDebounced] = useState('crown')
-  const [scope, setScope] = useState<'all' | 'pinned'>('all')
   const [states, setStates] = useState<Record<string, SourceState>>({})
 
   const sources = store.sources.filter((s) => s.installed)

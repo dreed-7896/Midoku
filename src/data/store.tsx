@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
-  DbLibrary, deleteEntryRow, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
+  DbLibrary, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
   notePageGrowth, saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
 import type { ChapterStateRow } from './db'
@@ -429,6 +429,62 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         toast(`${s.name ?? 'Source'} is now the main source`)
         await loadEntry(e.id).catch(() => {})
       },
+      /**
+       * Moves a title to another source: links it, carries reading state (read, page, bookmark, hidden, moved,
+       * thumbnail) and page layouts over by chapter number, makes it the main source and unlinks the old one.
+       */
+      migrateSource: async (id: string, to: { mangaId: number; mangaUrl: string; sourceId: string; name?: string; iconUrl?: string }) => {
+        let e = find(id)
+        const from = e?.sources.find((s) => s.main) ?? e?.sources[0]
+        if (!e || !from) return false
+        if (from.sourceId === to.sourceId && from.mangaUrl === to.mangaUrl) { toast('That is the current source'); return false }
+        if (!e.remote?.chaptersLoaded) await loadEntry(e.id).catch(() => {})
+        e = find(id)!
+        const keysOf = (c: Chapter) => (c.alts?.length ? c.alts.map((a) => chapterKey(a.sourceId, a.url)) : c.sourceUrl ? [chapterKey(c.sourceId, c.sourceUrl)] : [])
+        const before = new Set(e.chapters.flatMap(keysOf))
+        const already = e.sources.some((s) => s.sourceId === to.sourceId && s.mangaUrl === to.mangaUrl)
+        if (!already) {
+          const source: EntrySource = { sourceId: to.sourceId, mangaId: to.mangaId, mangaUrl: to.mangaUrl, name: to.name, iconUrl: to.iconUrl, chapters: 0, following: true, main: false }
+          const hadRow = !!e.dbId
+          editEntry(e.id, (x) => ({ ...x, sources: [...x.sources, source] }))
+          const db0 = ensureEntry(e.id)
+          if (db0 && hadRow) saveEntrySource(sourceRow(db0, source))
+          await loadEntry(e.id)
+        }
+        e = find(id)!
+        const dbId = ensureEntry(e.id)
+        const fresh = (c: Chapter) => c.alts?.find((a) => a.sourceId === to.sourceId && !before.has(chapterKey(a.sourceId, a.url)))
+        const touched = (c: Chapter) => c.read || c.page > 0 || c.bookmarked || c.removed || c.order != null || !!c.thumb
+        let moved = 0, lost = 0
+        const rows: ChapterStateRow[] = []
+        for (const c of e.chapters) {
+          if (c.insertId || !touched(c)) continue
+          const v = fresh(c)
+          if (!v) { lost++; continue }
+          moved++
+          if (dbId) rows.push(stateRow(dbId, { ...c, sourceId: v.sourceId, sourceUrl: v.url, preferred: false }))
+          const split = c.sourceUrl ? e.splits?.[chapterKey(c.sourceId, c.sourceUrl)] : undefined
+          if (dbId && split) saveSplit({ entry_id: dbId, source_id: v.sourceId, chapter_url: v.url, breaks: split.breaks, excluded: split.skip })
+        }
+        if (rows.length) saveChapterStates(rows)
+        await flushWrites().catch(() => false)
+        const target = find(id)!.sources.find((s) => s.sourceId === to.sourceId && s.mangaUrl === to.mangaUrl)
+        if (target && !target.main) {
+          editEntry(e.id, (x) => ({ ...x, sources: reorderMain(x.sources, to.sourceId, to.mangaUrl), remote: x.remote && { ...x.remote, mangaId: to.mangaId, sourceId: to.sourceId, mangaUrl: to.mangaUrl } }))
+          if (dbId && e.dbId) {
+            updateEntrySource({ entry_id: dbId }, { is_main: false })
+            updateEntrySource({ entry_id: dbId, source_id: to.sourceId, manga_url: to.mangaUrl }, { is_main: true })
+          }
+        }
+        editEntry(e.id, (x) => ({ ...x, sources: x.sources.filter((y) => !(y.sourceId === from.sourceId && y.mangaUrl === from.mangaUrl)) }))
+        if (dbId && from.mangaUrl) deleteEntrySource(dbId, from.sourceId, from.mangaUrl)
+        await flushWrites().catch(() => false)
+        await loadEntry(e.id).catch(() => {})
+        // The chapters on screen are the new source's now: read their state from the database.
+        loadStates(e.id)
+        toast(`Moved to ${to.name ?? 'the new source'} · ${moved} chapter${moved === 1 ? '' : 's'} carried over${lost ? ` · ${lost} not found there` : ''}`)
+        return true
+      },
       /** Nests a title inside another entry (a series), or takes it out again. */
       setParent: (childId: string, parentId: string | undefined) => {
         const child = find(childId)
@@ -455,7 +511,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           dropped.forEach((c) => changes.delete(c.id))
         }
         editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (changes.has(c.id) ? { ...c, ...changes.get(c.id) } : c)) }))
-        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined) saveChapters(e.id, new Set(changes.keys()))
+        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined || 'thumb' in patch) saveChapters(e.id, new Set(changes.keys()))
       },
       /** Reads another version (linked source) of a chapter from now on. */
       chooseVersion: (id: string, chapterId: string, versionIndex: number) => {

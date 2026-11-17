@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { PageThumb, RemoteImage } from '../components/Art'
+import { LazyImage, PageThumb, RemoteImage } from '../components/Art'
+import { useLongPress } from '../components/LongPress'
 import { Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { Empty, Loading } from '../components/Status'
@@ -69,6 +70,9 @@ export default function Reader() {
   // Parts of split chapters and inserted chapters are found among the shown chapters.
   const chapter = entry ? visibleChapters(entry).find((c) => c.id === chapterId) ?? entry.chapters.find((c) => c.id === chapterId) : undefined
   const [versions, setVersions] = useState(false)
+  const [panel, setPanel] = useState<null | 'chapters' | 'pages'>(null)
+  /** Whole-chapter page number of each shown page (a part or trimmed chapter shows some of them). */
+  const [pageNums, setPageNums] = useState<number[]>([])
   const ordered = entry ? [...visibleChapters(entry)].sort((a, b) => a.number - b.number) : []
   const index = ordered.findIndex((c) => c.id === chapterId)
   // Measured page heights, so pages that leave the window keep their size (real images vary in height).
@@ -99,7 +103,9 @@ export default function Reader() {
         const whole = chapter.physicalId ?? chapter.id
         const known = entry?.chapters.find((c) => c.id === whole)?.pages ?? chapter.pages
         if (known !== list.length) store.editChapters(entryId, new Set([whole]), { pages: list.length })
-        setUrls(chapter.range ? shownPages(chapter, list.length).map((n) => list[n - 1]) : list)
+        const nums = chapter.range || chapter.skip?.length ? shownPages(chapter, list.length) : list.map((_, i) => i + 1)
+        setPageNums(nums)
+        setUrls(nums.map((n) => list[n - 1]))
       })
       .catch((e: Error) => alive && setPagesError(e.message))
     return () => { alive = false }
@@ -187,6 +193,18 @@ export default function Reader() {
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
+
+  const pagePress = useLongPress<number>((n) => {
+    if (!entry || !chapter) return
+    const whole = pageNums[n - 1] ?? n
+    if (!window.confirm(`Use page ${n} as the thumbnail of ${chapter.label}?`)) return
+    store.editChapters(entry.id, new Set([chapter.id]), { thumb: whole === (chapter.range?.[0] ?? 1) ? undefined : `page:${whole}` })
+    store.toast(entry.custom?.thumbs ? 'Thumbnail changed' : 'Thumbnail changed · turn on thumbnails in Edit details to see it')
+  })
+  // The chapter list opens scrolled to the chapter being read.
+  useEffect(() => {
+    if (panel === 'chapters') requestAnimationFrame(() => document.querySelector('.reader-chapters .is-current')?.scrollIntoView({ block: 'center' }))
+  }, [panel])
 
   if (!entry || !chapter) {
     return (
@@ -352,6 +370,12 @@ export default function Reader() {
       </header>
 
       <footer className={`reader__bottom${ui ? '' : ' is-hidden'}`}>
+        <button type="button" className="icon-btn icon-btn--glass reader__pages-btn" aria-label="Pages" disabled={!pages} onClick={() => setPanel('pages')}>
+          <Icon name="grid" />
+        </button>
+        <button type="button" className="icon-btn icon-btn--glass" aria-label="Chapters" onClick={() => setPanel('chapters')}>
+          <Icon name="list" />
+        </button>
         <button type="button" className="icon-btn icon-btn--glass" aria-label="Previous chapter" disabled={!prev} onClick={() => prev && goChapter(prev)}>
           <Icon name="prev" />
         </button>
@@ -363,7 +387,45 @@ export default function Reader() {
         <button type="button" className="icon-btn icon-btn--glass" aria-label="Next chapter" disabled={!next} onClick={() => next && goChapter(next)}>
           <Icon name="next" />
         </button>
+        <button type="button" className={`icon-btn icon-btn--glass${chapter.bookmarked ? ' is-accent-text' : ''}`} aria-pressed={chapter.bookmarked}
+          aria-label={chapter.bookmarked ? 'Remove bookmark' : 'Bookmark chapter'}
+          onClick={() => { store.editChapters(entry.id, new Set([chapter.id]), { bookmarked: !chapter.bookmarked }); store.toast(chapter.bookmarked ? `${chapter.label} unbookmarked` : `${chapter.label} bookmarked`) }}>
+          <Icon name={chapter.bookmarked ? 'bookmarkFill' : 'bookmark'} />
+        </button>
       </footer>
+      <Sheet open={panel === 'chapters'} tall title={`Chapters · ${ordered.length}`} onClose={() => setPanel(null)}>
+        <div className="ch-list reader-chapters">
+          {[...ordered].reverse().map((c) => (
+            <button key={c.id} type="button" className={`ch-row${c.id === chapter.id ? ' is-current' : ''}${c.read ? ' is-read' : ''}`}
+              onClick={() => { setPanel(null); if (c.id !== chapter.id) goChapter(c) }}>
+              <span className="ch-row__text">
+                <span className="ch-row__label"><span>{c.label}</span>{c.isNew && !c.read && <span className="badge">New</span>}</span>
+                <span className="ch-row__meta">{c.id === chapter.id ? 'Reading · ' : c.read ? 'Read · ' : c.page ? `Page ${c.page} · ` : ''}{c.part ?? c.title}{c.date ? ` · ${c.date}` : ''}</span>
+              </span>
+              <span className="ch-row__end">
+                {c.bookmarked && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
+                {c.downloaded && <span className="flag"><Icon name="download" size={12} stroke={2.2} label="Downloaded" /></span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+      <Sheet open={panel === 'pages'} tall title={`Pages · ${chapter.label}`} onClose={() => setPanel(null)}>
+        {isRemote && <p className="hint">Tap a page to go to it. Long-press one to make it the chapter's thumbnail.</p>}
+        <div className="splitter__grid">
+          {list.map((n) => {
+            const lp = pagePress(n)
+            return (
+              <button key={n} type="button" className={`splitter__page${n === page ? ' is-start' : ''}`} aria-current={n === page ? 'page' : undefined} aria-label={`Page ${n}`}
+                onClick={() => { if (lp.wasLongPress()) return; setPanel(null); setPage(n); scrollToPage(n) }}
+                onPointerDown={isRemote ? lp.onPointerDown : undefined} onPointerMove={lp.onPointerMove} onPointerUp={lp.onPointerUp} onPointerLeave={lp.onPointerLeave} onContextMenu={isRemote ? lp.onContextMenu : undefined}>
+                <div className="splitter__img">{isRemote && urls ? <LazyImage src={urls[n - 1]} fromDevice={fromDevice} placeholder={n} /> : <PageThumb layout={n} />}</div>
+                <span className="splitter__num">{n}</span>
+              </button>
+            )
+          })}
+        </div>
+      </Sheet>
       <Sheet open={modes} title="Reading mode" onClose={() => setModes(false)}>
         <div className="label label--flush">For {entry.title}</div>
         <div className="check-list">

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { chapterKey, getSaved } from '../data/downloads'
 import { useStore } from '../data/store'
-import { getPages } from '../data/suwayomi'
+import { chapterPages } from '../data/thumbs'
 import type { Chapter, PageLayout } from '../data/types'
-import { PageThumb, RemoteImage } from './Art'
+import { LazyImage } from './Art'
 import { Sheet } from './Chrome'
 import { Icon } from './Icon'
 import { Empty, Loading } from './Status'
@@ -25,7 +25,7 @@ export function PageSplitter({ entryId, chapter, layout, onClose }: { entryId: s
 
   useEffect(() => {
     if (!chapter.remoteId) return
-    ;(saved ? Promise.resolve(saved.pages) : getPages(chapter.remoteId))
+    chapterPages(chapter)
       .then((list) => {
         setUrls(list)
         if (list.length !== chapter.pages) store.editChapters(entryId, new Set([chapter.id]), { pages: list.length })
@@ -83,7 +83,7 @@ export function PageSplitter({ entryId, chapter, layout, onClose }: { entryId: s
             <button key={n} type="button" className={`splitter__page${start ? ' is-start' : ''}${out ? ' is-out' : ''}${part % 2 ? '' : ' is-even'}`}
               aria-pressed={mode === 'skip' ? out : start} aria-label={`Page ${n}${start ? `, starts part ${part}` : ''}${out ? ', left out' : ''}`} onClick={() => tap(n)}>
               <div className="splitter__img">
-                {u ? <RemoteImage src={u} fromDevice={!!saved} /> : <PageThumb layout={(n * 7) % 4} />}
+                <LazyImage src={u} fromDevice={!!saved} placeholder={(n * 7) % 4} />
                 {out && <span className="splitter__out"><Icon name="x" size={22} stroke={2.6} /></span>}
               </div>
               {start && starts.length > 1 && <span className="splitter__part">Part {part}</span>}

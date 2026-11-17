@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { statusOf, suggestedChapterName, totalCount, useStore } from '../data/store'
+import { resetThumbs } from '../data/thumbs'
 import { STATUS_LABEL, type Chapter, type CustomDetails, type Entry, type ManualStatus } from '../data/types'
 import { Cover } from './Art'
 import { Sheet } from './Chrome'
@@ -38,6 +39,7 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
   const [description, setDescription] = useState(c.description ?? '')
   const [cover, setCover] = useState(c.cover ?? '')
   const [status, setStatus] = useState<ManualStatus | undefined>(c.status)
+  const [thumbs, setThumbs] = useState(!!c.thumbs)
   const [busy, setBusy] = useState(false)
   const auto = statusOf({ ...entry, custom: { ...c, status: undefined } })
 
@@ -46,6 +48,13 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
     setBusy(true)
     try { setCover(await shrinkImage(file)) } catch (e) { store.toast((e as Error).message) } finally { setBusy(false) }
   }
+  const resetAll = async () => {
+    if (!window.confirm(`Reset all chapter thumbnails of ${entry.title}?`)) return
+    await resetThumbs(entry.chapters)
+    const picked = new Set(entry.chapters.filter((x) => x.thumb).map((x) => x.id))
+    if (picked.size) store.editChapters(entry.id, picked, { thumb: undefined })
+    store.toast('Thumbnails reset')
+  }
   const save = () => {
     const patch: CustomDetails = {
       title: title.trim() || undefined,
@@ -53,6 +62,7 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
       description: description.trim() || undefined,
       cover: cover.trim() || undefined,
       status,
+      thumbs: thumbs || undefined,
     }
     store.editDetails(entry.id, patch)
     store.toast('Details saved')
@@ -88,6 +98,23 @@ export function EditDetailsSheet({ entry, onClose }: { entry: Entry; onClose: ()
         {MANUAL.map((s) => <button key={s} type="button" className={status === s ? 'is-on' : ''} onClick={() => setStatus(s)}>{STATUS_LABEL[s]}</button>)}
       </div>
       <p className="hint">Auto is Reading until every chapter is read, then Completed.</p>
+
+      {!own && <>
+        <div className="label">Chapters</div>
+        <div className="check-list">
+          <label className="check-row">
+            <span className="check-row__name check-row__name--stack"><strong>Show thumbnails</strong><span className="card-meta">A grid with each chapter's first page, made on this device</span></span>
+            <input type="checkbox" role="switch" className="switch" checked={thumbs} onChange={() => setThumbs((t) => !t)} />
+          </label>
+          {thumbs && (
+            <button type="button" className="check-row" onClick={() => void resetAll()}>
+              <span className="check-row__name check-row__name--stack"><strong>Reset thumbnails</strong><span className="card-meta">Clears picked and made thumbnails; progress is kept</span></span>
+              <Icon name="undo" size={18} />
+            </button>
+          )}
+        </div>
+        {thumbs && <p className="hint">Long-press a chapter → Edit thumbnail to pick a page or a picture.</p>}
+      </>}
 
       <div className="sheet__actions">
         <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>

@@ -124,6 +124,8 @@ export interface ChapterStateRow {
   pages?: number | null
   pages_before?: number | null
   pages_grew_at?: string | null
+  /** Chapter thumbnail picked by the person: "page:N" or an image data URL. */
+  thumb?: string | null
 }
 export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }
 export interface InsertedRow {
@@ -173,7 +175,7 @@ export async function loadLibrary(): Promise<DbLibrary> {
 /** A saved title's reading state, split chapters and inserted chapters. */
 export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
-    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at').eq('entry_id', entryId)),
+    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at, thumb').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
     all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
   ])
@@ -270,7 +272,6 @@ export const deleteSplit = (entryId: string, sourceId: string, chapterUrl: strin
   enqueue({ kind: 'delete', table: 'chapter_splits', match: { entry_id: entryId, source_id: sourceId, chapter_url: chapterUrl } })
 export const saveInserted = (row: InsertedRow) => enqueue({ kind: 'upsert', table: 'inserted_chapters', rows: [row] })
 export const deleteInserted = (id: string) => enqueue({ kind: 'delete', table: 'inserted_chapters', match: { id } })
-export const deleteEntryRow = (id: string) => enqueue({ kind: 'delete', table: 'entries', match: { id } })
 /** Merges titles into `keep` in the database (see merge_entries in the migrations). */
 export const mergeEntryRows = (keep: string, parts: string[], segments: number[]) =>
   enqueue({ kind: 'rpc', fn: 'merge_entries', args: { keep, parts, segments } })

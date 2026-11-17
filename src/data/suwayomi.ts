@@ -66,8 +66,6 @@ const MANGA = `${CARD} author artist description genre status realUrl sourceId i
 const SUMMARY = `${MANGA} chapters { totalCount } latestUploadedChapter { uploadDate }`
 const CHAPTER = 'id url name chapterNumber uploadDate scanlator pageCount sourceOrder'
 
-export const isConnected = () => !!getSettings().serverUrl
-
 const normalise = (url: string) => url.trim().replace(/\/+$/, '')
 const serverBase = () => normalise(getSettings().serverUrl)
 

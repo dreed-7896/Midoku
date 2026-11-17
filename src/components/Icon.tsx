@@ -6,6 +6,7 @@ import {
   Notification03Icon, PinIcon, PlayIcon, PuzzleIcon, Refresh01Icon, Search01Icon, SecurityWarningIcon, Sorting01Icon,
   SparklesIcon, Tick02Icon, Undo02Icon, Settings01Icon, FaceIdIcon, SquareLock02Icon, PreviousIcon, NextIcon,
   ScrollVerticalIcon, BookOpen02Icon, InformationCircleIcon, ShuffleIcon, Clock01Icon,
+  GridViewIcon, LeftToRightListBulletIcon, Image01Icon, ArrowDataTransferHorizontalIcon,
 } from '@hugeicons/core-free-icons'
 
 const ICONS = {
@@ -54,6 +55,10 @@ const ICONS = {
   info: InformationCircleIcon,
   shuffle: ShuffleIcon,
   clock: Clock01Icon,
+  grid: GridViewIcon,
+  list: LeftToRightListBulletIcon,
+  image: Image01Icon,
+  migrate: ArrowDataTransferHorizontalIcon,
 } satisfies Record<string, IconSvgElement>
 
 /** Icons drawn solid instead of outlined. */

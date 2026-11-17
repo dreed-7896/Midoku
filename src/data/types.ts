@@ -20,6 +20,8 @@ export interface CustomDetails {
   status?: ManualStatus
   /** Reading mode for this title; the device default is used without one. */
   reader?: ReaderMode
+  /** Chapters as a grid of page thumbnails instead of a list. */
+  thumbs?: boolean
 }
 
 export type ReaderMode = 'webtoon' | 'paged' | 'rtl'
@@ -63,6 +65,8 @@ export interface Chapter {
   isNew: boolean
   /** Pages added since the server last fetched this chapter (found by the update check). */
   newPages?: number
+  /** Thumbnail picked by the person: "page:N" (a page of the chapter) or an image data URL. */
+  thumb?: string
   /** Number of physical chapters (source variants) stacked in this slot. */
   versions: number
   sourceId: string

@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Cover, PageThumb } from '../components/Art'
+import { ChapterThumb, Cover } from '../components/Art'
 import { Chip, IconButton, Sheet } from '../components/Chrome'
 import { Icon } from '../components/Icon'
 import { TLink as Link, useNav } from '../components/Nav'
 import { useLongPress } from '../components/LongPress'
 import { PageSplitter } from '../components/PageSplitter'
+import { ThumbSheet } from '../components/ThumbSheet'
 import { AddToEntrySheet, EditDetailsSheet, MoveSheet } from '../components/EntryTools'
 import { SourcePicker, type PickedTitle } from '../components/SourcePicker'
 import { Banner, Empty, Loading } from '../components/Status'
-import { chapterKey, getSaved, useDownloads } from '../data/downloads'
+import { chapterKey, useDownloads } from '../data/downloads'
 import { layoutOf, physicalIdOf } from '../data/library'
 import { agoText, newCount, progressPct, readCount, resumeChapter, statusOf, totalCount, unreadCount, useStore, visibleChapters } from '../data/store'
-import { getChapters, getPages, SChapter, toChapter } from '../data/suwayomi'
+import { getChapters, SChapter, toChapter } from '../data/suwayomi'
 import { STATUS_LABEL, type Chapter } from '../data/types'
 
 type ChapterFilter = 'all' | 'unread' | 'bookmarked' | 'downloaded'
-type Panel = null | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'addTo' | 'move'
+type Panel = null | 'migrate' | 'options' | 'tabs' | 'sources' | 'link' | 'series' | 'insert' | 'edit' | 'addTo' | 'move'
 
 export default function EntryPage() {
   const { id = '' } = useParams()
@@ -37,6 +38,7 @@ export default function EntryPage() {
   const [pickedTitle, setPickedTitle] = useState<PickedTitle | null>(null)
   const [moving, setMoving] = useState<Chapter | null>(null)
   const [adding, setAdding] = useState<Set<string>>(new Set())
+  const [migrating, setMigrating] = useState(false)
   const downloads = useDownloads()
   const longPress = useLongPress<Chapter>((c) => setSheetFor(c.id))
   const libraryPress = useLongPress<void>(() => setPanel('tabs'))
@@ -92,6 +94,8 @@ export default function EntryPage() {
   const parent = entry.parentId ? store.entry(entry.parentId) : undefined
   const nestable = store.entries.filter((e) => e.inLibrary && e.id !== entry.id && !e.parentId && !store.children(e.id).length)
   const resume = resumeChapter(entry)
+  /** Chapters as a grid of thumbnails: off by default, turned on per title (Edit details, or the button here). */
+  const thumbs = !!entry.custom?.thumbs
   const bm = libraryPress()
   /** Filing a title into a tab puts it in the library too. */
   const fileIn = (tabId: string) => {
@@ -227,6 +231,7 @@ export default function EntryPage() {
         </button>
       </div>}
 
+      {migrating && <div className="pad-x pad-t-sm"><Banner tone="busy">Migrating… loading chapters from the new source</Banner></div>}
       {remote.saved && <div className="pad-x pad-t-sm"><Banner icon="info">Offline · showing the copy saved on this device</Banner></div>}
 
       {!ownSeries && <div className="facts pad-x pad-t">
@@ -273,6 +278,7 @@ export default function EntryPage() {
         <div className="section-head">
           <h2 className="h2">Chapters<span className="h2__count">{loaded ? all.length : '…'}</span></h2>
           <div className="row-gap">
+            <IconButton icon={thumbs ? 'list' : 'grid'} label={thumbs ? 'Show chapters as a list' : 'Show chapter thumbnails'} onClick={() => store.editDetails(entry.id, { thumbs: thumbs ? undefined : true })} />
             <IconButton icon="sort" label={descending ? 'Show oldest first' : 'Show newest first'} onClick={() => setDescending((d) => !d)} />
             <IconButton icon="select" label={selecting ? 'Done selecting' : 'Select chapters'} active={selecting}
               onClick={() => { setSelecting((s) => !s); setSelected(new Set()) }} />
@@ -293,41 +299,60 @@ export default function EntryPage() {
           <div className="pad-t"><Empty icon={emptyFor[filter].icon} tone={emptyFor[filter].done ? 'done' : 'neutral'} title={emptyFor[filter].title} detail={emptyFor[filter].detail} /></div>
         )}
 
-        <div className="grid3 pad-t">
+        <div className={thumbs ? 'grid3 pad-t' : 'ch-list pad-t-sm'}>
           {chapters.slice(0, shown).map((c) => {
             const current = resume?.id === c.id
             const isSelected = selected.has(c.id)
             const lp = longPress(c)
             const progress = !c.downloaded ? progressOf(c) : undefined
+            const press = {
+              onClick: () => { if (!lp.wasLongPress()) openChapter(c) },
+              onPointerDown: lp.onPointerDown, onPointerMove: lp.onPointerMove, onPointerUp: lp.onPointerUp, onPointerLeave: lp.onPointerLeave, onContextMenu: lp.onContextMenu,
+            }
+            const versions = c.versions > 1 && (
+              <span role="button" tabIndex={0} className="badge badge--glass chapter__versions" aria-label={`${c.versions} versions, choose one`}
+                onClick={(e) => { e.stopPropagation(); setSheetFor(c.id) }}>
+                <Icon name="layers" size={11} />{c.versions}
+              </span>
+            )
+            const badges = <>
+              {c.isNew && !c.read && <span className="badge">New</span>}
+              {!!c.newPages && <span className="badge">+{c.newPages} pages</span>}
+              {c.insertedFrom && <span className="badge badge--glass">Added</span>}
+              {c.physicalId && <span className="badge badge--glass">Part</span>}
+            </>
+            const flags = <>
+              {c.bookmarked && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
+              {c.downloaded && <span className="flag"><Icon name="download" size={12} stroke={2.2} label="Downloaded" /></span>}
+              {progress !== undefined && <span className="flag">{Math.round(progress * 100)}%</span>}
+            </>
+            const check = selecting && <span className={`chapter__check${isSelected ? ' is-on' : ''}`}>{isSelected && <Icon name="check" size={14} stroke={2.6} />}</span>
+            const meta = c.part ?? (c.insertedFrom ? `from ${c.insertedFrom}` : current && c.page ? `${c.title} · p. ${c.page}` : `${c.title}${c.date ? ` · ${c.date}` : ''}`)
+            if (!thumbs) return (
+              <button key={c.id} type="button" className={`ch-row${current ? ' is-current' : ''}${isSelected ? ' is-selected' : ''}${c.read ? ' is-read' : ''}`}
+                aria-pressed={selecting ? isSelected : undefined} {...press}>
+                <span className="ch-row__text">
+                  <span className="ch-row__label"><span>{c.label}</span>{badges}</span>
+                  <span className="ch-row__meta">{c.read ? 'Read · ' : ''}{meta}</span>
+                  {current && c.page > 0 && c.pages > 0 && <span className="ch-row__bar"><span style={{ width: `${(c.page / c.pages) * 100}%` }} /></span>}
+                </span>
+                <span className="ch-row__end">{versions && <span className="chapter__versions--inline">{versions}</span>}{flags}{check}</span>
+              </button>
+            )
             return (
               <button key={c.id} type="button" className={`chapter${current ? ' is-current' : ''}${isSelected ? ' is-selected' : ''}`}
-                aria-pressed={selecting ? isSelected : undefined} onClick={() => { if (!lp.wasLongPress()) openChapter(c) }}
-                onPointerDown={lp.onPointerDown} onPointerMove={lp.onPointerMove} onPointerUp={lp.onPointerUp} onPointerLeave={lp.onPointerLeave} onContextMenu={lp.onContextMenu}>
+                aria-pressed={selecting ? isSelected : undefined} {...press}>
                 <div className={`chapter__thumb${c.read ? ' is-read' : ''}`}>
-                  <PageThumb layout={c.layout} />
-                  <span className="chapter__badges">
-                    {c.isNew && !c.read && <span className="badge">New</span>}
-                    {!!c.newPages && <span className="badge">+{c.newPages} pages</span>}
-                    {c.insertedFrom && <span className="badge badge--glass">Added</span>}
-                    {c.physicalId && <span className="badge badge--glass">Part</span>}
-                  </span>
-                  {c.versions > 1 && (
-                    <span role="button" tabIndex={0} className="badge badge--glass chapter__versions" aria-label={`${c.versions} versions, choose one`}
-                      onClick={(e) => { e.stopPropagation(); setSheetFor(c.id) }}>
-                      <Icon name="layers" size={11} />{c.versions}
-                    </span>
-                  )}
-                  <span className="chapter__flags">
-                    {c.bookmarked && <span className="flag flag--accent"><Icon name="bookmarkFill" size={11} label="Bookmarked" /></span>}
-                    {c.downloaded && <span className="flag"><Icon name="download" size={12} stroke={2.2} label="Downloaded" /></span>}
-                    {progress !== undefined && <span className="flag">{Math.round(progress * 100)}%</span>}
-                  </span>
+                  <ChapterThumb chapter={c} />
+                  <span className="chapter__badges">{badges}</span>
+                  {versions}
+                  <span className="chapter__flags">{flags}</span>
                   {c.read && <span className="badge badge--bl badge--glass"><Icon name="check" size={11} stroke={2.6} />Read</span>}
                   {current && c.page > 0 && c.pages > 0 && <span className="chapter__progress"><span style={{ width: `${(c.page / c.pages) * 100}%` }} /></span>}
-                  {selecting && <span className={`chapter__check${isSelected ? ' is-on' : ''}`}>{isSelected && <Icon name="check" size={14} stroke={2.6} />}</span>}
+                  {check}
                 </div>
                 <div className="card-title">{c.label}</div>
-                <div className="card-meta">{c.part ?? (c.insertedFrom ? `from ${c.insertedFrom}` : current && c.page ? `${c.title} · p. ${c.page}` : `${c.title}${c.date ? ` · ${c.date}` : ''}`)}</div>
+                <div className="card-meta">{meta}</div>
               </button>
             )
           })}
@@ -367,6 +392,7 @@ export default function EntryPage() {
           <MenuRow icon="settings" title="Edit details" detail="Title, author, description, cover, reading status" onClick={() => setPanel('edit')} />
           <MenuRow icon="folder" title="Library tabs" detail={userTabs.filter((t) => entry.tabs.includes(t.id)).map((t) => t.name).join(', ') || 'Not in any tab'} onClick={() => setPanel('tabs')} />
           <MenuRow icon="sources" title="Sources" detail={`${entry.sources.length} linked · main: ${main?.name ?? '—'}`} onClick={() => setPanel('sources')} />
+          {entry.remote && <MenuRow icon="migrate" title="Migrate" detail={`Move to another source · progress comes along`} onClick={() => setPanel('migrate')} />}
           <MenuRow icon="books" title="Series" detail={kids.length ? `${kids.length} title${kids.length === 1 ? '' : 's'} inside` : parent ? `Part of ${parent.title}` : 'Group volumes or seasons together'} onClick={() => setPanel('series')} />
           <MenuRow icon="globe" title="Open website" detail={entry.remote?.url ? new URL(entry.remote.url).hostname : 'Not available'} onClick={() => { setPanel(null); openWebsite() }} />
         </div>
@@ -416,6 +442,13 @@ export default function EntryPage() {
           : <p className="hint">Linking sources needs a server.</p>}
       </Sheet>
 
+      {panel === 'migrate' && <SourcePicker query={entry.title} title={`Migrate from ${main?.name ?? 'source'}`} onClose={() => setPanel(null)}
+        onPick={(m) => {
+          if (!window.confirm(`Move ${entry.title} from ${main?.name ?? 'its source'} to ${m.name ?? 'this source'}${m.title ? ` (${m.title})` : ''}?\n\nRead chapters, pages, bookmarks and thumbnails move over by chapter number. ${main?.name ?? 'The old source'} is unlinked.`)) return
+          setPanel(null)
+          setMigrating(true)
+          void store.migrateSource(entry.id, m).catch((e: Error) => store.toast(`Migration failed: ${e.message}`)).finally(() => setMigrating(false))
+        }} />}
       {panel === 'link' && <SourcePicker query={entry.title} title="Link a source" onClose={() => setPanel(null)}
         onPick={(m) => { setPanel(null); void store.linkSource(entry.id, m) }} />}
 
@@ -507,10 +540,12 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, onMove, onAddTo, ca
   const splitKey = whole.sourceUrl ? chapterKey(whole.sourceId, whole.sourceUrl) : ''
   const layout = layoutOf(entry.splits?.[splitKey])
   const [splitting, setSplitting] = useState(false)
+  const [thumbing, setThumbing] = useState(false)
   const ids = new Set([chapter.id])
   const done = (fn: () => void) => { fn(); onClose() }
 
   if (splitting) return <PageSplitter entryId={entryId} chapter={whole} layout={layout} onClose={onClose} />
+  if (thumbing) return <ThumbSheet entryId={entryId} chapter={chapter} onClose={onClose} />
 
   return (
     <Sheet open title={chapter.label} onClose={onClose}>
@@ -545,6 +580,7 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, onMove, onAddTo, ca
             <Icon name="layers" size={18} />{layout ? 'Edit pages & parts' : 'Split or trim pages'}
           </button>
         )}
+        {canEdit && entry.custom?.thumbs && <button type="button" onClick={() => setThumbing(true)}><Icon name="image" size={18} />Edit thumbnail</button>}
         {canEdit && <button type="button" onClick={onInsert}><Icon name="plus" size={18} />Insert after</button>}
         <button type="button" onClick={onMove}><Icon name="sort" size={18} />Move</button>
         {whole.order != null && <button type="button" onClick={() => done(() => store.resetOrder(entryId, whole.id))}><Icon name="undo" size={18} />Original place</button>}

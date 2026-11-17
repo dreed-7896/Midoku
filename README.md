@@ -31,6 +31,9 @@ Mobile-only PWA (React + Vite). Enter your Suwayomi server address in **Settings
 - History: recently read titles by day, with resume and remove (Home's clock button or Library ⋯).
 - Reader: Webtoon, Paged or Right to left, as a device default or per title (reader top bar). Pinch or double-tap to zoom (all modes); in paged modes tap the left or right edge to turn the page.
 - Not planned: trackers (AniList, MyAnimeList).
+- Chapter thumbnails: off by default (plain list); turn on per title in Edit details or with the grid button by the chapters. Long-press a chapter → Edit thumbnail to pick a page or a picture; Edit details → Reset thumbnails.
+- Reader bottom bar: Chapters list, previous/next, Bookmark, and Pages (page grid; long-press a page to make it the thumbnail).
+- Migrate (title ⋯ → Migrate): move a title to another source; read chapters, pages, bookmarks and thumbnails come along by chapter number.
 - Chapters: long-press a chapter → Move to change the reading order, or Add to entry to put it in another library entry (Select → Add to for several).
 - New chapters: checked on launch (every 6 hours) or with the refresh button in Library.
 - Updates: each deploy ships a new service worker; the app shows "New version available · Restart".

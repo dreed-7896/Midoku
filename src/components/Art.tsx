@@ -1,7 +1,8 @@
-import { CSSProperties, useEffect, useState } from 'react'
+import { CSSProperties, useEffect, useRef, useState } from 'react'
 import { savedPageUrl } from '../data/downloads'
 import { fetchImage, needsAuthForImages } from '../data/suwayomi'
-import type { CoverArt } from '../data/types'
+import { cachedThumb, chapterThumb } from '../data/thumbs'
+import type { Chapter, CoverArt } from '../data/types'
 
 /**
  * Blob URLs of images fetched with a login, kept after the image leaves the screen so going back to a
@@ -107,6 +108,55 @@ export function PageThumb({ layout }: { layout: number }) {
       ))}
     </div>
   )
+}
+
+/** True once the element comes near the screen (stays true). Grids of page images load as they scroll in. */
+function useNear<T extends HTMLElement>(margin = '300px') {
+  const ref = useRef<T>(null)
+  const [near, setNear] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || near) return
+    const io = new IntersectionObserver((items) => { if (items.some((i) => i.isIntersecting)) { setNear(true); io.disconnect() } }, { rootMargin: margin })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [near, margin])
+  return [ref, near] as const
+}
+
+/** A server image that is only fetched once it scrolls near the screen; a page placeholder until then. */
+export function LazyImage({ src, fromDevice, placeholder = 0 }: { src: string; fromDevice?: boolean; placeholder?: number }) {
+  const [ref, near] = useNear<HTMLDivElement>()
+  return <div ref={ref} className="lazy-img">{near && src ? <RemoteImage src={src} fromDevice={fromDevice} /> : <PageThumb layout={placeholder} />}</div>
+}
+
+/**
+ * A chapter's thumbnail: a picture the person picked, or a page of the chapter made into a small image on
+ * this device (see thumbs.ts) once the chapter is on screen. Sample chapters keep the drawn placeholder.
+ */
+export function ChapterThumb({ chapter }: { chapter: Chapter }) {
+  const [ref, near] = useNear<HTMLDivElement>('100px')
+  const picked = chapter.thumb?.startsWith('data:') ? chapter.thumb : undefined
+  const [url, setUrl] = useState<string>()
+  const key = `${chapter.sourceId}|${chapter.sourceUrl}|${chapter.thumb ?? ''}|${chapter.range?.[0] ?? ''}`
+  useEffect(() => {
+    setUrl(undefined)
+    if (picked || !chapter.remoteId) return
+    let alive = true
+    cachedThumb(chapter).then((u) => { if (alive && u) setUrl(u) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  useEffect(() => {
+    if (!near || url || picked || !chapter.remoteId) return
+    let alive = true
+    // A short wait so flinging through a long list doesn't start work for every chapter passed.
+    const t = setTimeout(() => chapterThumb(chapter).then((u) => { if (alive && u) setUrl(u) }).catch(() => {}), 300)
+    return () => { alive = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [near, key, url])
+  const shown = picked ?? url
+  return <div ref={ref} className="chapter-art">{shown ? <img src={shown} alt="" /> : <PageThumb layout={chapter.layout} />}</div>
 }
 
 export function SourceIcon({ letter, color, size = 40, url }: { letter: string; color: string; size?: number; url?: string }) {
