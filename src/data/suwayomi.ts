@@ -134,10 +134,17 @@ export const refreshExtensions = () =>
 export const changeExtension = (pkgName: string, action: 'install' | 'uninstall' | 'update') =>
   gql(`mutation($id: String!) { updateExtension(input: { id: $id, patch: { ${action}: true } }) { extension { pkgName } } }`, { id: pkgName })
 
+// Suwayomi's extensions(condition:) ignores pkgName, so one extension is read with extension(pkgName:).
 export const getExtensionSources = (pkgName: string) =>
-  gql<{ extensions: { nodes: SExtension[] } }>(
-    `query($pkg: String!) { extensions(condition: { pkgName: $pkg }) { nodes { ${EXT} source { nodes { ${SRC} } } } } }`, { pkg: pkgName },
-  ).then((d) => d.extensions.nodes[0])
+  gql<{ extension: SExtension | null }>(
+    `query($pkg: String!) { extension(pkgName: $pkg) { ${EXT} source { nodes { ${SRC} } } } }`, { pkg: pkgName },
+  ).then((d) => d.extension)
+
+/** Multi-language ("all") first, then English, then the rest A–Z. */
+export function byLanguage<T extends { lang: string }>(list: T[]): T[] {
+  const rank = (l: string) => (l === 'all' ? 0 : l === 'en' ? 1 : 2)
+  return [...list].sort((a, b) => rank(a.lang) - rank(b.lang) || a.lang.localeCompare(b.lang))
+}
 
 /** Installed sources, without Suwayomi's built-in "Local source". */
 export const getSources = () =>

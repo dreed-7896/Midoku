@@ -7,7 +7,7 @@ import { Icon } from '../components/Icon'
 import { TLink as Link, useNav } from '../components/Nav'
 import { useStore } from '../data/store'
 import {
-  artFor, assetUrl, browseSource, changeExtension, getExtensions, getExtensionSources, getSources, refreshExtensions,
+  artFor, assetUrl, browseSource, byLanguage, changeExtension, getExtensions, getExtensionSources, getSources, refreshExtensions,
   SExtension, SMangaCard, SSource,
 } from '../data/suwayomi'
 
@@ -188,15 +188,16 @@ export function RemoteBrowse() {
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
+    setExt(undefined); setExtError(undefined); setSourceId(undefined); setItems([]); setPage(1)
     getExtensionSources(pkg).then((e) => {
-      if (!e) { setExtError('This extension is not installed.'); return }
+      const sources = byLanguage(e?.source?.nodes ?? [])
+      if (!e || !e.isInstalled || !sources.length) { setExtError('This extension is not installed on the server.'); return }
       setExt(e)
-      const sources = e.source?.nodes ?? []
-      setSourceId((sources.find((s) => s.lang === 'en') ?? sources.find((s) => s.lang === 'all') ?? sources[0])?.id)
+      setSourceId(sources[0].id)
     }).catch((e: Error) => setExtError(e.message))
   }, [pkg])
 
-  const sources = ext?.source?.nodes ?? []
+  const sources = useMemo(() => byLanguage(ext?.source?.nodes ?? []), [ext])
   const source = sources.find((s) => s.id === sourceId)
 
   useEffect(() => {
@@ -228,7 +229,7 @@ export function RemoteBrowse() {
         <SourceIcon letter={(ext?.name ?? pkg)[0] ?? '?'} color={ICON_BG} size={68} url={ext ? assetUrl(ext.iconUrl) : undefined} />
         <div>
           <h1 className="entry__title entry__title--left">{source?.displayName.replace(/\s*\(.*\)$/, '') ?? ext?.name ?? 'Source'}</h1>
-          <div className="entry__author">{ext ? `${sources.length} language${sources.length === 1 ? '' : 's'} · v${ext.versionName}` : extError ? '' : 'Loading…'}</div>
+          <div className="entry__author">{ext ? `${sources.length === 1 ? langLabel(sources[0].lang) : `${sources.length} languages`} · v${ext.versionName}` : extError ? '' : 'Loading…'}</div>
         </div>
       </div>
       {extError && <div className="pad-x pad-t"><Notice title="Couldn't open this source" detail={extError} /></div>}
@@ -269,7 +270,12 @@ export function RemoteBrowse() {
   )
 }
 
-type SearchResult = { state: 'loading' | 'done' | 'error'; items: SMangaCard[]; error?: string }
+type SearchSource = SSource & { extension: { pkgName: string } | null }
+/** One section per extension: its sources in every language, searched and merged. */
+type SearchGroup = { key: string; pkg: string; name: string; iconUrl: string; sources: SearchSource[] }
+type SearchResult = { done: number; total: number; items: SMangaCard[]; errors: string[] }
+
+const titleKey = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 
 export function RemoteSearch() {
   const store = useStore()
@@ -277,7 +283,7 @@ export function RemoteSearch() {
   const [debounced, setDebounced] = useState('')
   const [english, setEnglish] = useState(false)
   const [hideNsfw, setHideNsfw] = useState(true)
-  const [sources, setSources] = useState<(SSource & { extension: { pkgName: string } | null })[] | null>(null)
+  const [sources, setSources] = useState<SearchSource[] | null>(null)
   const [error, setError] = useState<string>()
   const [results, setResults] = useState<Record<string, SearchResult>>({})
   const run = useRef(0)
@@ -288,37 +294,68 @@ export function RemoteSearch() {
     return () => clearTimeout(t)
   }, [query])
 
-  const active = (sources ?? []).filter((s) => (!english || s.lang === 'en') && (!hideNsfw || !s.isNsfw))
-  const activeKey = active.map((s) => s.id).join()
+  const groups = useMemo(() => {
+    const map = new Map<string, SearchGroup>()
+    for (const s of sources ?? []) {
+      if ((english && s.lang !== 'en' && s.lang !== 'all') || (hideNsfw && s.isNsfw)) continue
+      const key = s.extension?.pkgName ?? s.id
+      const g = map.get(key) ?? { key, pkg: s.extension?.pkgName ?? '', name: s.name, iconUrl: s.iconUrl, sources: [] }
+      g.sources.push(s)
+      map.set(key, g)
+    }
+    return [...map.values()].map((g) => ({ ...g, sources: byLanguage(g.sources) }))
+  }, [sources, english, hideNsfw])
+  const groupsKey = groups.map((g) => g.sources.map((s) => s.id).join()).join('|')
 
-  // Searches every source, three at a time, showing each one as it answers.
+  // Every extension's main language goes first so each section fills in quickly; the other
+  // languages follow and are merged in, skipping titles already shown. Four requests at a time.
   useEffect(() => {
-    if (!debounced || !active.length) return
+    if (!debounced || !groups.length) return
     const id = ++run.current
-    setResults(Object.fromEntries(active.map((s) => [s.id, { state: 'loading', items: [] } as SearchResult])))
-    const queue = [...active]
+    setResults(Object.fromEntries(groups.map((g) => [g.key, { done: 0, total: g.sources.length, items: [], errors: [] } as SearchResult])))
+    const depth = Math.max(...groups.map((g) => g.sources.length))
+    const queue: { key: string; source: string }[] = []
+    for (let i = 0; i < depth; i++) for (const g of groups) if (g.sources[i]) queue.push({ key: g.key, source: g.sources[i].id })
     const worker = async () => {
       while (queue.length && run.current === id) {
-        const s = queue.shift()!
+        const job = queue.shift()!
+        let found: SMangaCard[] = []
+        let failure: string | undefined
         try {
-          const r = await browseSource(s.id, 'SEARCH', 1, debounced)
-          if (run.current === id) setResults((prev) => ({ ...prev, [s.id]: { state: 'done', items: r.mangas } }))
+          found = (await browseSource(job.source, 'SEARCH', 1, debounced)).mangas
         } catch (e) {
-          if (run.current === id) setResults((prev) => ({ ...prev, [s.id]: { state: 'error', items: [], error: (e as Error).message } }))
+          failure = (e as Error).message
         }
+        if (run.current !== id) return
+        setResults((prev) => {
+          const r = prev[job.key]
+          if (!r) return prev
+          const seen = new Set(r.items.map((m) => titleKey(m.title)))
+          const fresh = found.filter((m) => {
+            const k = titleKey(m.title)
+            if (seen.has(k)) return false
+            seen.add(k)
+            return true
+          })
+          return { ...prev, [job.key]: { ...r, done: r.done + 1, items: fresh.length ? [...r.items, ...fresh] : r.items, errors: failure ? [...r.errors, failure] : r.errors } }
+        })
       }
     }
-    Promise.all([worker(), worker(), worker()])
+    Promise.all([worker(), worker(), worker(), worker()])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debounced, activeKey])
+  }, [debounced, groupsKey])
 
   const q = debounced.toLowerCase()
   const local = store.entries.filter((e) => e.inLibrary && q && e.title.toLowerCase().includes(q))
-  const order = (s: SSource) => ({ done: results[s.id]?.items.length ? 0 : 2, loading: 1, error: 3 }[results[s.id]?.state ?? 'loading'])
+  const resultFor = (g: SearchGroup): SearchResult => results[g.key] ?? { done: 0, total: g.sources.length, items: [], errors: [] }
+  const order = (g: SearchGroup) => {
+    const r = resultFor(g)
+    return r.items.length ? 0 : r.done < r.total ? 1 : 2
+  }
 
   return (
     <div className="page">
-      <PageHead kicker={`${active.length} sources · your library`} title="Search" />
+      <PageHead kicker={`${groups.length} sources · your library`} title="Search" />
       <div className="pad-x pad-t">
         <label className="field field--lg field--focus">
           <Icon name="search" size={20} />
@@ -333,7 +370,7 @@ export function RemoteSearch() {
 
       {error && <div className="pad-x pad-t"><Notice title="Couldn't load sources" detail={error} /></div>}
       {!debounced ? (
-        <p className="hint pad-x pad-t">{sources && !sources.length ? 'Install an extension in Sources first.' : `Searches your library and ${active.length} sources at once.`}</p>
+        <p className="hint pad-x pad-t">{sources && !sources.length ? 'Install an extension in Sources first.' : `Searches your library and ${groups.length} sources, in every language${english ? ' you picked' : ''}.`}</p>
       ) : (
         <>
           <section className="section pad-x">
@@ -353,19 +390,23 @@ export function RemoteSearch() {
             )}
           </section>
 
-          {[...active].sort((a, b) => order(a) - order(b)).map((s) => {
-            const r = results[s.id] ?? { state: 'loading', items: [] }
-            if (r.state === 'done' && !r.items.length) return null
+          {[...groups].sort((a, b) => order(a) - order(b)).map((g) => {
+            const r = resultFor(g)
+            const searching = r.done < r.total
+            const failed = !searching && !r.items.length && r.errors.length === r.total
+            if (!searching && !r.items.length && !failed) return null
             return (
-              <section key={s.id} className="section">
-                <Link to={`/sources/${encodeURIComponent(s.extension?.pkgName ?? '')}`} className="section-head pad-x link-row">
-                  <h2 className="h3"><SourceIcon letter={s.name[0] ?? '?'} color={ICON_BG} size={28} url={assetUrl(s.iconUrl)} />{s.displayName}</h2>
-                  <span className="card-meta">{r.state === 'loading' ? 'Searching…' : r.state === 'done' ? `${r.items.length} results` : ''}</span>
+              <section key={g.key} className="section">
+                <Link to={`/sources/${encodeURIComponent(g.pkg)}`} className="section-head pad-x link-row">
+                  <h2 className="h3"><SourceIcon letter={g.name[0] ?? '?'} color={ICON_BG} size={28} url={assetUrl(g.iconUrl)} />{g.name}</h2>
+                  <span className="card-meta">
+                    {searching ? (r.total > 1 ? `Searching ${r.done}/${r.total}…` : 'Searching…') : failed ? '' : `${r.items.length} result${r.items.length === 1 ? '' : 's'}`}
+                  </span>
                   <Icon name="chevronRight" size={18} />
                 </Link>
-                {r.state === 'loading' && <div className="rail" aria-hidden="true">{[0, 1, 2].map((i) => <div key={i} className="rail__item skeleton" />)}</div>}
-                {r.state === 'error' && <div className="pad-x"><Notice {...sourceError(r.error ?? '')} /></div>}
-                {r.state === 'done' && <div className="rail">{r.items.map((m) => <MangaCard key={m.id} m={m} rail />)}</div>}
+                {!r.items.length && searching && <div className="rail" aria-hidden="true">{[0, 1, 2].map((i) => <div key={i} className="rail__item skeleton" />)}</div>}
+                {failed && <div className="pad-x"><Notice {...sourceError(r.errors[0] ?? '')} /></div>}
+                {r.items.length > 0 && <div className="rail">{r.items.map((m) => <MangaCard key={m.id} m={m} rail />)}</div>}
               </section>
             )
           })}
