@@ -1,10 +1,9 @@
-import React, { useCallback } from 'react'
+import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Route, useLocation } from 'react-router-dom'
 import { MiniPlayer, TabBar, Toast, UpdateCard } from './components/Chrome'
 import { LockGate } from './components/Lock'
 import { StackRoutes } from './components/Nav'
-import { getSettings } from './data/settings'
 import { StoreProvider } from './data/store'
 import { registerServiceWorker } from './data/update'
 import EntryPage from './pages/Entry'
@@ -17,19 +16,12 @@ import SourceBrowse from './pages/SourceBrowse'
 import Sources from './pages/Sources'
 import './styles.css'
 
-const TAB_ROOTS = ['/', '/library', '/search', '/sources']
-
 function App() {
   const { pathname } = useLocation()
   const reading = pathname.startsWith('/read/')
-  // Paged reading swipes sideways, so the edge-back gesture stays off there.
-  const canSwipeBack = useCallback(
-    (path: string) => !TAB_ROOTS.includes(path) && !(path.startsWith('/read/') && getSettings().readerMode === 'paged'),
-    [],
-  )
   return (
     <div className="app">
-      <StackRoutes canSwipeBack={canSwipeBack}>
+      <StackRoutes>
         <Route path="/" element={<Home />} />
         <Route path="/library" element={<Library />} />
         <Route path="/entry/:id" element={<EntryPage />} />

@@ -1,13 +1,15 @@
-import { MouseEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
+import { MouseEvent, ReactNode, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
 import { Link, LinkProps, Location, Routes, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 
 /**
  * A native-style page stack. Every screen is its own scrolling layer. Pushing slides the new screen in from
  * the right while the one underneath shifts left and darkens; going back reverses it. The previous screen
- * stays mounted underneath, so the edge swipe drags the real page away and reveals the real previous page,
- * with scroll positions and state intact.
+ * stays mounted underneath, so going back shows it with its scroll position and state intact.
+ *
+ * The edge swipe is left to iOS: it animates its own back gesture, so a history step the app did not start
+ * (iOS swipe, browser back) changes screens without a second animation.
  */
-type Direction = 'forward' | 'back' | 'tab' | 'swipe'
+type Direction = 'forward' | 'back' | 'tab' | 'none'
 type Role = 'current' | 'hidden' | 'top-in' | 'under-out' | 'top-out' | 'under-in' | 'fade-in'
 
 const DURATION = 360
@@ -16,8 +18,6 @@ const scrollPositions = new Map<string, number>()
 
 const historyIndex = () => (window.history.state as { idx?: number } | null)?.idx ?? 0
 const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
-const isStandalone = () =>
-  window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true
 
 export function useNav() {
   const navigate = useNavigate()
@@ -61,10 +61,9 @@ function Layer({ loc, role, children, register }: {
   )
 }
 
-export function StackRoutes({ children, canSwipeBack }: { children: ReactNode; canSwipeBack: (pathname: string) => boolean }) {
+export function StackRoutes({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navType = useNavigationType()
-  const navigate = useNavigate()
   const [, rerender] = useReducer((n: number) => n + 1, 0)
   const idx = historyIndex()
 
@@ -80,9 +79,10 @@ export function StackRoutes({ children, canSwipeBack }: { children: ReactNode; c
   const last = useRef(location)
   const anim = useRef<{ from: Location; dir: 'forward' | 'back' | 'tab'; key: string } | null>(null)
   if (last.current.key !== location.key) {
-    const dir = pendingDirection ?? (navType === 'POP' ? 'back' : 'forward')
+    // A history step the app did not start (iOS edge swipe, browser back) is already animated by the system.
+    const dir = pendingDirection ?? (navType === 'POP' ? 'none' : 'forward')
     pendingDirection = null
-    anim.current = dir === 'swipe' || reduceMotion() ? null : { from: last.current, dir, key: location.key }
+    anim.current = dir === 'none' || reduceMotion() ? null : { from: last.current, dir, key: location.key }
     last.current = location
   }
 
@@ -93,8 +93,6 @@ export function StackRoutes({ children, canSwipeBack }: { children: ReactNode; c
   }, [])
 
   useLayoutEffect(() => {
-    // Drop any inline styles left by an edge swipe.
-    els.current.forEach((el) => { el.style.transform = ''; el.style.filter = ''; el.style.transition = ''; el.style.visibility = '' })
     if (!anim.current) return
     const key = anim.current.key
     const t = setTimeout(() => {
@@ -116,74 +114,6 @@ export function StackRoutes({ children, canSwipeBack }: { children: ReactNode; c
   const order = useRef(new Map<string, number>())
   for (const k of roles.keys()) if (!order.current.has(k)) order.current.set(k, order.current.size)
   const layers = [...roles.values()].sort((x, y) => order.current.get(x.loc.key)! - order.current.get(y.loc.key)!)
-
-  // Edge swipe: drag the top screen right to reveal the one below; release past a third to go back.
-  useEffect(() => {
-    if (!below || !isStandalone() || !canSwipeBack(location.pathname)) return
-    let tracking = false, decided = false, startX = 0, startY = 0, dx = 0, startT = 0
-    const top = () => els.current.get(location.key)
-    const under = () => els.current.get(below.key)
-
-    const paint = (x: number, width: number) => {
-      const p = Math.min(1, x / width)
-      top()!.style.transform = `translate3d(${x}px, 0, 0)`
-      const u = under()!
-      u.style.transform = `translate3d(${-30 * (1 - p)}%, 0, 0)`
-      u.style.filter = `brightness(${0.4 + 0.6 * p})`
-    }
-    const onStart = (e: TouchEvent) => {
-      const t = e.touches[0]
-      if (e.touches.length !== 1 || t.clientX > 24 || anim.current) return
-      tracking = true; decided = false; startX = t.clientX; startY = t.clientY; dx = 0; startT = Date.now()
-    }
-    const onMove = (e: TouchEvent) => {
-      if (!tracking || !top() || !under()) return
-      const t = e.touches[0]
-      const mx = t.clientX - startX, my = t.clientY - startY
-      if (!decided) {
-        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return
-        decided = true
-        if (Math.abs(my) > Math.abs(mx) || mx < 0) { tracking = false; return }
-        top()!.classList.add('layer--dragging')
-        under()!.classList.add('layer--peek')
-      }
-      e.preventDefault()
-      dx = Math.max(0, mx)
-      paint(dx, top()!.offsetWidth)
-    }
-    const onEnd = () => {
-      const t = top(), u = under()
-      if (!tracking || !decided || !t || !u) { tracking = false; return }
-      tracking = false
-      const width = t.offsetWidth
-      const commit = dx > width * 0.33 || dx / Math.max(1, Date.now() - startT) > 0.6
-      const ease = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
-      t.style.transition = `transform 240ms ${ease}`
-      u.style.transition = `transform 240ms ${ease}, filter 240ms ${ease}`
-      paint(commit ? width : 0, width)
-      setTimeout(() => {
-        t.classList.remove('layer--dragging')
-        u.classList.remove('layer--peek')
-        if (commit) {
-          pendingDirection = 'swipe'
-          navigate(-1)
-        } else {
-          for (const el of [t, u]) { el.style.transform = ''; el.style.filter = ''; el.style.transition = '' }
-        }
-      }, 240)
-    }
-
-    document.addEventListener('touchstart', onStart, { passive: true })
-    document.addEventListener('touchmove', onMove, { passive: false })
-    document.addEventListener('touchend', onEnd)
-    document.addEventListener('touchcancel', onEnd)
-    return () => {
-      document.removeEventListener('touchstart', onStart)
-      document.removeEventListener('touchmove', onMove)
-      document.removeEventListener('touchend', onEnd)
-      document.removeEventListener('touchcancel', onEnd)
-    }
-  }, [below, location.key, location.pathname, canSwipeBack, navigate])
 
   return (
     <>
