@@ -14,5 +14,10 @@ Web client for Midoku, backed by [Suwayomi-Server](https://github.com/Suwayomi/S
 
 ## Web app
 
-- Dev (inside the codespace): `npm run dev` → open port 5173. `/api` is proxied to Suwayomi.
-- Vercel: set `SUWAYOMI_URL` to the Suwayomi URL (e.g. the codespace's public 4567 URL). `/api/*` is forwarded there by `api/suwayomi.ts`.
+Mobile-only PWA (React + Vite). It currently runs on **dummy data** (`src/data/mock.ts`) and does not talk to Suwayomi yet.
+
+- `npm run dev` → open port 5173 (in the codespace, from the Ports tab).
+- `npm run build` renders the PWA icons from `public/icon.svg`, type-checks and builds to `dist/`.
+- Screens: Home feed, Library (tabs, filters, groups, collections), Entry details, Search, Sources, Source browse.
+- State lives in `src/data/store.tsx`; swapping the mock for Suwayomi only needs that layer to change.
+- Icons: Hugeicons (`@hugeicons/react` + `@hugeicons/core-free-icons`).
