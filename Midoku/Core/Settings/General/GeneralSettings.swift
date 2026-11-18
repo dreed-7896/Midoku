@@ -16,6 +16,9 @@ struct GeneralSettings: Sendable {
         case sources
         case settings
 
+        /// The tabs in the tab bar, in order; `history` is kept only so old settings still decode.
+        static let selectable: [OpeningTab] = [.browse, .library, .search, .sources, .settings]
+
         var title: String {
             switch self {
             case .library: "Library"

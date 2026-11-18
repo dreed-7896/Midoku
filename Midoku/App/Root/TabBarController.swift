@@ -38,6 +38,8 @@ class TabBarController: UITabBarController {
         .init(title: NSLocalizedString("SETTINGS"), image: "MDTabSettings")
     ])
     private var customTabBarHeight: NSLayoutConstraint?
+    private var miniPlayerHost: UIHostingController<MDMiniPlayerView>?
+    private var miniPlayerTimer: Timer?
     private let visibleReaders = NSHashTable<UIViewController>.weakObjects()
     private static let sourcesTabIndex = 3
 
@@ -591,6 +593,80 @@ extension TabBarController {
             height
         ])
         customTabBar.selectedIndex = selectedIndex
+        installMiniPlayer()
+    }
+
+    private func installMiniPlayer() {
+        let host = UIHostingController(rootView: MDMiniPlayerView(
+            openEntry: { [weak self] id in self?.openLibraryEntry(id) },
+            resume: { [weak self] id in self?.resumeReading(id) }
+        ))
+        host.view.backgroundColor = .clear
+        host.sizingOptions = [.intrinsicContentSize]
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        addChild(host)
+        view.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            host.view.bottomAnchor.constraint(equalTo: customTabBar.topAnchor, constant: -8)
+        ])
+        host.didMove(toParent: self)
+        miniPlayerHost = host
+        // Tabs with SwiftUI stacks don't report pushes, so the card checks where it is twice a second.
+        miniPlayerTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateMiniPlayerVisibility() }
+        }
+        updateMiniPlayerVisibility()
+    }
+
+    /// Like the web: not on Home, Settings, entry pages or in the reader; only at the root of Library, Search and Sources.
+    private func updateMiniPlayerVisibility() {
+        guard let host = miniPlayerHost else { return }
+        var show = [1, 2, 3].contains(selectedIndex) && customTabBarVisible && presentedViewController == nil
+        if show, let controller = selectedViewController {
+            let navigation = (controller as? UINavigationController) ?? Self.firstNavigationController(in: controller)
+            if let navigation, navigation.viewControllers.count > 1 { show = false }
+        }
+        if host.view.isHidden == show {
+            host.view.isHidden = !show
+            if show { view.bringSubviewToFront(host.view) }
+        }
+    }
+
+    private static func firstNavigationController(in controller: UIViewController) -> UINavigationController? {
+        for child in controller.children {
+            if let navigation = child as? UINavigationController { return navigation }
+            if let navigation = firstNavigationController(in: child) { return navigation }
+        }
+        return nil
+    }
+
+    private func openLibraryEntry(_ id: UUID) {
+        let host = UIHostingController(rootView: NavigationStack { MCEntryView(entryID: id) }.midokuStyle())
+        present(host, animated: true)
+    }
+
+    private func resumeReading(_ id: UUID) {
+        Task { @MainActor in
+            let store = MCCollectionStore.shared
+            guard let slotID = await store.resumeSlot(entryID: id) else {
+                store.error = "No chapters are available to read."
+                return
+            }
+            do {
+                let sequence = try MCReaderSequence(entryID: id, slotID: slotID)
+                let reader = UIHostingController(rootView: NavigationStack {
+                    MCReaderView(sequence: sequence, startPage: nil, showPanels: false)
+                        .ignoresSafeArea()
+                        .toolbar(.hidden, for: .navigationBar)
+                })
+                reader.modalPresentationStyle = .fullScreen
+                present(reader, animated: true)
+            } catch {
+                store.error = error.localizedDescription
+            }
+        }
     }
 
     fileprivate func layoutCustomTabBar() {

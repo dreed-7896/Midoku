@@ -70,6 +70,25 @@ final class MCDiscoverModel: ObservableObject {
         feeds.append(.init(sourceKey: source.key, sourceName: source.name, listingID: listing.id, listingName: listing.name))
         save()
     }
+    func append(_ feed: MCDiscoverFeed) {
+        feeds.append(feed)
+        save()
+        Task { await load(feed, force: true) }
+    }
+    /// Replaces a shelf after editing and reloads it if what it shows changed.
+    func update(_ feed: MCDiscoverFeed) {
+        guard let index = feeds.firstIndex(where: { $0.id == feed.id }) else { return }
+        let old = feeds[index]
+        feeds[index] = feed
+        save()
+        if old.sourceKey != feed.sourceKey || old.listingID != feed.listingID || old.query != feed.query
+            || (try? JSONEncoder().encode(old.filters)) != (try? JSONEncoder().encode(feed.filters)) {
+            entries[feed.id] = nil; errors[feed.id] = nil; newKeys[feed.id] = nil
+            seen[feed.id.uuidString] = nil
+            UserDefaults.standard.set(seen, forKey: Self.seenKey)
+            Task { await load(feed, force: true) }
+        }
+    }
     func addSearch(source: AidokuRunner.Source, query: String, filters: [FilterValue], name: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -211,6 +230,13 @@ struct MCDiscoverView: View {
     @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
     @State private var extensionUpdates = 0
+    @State private var collection = MCCollectionStore.shared
+    /// When Updates was last opened; newer updates count on the bell, like the web's `seenAt`.
+    @AppStorage("Midoku.updatesSeenAt") private var updatesSeenAt: Double = 0
+
+    private var newUpdates: Int {
+        collection.library.updates.reduce(0) { $0 + ($1.discoveredAt.timeIntervalSince1970 > updatesSeenAt ? 1 : 0) }
+    }
     var openManga: (AidokuRunner.Manga) -> Void = { _ in }
     var openListing: (MCDiscoverFeed) -> Void = { _ in }
     var openShelves: () -> Void = {}
@@ -241,9 +267,13 @@ struct MCDiscoverView: View {
         let installed = installedSources
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
-                MDPageHeader(kicker: "\(Date.now.formatted(.dateTime.weekday(.wide))) · \(model.feeds.count) shelves", title: "Home") {
+                let fresh = newUpdates
+                MDPageHeader(kicker: "\(Date.now.formatted(.dateTime.weekday(.wide))) · \(fresh) new", title: "Home") {
                     MDIconButton(systemImage: "clock", label: "History") { openUpdates(.history) }
-                    MDIconButton(systemImage: "bell", label: "Updates") { openUpdates(.updates) }
+                    MDIconButton(systemImage: "bell", label: fresh > 0 ? "Updates, \(fresh) new" : "Updates", badge: fresh > 0 ? fresh : nil) {
+                        updatesSeenAt = Date.now.timeIntervalSince1970
+                        openUpdates(.updates)
+                    }
                 }
                 if installed.isEmpty && sources.hasLoaded {
                     welcomeCard
@@ -484,6 +514,10 @@ struct MCDiscoverConfiguration: View {
     @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
     @Environment(\.dismiss) private var dismiss
+    /// The shelf being edited; nil adds a new one.
+    @State private var editingID: UUID?
+    /// Opened from a shelf's options: only the editor, no shelf list.
+    private let editOnly: Bool
     @State private var sourceKey = ""
     @State private var kind: Kind = .tab
     @State private var listingID = ""
@@ -492,116 +526,284 @@ struct MCDiscoverConfiguration: View {
     @State private var query = ""
     @State private var enabledFilters: [FilterValue] = []
     @State private var shelfName = ""
+    @State private var layout: MCShelfLayout?
     @State private var showFilters = false
     @State private var loading = false
     @State private var error: String?
+    /// Keeps the edited shelf's tab and filters while its extension's options load.
+    @State private var keepSelection = false
 
-    init(model: MCDiscoverModel, kind: Kind = .tab) {
+    init(model: MCDiscoverModel, kind: Kind = .tab, editing: MCDiscoverFeed? = nil) {
         self.model = model
+        editOnly = editing != nil
         _kind = State(initialValue: kind)
+        if let editing {
+            _editingID = State(initialValue: editing.id)
+            _sourceKey = State(initialValue: editing.sourceKey)
+            _kind = State(initialValue: editing.isSearch ? .search : .tab)
+            _listingID = State(initialValue: editing.listingID)
+            _query = State(initialValue: editing.query ?? "")
+            _enabledFilters = State(initialValue: editing.filters ?? [])
+            _shelfName = State(initialValue: editing.listingName)
+            _layout = State(initialValue: editing.layout)
+        }
+        _keepSelection = State(initialValue: editing != nil)
     }
+
+    private func startEditing(_ feed: MCDiscoverFeed) {
+        keepSelection = true
+        editingID = feed.id
+        sourceKey = feed.sourceKey
+        kind = feed.isSearch ? .search : .tab
+        listingID = feed.listingID
+        query = feed.query ?? ""
+        enabledFilters = feed.filters ?? []
+        shelfName = feed.listingName
+        layout = feed.layout
+    }
+
+    private func resetForm() {
+        editingID = nil
+        query = ""; enabledFilters = []; shelfName = ""; layout = nil
+        listingID = listings.first?.id ?? ""
+    }
+
     private var installed: [AidokuRunner.Source] {
         sources.sourcesByKey.values.filter { !sources.isDisabled(sourceKey: $0.key) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
-    private var canAddSearch: Bool {
-        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !enabledFilters.isEmpty
+
+    private var canSave: Bool {
+        guard sources.source(for: sourceKey) != nil else { return false }
+        switch kind {
+        case .tab:
+            guard listings.contains(where: { $0.id == listingID }) else { return false }
+            return editingID != nil || !model.feeds.contains { $0.sourceKey == sourceKey && $0.listingID == listingID && !$0.isSearch }
+        case .search:
+            return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !enabledFilters.isEmpty
+        }
     }
+
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    ForEach(model.feeds) { feed in
-                        HStack(spacing: 10) {
-                            Image(systemName: feed.isSearch ? "magnifyingglass" : "rectangle.stack")
-                                .foregroundStyle(.secondary).frame(width: 22)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(feed.listingName).font(.mdHeadline)
-                                Text(feed.subtitle).font(.mdSubheadline).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if !editOnly && !model.feeds.isEmpty { shelfList }
+                    editor
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 20)
+            }
+            .mdSheet(editOnly ? "Edit shelf" : "Shelves", count: editOnly ? nil : model.feeds.count, onClose: { dismiss() },
+                     secondary: editingID != nil && !editOnly ? MDSheetAction(title: "Cancel edit") { resetForm() } : nil,
+                     primary: MDSheetAction(title: editingID == nil ? "Add shelf" : "Save shelf", disabled: !canSave) { save() })
+            .sheet(isPresented: $showFilters) {
+                FilterListSheetView(filters: searchFilters, search: $query, enabledFilters: $enabledFilters)
+            }
+            .task(id: "\(sourceKey)-\(kind.rawValue)") { await loadOptions() }
+        }
+        .midokuAccent()
+    }
+
+    // MARK: Shelf list
+
+    private var shelfList: some View {
+        group("Your shelves") {
+            VStack(spacing: 0) {
+                ForEach(Array(model.feeds.enumerated()), id: \.element.id) { index, feed in
+                    HStack(spacing: 10) {
+                        Image(systemName: feed.isSearch ? "magnifyingglass" : "rectangle.stack")
+                            .font(.system(size: 15)).foregroundStyle(Color.mdText2)
+                            .frame(width: 34, height: 34).background(Color.mdS3)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(feed.listingName).font(.mdSystem(size: 15, weight: .medium)).foregroundStyle(Color.mdText).lineLimit(1)
+                            Text("\(feed.subtitle) · \(model.layout(of: feed).title)").font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        smallSquare("arrow.up", label: "Move up", disabled: index == 0) { model.move(feed, by: -1) }
+                        smallSquare("arrow.down", label: "Move down", disabled: index == model.feeds.count - 1) { model.move(feed, by: 1) }
+                        smallSquare("pencil", label: "Edit \(feed.listingName)", active: editingID == feed.id) { startEditing(feed) }
+                        smallSquare("trash", label: "Remove \(feed.listingName)", destructive: true) {
+                            if editingID == feed.id { resetForm() }
+                            model.remove(feed)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(editingID == feed.id ? Color.mdAccentSoft : Color.mdS1)
+                    .overlay(alignment: .top) { if index > 0 { Rectangle().fill(Color.mdLine).frame(height: 1) } }
+                }
+            }
+            .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+        }
+    }
+
+    private func smallSquare(_ image: String, label: String, disabled: Bool = false, active: Bool = false,
+                             destructive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: image)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(destructive ? Color.mdAccent : active ? Color(uiColor: MDColor.onAccent) : Color.mdText2)
+                .frame(width: 30, height: 30)
+                .background(active ? Color.mdAccent : Color.mdS2)
+                .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.35 : 1)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: Editor
+
+    @ViewBuilder private var editor: some View {
+        if installed.isEmpty {
+            MDEmpty(systemImage: "puzzlepiece.extension", title: "No extensions", detail: Text("Install an extension from Sources first."), compact: true)
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                if !editOnly {
+                    Text(editingID == nil ? "Add a shelf" : "Edit shelf")
+                        .font(.mdDisplay(19, weight: .bold)).foregroundStyle(Color.mdText)
+                }
+                group("Shelf type") {
+                    MDSegmented(options: Kind.allCases, selection: $kind) { $0.rawValue }
+                    Text(kind == .search
+                         ? "Reruns your term and filters each time Home refreshes. Results you haven't seen before are marked New."
+                         : "Shows a tab from the extension, like Popular or Latest.")
+                        .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
+                }
+                group("Extension") {
+                    MDFlow {
+                        ForEach(installed, id: \.key) { source in
+                            chip(source.name, on: sourceKey == source.key) {
+                                keepSelection = false
+                                sourceKey = source.key
                             }
                         }
                     }
-                    .onDelete { offsets in offsets.map { model.feeds[$0] }.forEach(model.remove) }
-                    .onMove { model.feeds.move(fromOffsets: $0, toOffset: $1); model.save() }
-                } header: { Text("Your shelves") } footer: { Text(model.feeds.isEmpty ? "Shelves you add appear on Home." : "Reorder shelves with Edit. Swipe a shelf to remove it.") }
-                Section {
-                    if installed.isEmpty { Text("Install an extension from Extensions first.").foregroundStyle(.secondary) }
-                    else {
-                        Picker("Shelf type", selection: $kind) {
-                            ForEach(Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                if loading {
+                    MDLoading(label: "Loading", shape: .rows, count: 1)
+                } else if !sourceKey.isEmpty {
+                    switch kind {
+                    case .tab: tabFields
+                    case .search: searchFields
+                    }
+                }
+                if let error { Text(error).font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3) }
+                if !sourceKey.isEmpty {
+                    group("Name") {
+                        fieldBox {
+                            TextField(kind == .tab ? "Tab name" : "Shelf name (optional)", text: $shelfName)
+                                .font(.mdSystem(size: 15)).foregroundStyle(Color.mdText)
                         }
-                        .pickerStyle(.segmented)
-                        Picker("Extension", selection: $sourceKey) {
-                            Text("Choose extension").tag("")
-                            ForEach(installed, id: \.key) { Text($0.name).tag($0.key) }
-                        }
-                        if loading { MDLoading(label: "Loading", shape: .page) }
-                        else if !sourceKey.isEmpty {
-                            switch kind {
-                                case .tab: tabFields
-                                case .search: searchFields
+                    }
+                    group("Layout") {
+                        MDFlow {
+                            chip("Automatic", on: layout == nil) { layout = nil }
+                            ForEach(MCShelfLayout.allCases, id: \.self) { option in
+                                chip(option.title, on: layout == option, systemImage: option.systemImage) { layout = option }
                             }
                         }
-                        if let error { Text(error).font(.mdFootnote).foregroundStyle(.secondary) }
-                    }
-                } header: { Text("Add a shelf") } footer: {
-                    if kind == .search {
-                        Text("Search shelves rerun your term and filters each time Home refreshes. Results you haven't seen before are marked New.")
                     }
                 }
             }
-                .mdSheet("Shelves", count: model.feeds.count, onClose: { dismiss() }) {
-                    EditButton().font(.mdSystem(size: 14, weight: .semibold)).foregroundStyle(Color.mdAccent)
-                }
-                .sheet(isPresented: $showFilters) {
-                    FilterListSheetView(filters: searchFilters, search: $query, enabledFilters: $enabledFilters)
-                }
-                .task(id: "\(sourceKey)-\(kind.rawValue)") { await loadOptions() }
-        }.midokuAccent()
+        }
     }
 
     @ViewBuilder private var tabFields: some View {
         if listings.isEmpty {
-            Text("This extension does not provide discovery tabs. Try a search shelf.").font(.mdFootnote).foregroundStyle(.secondary)
+            Text("This extension does not provide discovery tabs. Try a search shelf.").font(.mdSystem(size: 13)).foregroundStyle(Color.mdText3)
         } else {
-            Picker("Tab", selection: $listingID) { ForEach(listings, id: \.id) { Text($0.name).tag($0.id) } }
-            Button("Add shelf", systemImage: "plus.circle.fill") {
-                if let source = sources.source(for: sourceKey), let listing = listings.first(where: { $0.id == listingID }) { model.add(source: source, listing: listing) }
-            }.disabled(model.feeds.contains { $0.sourceKey == sourceKey && $0.listingID == listingID && !$0.isSearch })
+            group("Tab") {
+                MDFlow {
+                    ForEach(listings, id: \.id) { listing in
+                        chip(listing.name, on: listingID == listing.id) {
+                            if shelfName.isEmpty || listings.contains(where: { $0.name == shelfName }) { shelfName = listing.name }
+                            listingID = listing.id
+                        }
+                    }
+                }
+            }
         }
     }
 
     @ViewBuilder private var searchFields: some View {
-        TextField("Search term", text: $query)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .submitLabel(.done)
-        if !searchFilters.isEmpty {
-            Button {
-                showFilters = true
-            } label: {
-                HStack {
-                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
-                    Spacer()
-                    Text(enabledFilters.isEmpty ? "None" : "\(enabledFilters.count) applied").foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right").font(.mdCaption.weight(.semibold)).foregroundStyle(.tertiary)
+        group("Search") {
+            fieldBox {
+                Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(Color.mdText3)
+                TextField("Search term, e.g. several artists", text: $query)
+                    .font(.mdSystem(size: 15)).foregroundStyle(Color.mdText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+            }
+            if !searchFilters.isEmpty {
+                HStack(spacing: 10) {
+                    Button { showFilters = true } label: {
+                        Label(enabledFilters.isEmpty ? "Filters" : "Filters · \(enabledFilters.count)", systemImage: "slider.horizontal.3")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(MDGhostButtonStyle(small: false))
+                    if !enabledFilters.isEmpty {
+                        Button { enabledFilters = [] } label: { Text("Clear").frame(maxWidth: .infinity) }
+                            .buttonStyle(MDGhostButtonStyle(small: false))
+                    }
                 }
             }
-            .foregroundStyle(.primary)
-            if !enabledFilters.isEmpty {
-                Button("Clear filters", role: .destructive) { enabledFilters = [] }
-            }
         }
-        TextField("Shelf name (optional)", text: $shelfName)
-        Button("Add search shelf", systemImage: "plus.circle.fill") {
-            guard let source = sources.source(for: sourceKey) else { return }
-            model.addSearch(source: source, query: query, filters: enabledFilters, name: shelfName)
-            query = ""; enabledFilters = []; shelfName = ""
+    }
+
+    private func fieldBox<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 10) { content() }
+            .padding(.horizontal, 12)
+            .frame(height: 46)
+            .background(Color.mdS1)
+            .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).mdLabel()
+            content()
         }
-        .disabled(!canAddSearch)
+    }
+
+    private func chip(_ title: String, on: Bool, systemImage: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) { MDChip(title: title, active: on, systemImage: systemImage, large: false) }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func save() {
+        guard let source = sources.source(for: sourceKey) else { return }
+        let trimmedName = shelfName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var feed: MCDiscoverFeed
+        switch kind {
+        case .tab:
+            guard let listing = listings.first(where: { $0.id == listingID }) else { return }
+            feed = MCDiscoverFeed(sourceKey: source.key, sourceName: source.name, listingID: listing.id,
+                                  listingName: trimmedName.isEmpty ? listing.name : trimmedName)
+        case .search:
+            feed = MCDiscoverFeed(sourceKey: source.key, sourceName: source.name, listingID: "",
+                                  listingName: trimmedName.isEmpty ? (trimmedQuery.isEmpty ? "Filtered search" : "“\(trimmedQuery)”") : trimmedName,
+                                  query: trimmedQuery, filters: enabledFilters)
+        }
+        feed.layout = layout
+        if let editingID {
+            feed.id = editingID
+            model.update(feed)
+        } else {
+            model.append(feed)
+        }
+        if editOnly { dismiss() } else { resetForm() }
     }
 
     private func loadOptions() async {
-        listings = []; listingID = ""; searchFilters = []; error = nil
+        let keep = keepSelection
+        listings = []; searchFilters = []; error = nil
+        if !keep { listingID = "" }
         guard let source = sources.source(for: sourceKey) else { return }
         loading = true
         defer { loading = false }
@@ -610,7 +812,8 @@ struct MCDiscoverConfiguration: View {
                 case .tab:
                     let loaded = try await source.getListings()
                     try Task.checkCancellation()
-                    listings = loaded; listingID = loaded.first?.id ?? ""
+                    listings = loaded
+                    if !loaded.contains(where: { $0.id == listingID }) { listingID = loaded.first?.id ?? "" }
                 case .search:
                     let loaded = try await source.getSearchFilters()
                     try Task.checkCancellation()
@@ -633,6 +836,7 @@ private struct MCDiscoverShelf: View {
     let openListing: (MCDiscoverFeed) -> Void
     @ObservedObject private var sources = SourceStore.shared
     @State private var showOptions = false
+    @State private var editing = false
 
     private var layout: MCShelfLayout { model.layout(of: feed) }
 
@@ -642,6 +846,9 @@ private struct MCDiscoverShelf: View {
             content
         }
         .mdActionSheet(isPresented: $showOptions, title: feed.listingName) { optionRows() }
+        .sheet(isPresented: $editing) {
+            MCDiscoverConfiguration(model: model, editing: feed).presentationDetents([.large])
+        }
     }
 
     private var header: some View {
@@ -683,6 +890,7 @@ private struct MCDiscoverShelf: View {
         var rows: [MDActionRow] = [
             MDActionRow(systemImage: "puzzlepiece.extension", title: feed.isSearch ? "Open search in \(feed.sourceName)" : "Open tab in \(feed.sourceName)",
                         detail: feed.isSearch ? "Same term and filters" : feed.listingName) { openListing(feed) },
+            MDActionRow(systemImage: "pencil", title: "Edit shelf", detail: feed.isSearch ? "Name, search term, filters, extension" : "Name, tab, extension") { editing = true },
             MDActionRow(systemImage: "arrow.clockwise", title: "Refresh") { Task { await model.load(feed, force: true) } }
         ]
         for option in MCShelfLayout.allCases {

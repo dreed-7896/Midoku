@@ -51,8 +51,8 @@ enum Settings {
                 key: AppSettings.general.openingTab.key,
                 title: "Opening tab",
                 value: .select(.init(
-                    values: GeneralSettings.OpeningTab.allCases.map(\.rawValue),
-                    titles: GeneralSettings.OpeningTab.allCases.map(\.title)
+                    values: GeneralSettings.OpeningTab.selectable.map(\.rawValue),
+                    titles: GeneralSettings.OpeningTab.selectable.map(\.title)
                 ))
             ),
             .init(
