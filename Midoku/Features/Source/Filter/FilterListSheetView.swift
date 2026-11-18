@@ -292,6 +292,9 @@ private struct FilterListView: View {
                                 }
                             }
                             .padding(.horizontal)
+                            if LibraryArtistChips.applies(to: filter) {
+                                LibraryArtistChips(text: textBinding(for: filter.id))
+                            }
 
                         case let .sort(_, _, defaultValue):
                             if showTitles {
@@ -761,5 +764,116 @@ extension FilterListView {
             get: { search[id, default: ""] },
             set: { search[id] = $0 }
         )
+    }
+}
+
+/// Artists from the library as chips under a source's Artist field. Tapping one adds it to the
+/// field (or removes it), joined with `|`, which sources that support several artists search
+/// one by one.
+struct LibraryArtistChips: View {
+    @Binding var text: String
+
+    @State private var artists: [String] = []
+    @State private var query = ""
+    @State private var showAll = false
+
+    private static let collapsedCount = 12
+
+    static func applies(to filter: AidokuRunner.Filter) -> Bool {
+        let id = filter.id.lowercased()
+        return id == "artist" || id == "author" || id == "artists"
+            || (filter.title ?? "").localizedCaseInsensitiveContains("artist")
+    }
+
+    /// Distinct library artists, case-insensitively, sorted by name. Names stored as
+    /// `a | b` are split.
+    @MainActor
+    static func libraryArtists() -> [String] {
+        let store = MCCollectionStore.shared
+        var seen = Set<String>()
+        var names: [String] = []
+        for entry in store.library.entries {
+            for raw in store.searchProfile(entry).artists {
+                for part in raw.split(separator: "|") {
+                    let name = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty, seen.insert(name.lowercased()).inserted {
+                        names.append(name)
+                    }
+                }
+            }
+        }
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private var selected: Set<String> {
+        Set(text.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
+    }
+
+    private var visible: [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            return artists.filter { $0.localizedCaseInsensitiveContains(trimmed) }
+        }
+        if showAll { return artists }
+        // Selected artists stay visible when the list is collapsed.
+        let chosen = selected
+        let picked = artists.filter { chosen.contains($0.lowercased()) }
+        let rest = artists.filter { !chosen.contains($0.lowercased()) }
+        return picked + rest.prefix(max(0, Self.collapsedCount - picked.count))
+    }
+
+    var body: some View {
+        Group {
+            if !artists.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("From your library")
+                            .font(.mdMono(10, weight: .semibold))
+                            .textCase(.uppercase)
+                            .tracking(1)
+                            .foregroundStyle(Color.mdText3)
+                        Spacer()
+                        if artists.count > Self.collapsedCount, query.isEmpty {
+                            Button(showAll ? "Show less" : "Show all \(artists.count)") {
+                                withAnimation { showAll.toggle() }
+                            }
+                            .font(.mdSystem(size: 13, weight: .medium))
+                            .foregroundStyle(Color.mdAccent)
+                        }
+                    }
+                    if artists.count > Self.collapsedCount {
+                        TextFieldWrapper {
+                            TextField("Find a library artist", text: $query)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                            if !query.isEmpty {
+                                ClearFieldButton { query = "" }
+                            }
+                        }
+                    }
+                    MDFlow {
+                        ForEach(visible, id: \.self) { artist in
+                            let on = selected.contains(artist.lowercased())
+                            Button(artist) { toggle(artist) }
+                                .buttonStyle(MDFilterChipStyle(state: on ? .on : .off))
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+        .onAppear { artists = Self.libraryArtists() }
+    }
+
+    private func toggle(_ artist: String) {
+        var names = text.split(separator: "|")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if let index = names.firstIndex(where: { $0.lowercased() == artist.lowercased() }) {
+            names.remove(at: index)
+        } else {
+            names.append(artist)
+        }
+        text = names.joined(separator: "|")
     }
 }
