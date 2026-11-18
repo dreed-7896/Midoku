@@ -142,6 +142,7 @@ class TabBarController: UITabBarController {
         historyViewController.navigationBar.prefersLargeTitles = false
         browseViewController.hidesBarAtRoot = true
         historyViewController.hidesBarAtRoot = true
+        searchViewController.hidesBarAtRoot = true
         searchViewController.navigationBar.prefersLargeTitles = true
 
         // Midoku Web order: Home (updates & history), Library, Search, Sources, Settings.

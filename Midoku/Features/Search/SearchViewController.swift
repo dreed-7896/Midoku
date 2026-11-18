@@ -11,9 +11,7 @@ import SwiftUI
 
 class SearchViewController: UIViewController {
     private let viewModel = SearchContentView.ViewModel()
-    private let searchController: UISearchController = .init(searchResultsController: nil)
 
-    private var isSearchBarActive = false
     private var hasLoadedSources = false
     private var cancellables = Set<AnyCancellable>()
 
@@ -51,7 +49,6 @@ class SearchViewController: UIViewController {
             get: { [weak self] in self?.searchText ?? "" },
             set: { [weak self] in
                 self?.searchText = $0
-                self?.searchController.searchBar.text = $0
             }
         )
     }
@@ -76,9 +73,10 @@ class SearchViewController: UIViewController {
             filters: filtersBinding,
             openResult: open(result:),
             dismissKeyboard: {
-                self.searchController.searchBar.resignFirstResponder()
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             },
-            path: NavigationCoordinator(rootViewController: self)
+            path: NavigationCoordinator(rootViewController: self),
+            filterHeader: headerView
         )
     }
     private var headerView: FilterHeaderView {
@@ -123,30 +121,13 @@ class SearchViewController: UIViewController {
         return FilterHeaderView(
             filters: filters,
             enabledFilters: filtersBinding,
-            onFilterSheetDismiss: {
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                    if self.isSearchBarActive {
-                        self.searchController.searchBar.becomeFirstResponder()
-                    }
-                }
-            }
+            onFilterSheetDismiss: {}
         )
     }
 
     private lazy var mainHostingController = UIHostingController(rootView: mainView)
-    private lazy var headerHostingController = {
-        let headerHostingController = UIHostingController(rootView: headerView)
-        headerHostingController.view.backgroundColor = .clear
-        headerHostingController.view.clipsToBounds = false
-        headerHostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        return headerHostingController
-    }()
-
     init() {
         super.init(nibName: nil, bundle: nil)
-        // fix search bar not activating on first present
-        navigationItem.searchController = searchController
     }
 
     required init?(coder: NSCoder) {
@@ -162,34 +143,7 @@ class SearchViewController: UIViewController {
 
     func configure() {
         title = NSLocalizedString("SEARCH")
-        view.backgroundColor = .systemBackground
-
-        if #available(iOS 16, *) {
-            navigationItem.preferredSearchBarPlacement = .stacked
-        }
-
-        searchController.hidesNavigationBarDuringPresentation = true
-        searchController.searchBar.delegate = self
-
-        // add search filters to scope bar
-        searchController.searchBar.showsScopeBar = true
-        searchController.searchBar.scopeButtonTitles = [""]
-        (searchController.searchBar.value(forKey: "_scopeBar") as? UIView)?.isHidden = true
-
-        if
-            let containerView = searchController.searchBar.value(forKey: "_scopeBarContainerView") as? UIView,
-            !containerView.subviews.contains(where: { String(describing: $0.classForCoder).contains("UIHostingView") })
-        {
-            containerView.clipsToBounds = false
-            containerView.addSubview(headerHostingController.view)
-
-            NSLayoutConstraint.activate([
-                headerHostingController.view.topAnchor.constraint(equalTo: containerView.topAnchor),
-                headerHostingController.view.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-                headerHostingController.view.leadingAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.leadingAnchor),
-                headerHostingController.view.trailingAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.trailingAnchor)
-            ])
-        }
+        view.backgroundColor = MDColor.bg
 
         addChild(mainHostingController)
         view.addSubview(mainHostingController.view)
@@ -228,20 +182,10 @@ class SearchViewController: UIViewController {
             .store(in: &cancellables)
     }
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        // fixes scope bar being hidden when dismissing and re-presenting the view
-        if let containerView = searchController.searchBar.value(forKey: "_scopeBarContainerView") as? UIView {
-            containerView.alpha = 1
-            containerView.isHidden = false
-        }
-    }
-
     func search(for query: String) {
         loadViewIfNeeded()
         viewModel.isLoading = !query.isEmpty
         searchText = query
-        searchController.searchBar.text = query
 
         Task {
             if !hasLoadedSources {
@@ -254,7 +198,6 @@ class SearchViewController: UIViewController {
 
     private func updateHostingControllers() {
         mainHostingController.rootView = mainView
-        headerHostingController.rootView = headerView
     }
 
     private func loadSources() async {
@@ -349,30 +292,5 @@ class SearchViewController: UIViewController {
             let sourceController = NewSourceViewController(source: result.source, onlySearch: true, searchQuery: searchText)
             navigationController?.pushViewController(sourceController, animated: true)
         }
-    }
-}
-
-// MARK: UISearchBarDelegate
-extension SearchViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        // update search text for the search results
-        self.searchText = searchText
-    }
-
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        // trigger search commit (immediate search without delay)
-        self.searchCommitToggle.toggle()
-    }
-
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchText = ""
-    }
-
-    func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-        isSearchBarActive = true
-    }
-
-    func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
-        isSearchBarActive = false
     }
 }

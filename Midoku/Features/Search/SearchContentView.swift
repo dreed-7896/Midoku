@@ -16,6 +16,7 @@ struct SearchContentView: View {
     let openResult: (ViewModel.SearchResult) -> Void
     let dismissKeyboard: () -> Void
     let path: NavigationCoordinator
+    var filterHeader: FilterHeaderView?
 
     @State private var keyboardOffset: CGFloat = 0
     @Namespace private var animation
@@ -27,8 +28,10 @@ struct SearchContentView: View {
         filters: Binding<[FilterValue]>,
         openResult: @escaping (ViewModel.SearchResult) -> Void,
         dismissKeyboard: @escaping () -> Void,
-        path: NavigationCoordinator
+        path: NavigationCoordinator,
+        filterHeader: FilterHeaderView? = nil
     ) {
+        self.filterHeader = filterHeader
         self._viewModel = StateObject(wrappedValue: viewModel)
         self._searchText = searchText
         self._searchCommitToggle = searchCommitToggle
@@ -39,7 +42,20 @@ struct SearchContentView: View {
     }
 
     var body: some View {
-        midokuBody.font(.mdBody)
+        VStack(spacing: 0) {
+            MDPageHeader(kicker: "\(viewModel.sources.count) sources", title: NSLocalizedString("SEARCH"))
+            MDSearchField(text: $searchText, prompt: "Search titles everywhere", autofocus: false, onSubmit: {
+                searchCommitToggle.toggle()
+            })
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            if let filterHeader {
+                filterHeader.padding(.top, 10)
+            }
+            midokuBody.font(.mdBody)
+                .padding(.top, 6)
+        }
+        .background(Color.mdBg)
     }
 
     @ViewBuilder private var midokuBody: some View {
@@ -76,7 +92,8 @@ struct SearchContentView: View {
                 }
                 .scrollBackgroundHiddenPlease()
                 .scrollDismissesKeyboardImmediately()
-                .listStyle(.grouped)
+                .listStyle(.plain)
+                .listSectionSeparator(.hidden)
                 .environment(\.defaultMinListRowHeight, 10)
             }
         }
@@ -117,16 +134,20 @@ struct SearchContentView: View {
                         "clock.arrow.circlepath"
                     }
                     Image(systemName: imageName)
-                        .foregroundStyle(.tint)
-                        .imageScale(.small)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(pinned ? Color.mdAccent : Color.mdText3)
+                        .frame(width: 22)
                     Text(item)
+                        .font(.mdSystem(size: 15, weight: .medium))
+                        .foregroundStyle(Color.mdText)
                         .lineLimit(1)
                     Spacer()
+                    Image(systemName: "arrow.up.left").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.mdText3)
                 }
             }
             .buttonStyle(ListButtonStyle(tint: false))
 
-            Divider().padding(.horizontal)
+            Rectangle().fill(Color.mdLine).frame(height: 1).padding(.horizontal, 16)
         }
         .swipeActions(edge: .leading) {
             Button {
@@ -173,9 +194,7 @@ struct SearchContentView: View {
                 termRow(item, pinned: true)
             }
         } header: {
-            Text("Pinned")
-                .font(.mdBody)
-                .textCase(nil)
+            MDSectionLabel(text: "Pinned").padding(.horizontal, 16).padding(.top, 12)
         }
     }
 
@@ -188,8 +207,7 @@ struct SearchContentView: View {
                 .font(.mdSubheadline.weight(.medium))
                 .lineLimit(1)
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.roundedRectangle(radius: 0))
+        .buttonStyle(MDGhostButtonStyle())
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
         .padding(.vertical, 6)
@@ -205,14 +223,16 @@ struct SearchContentView: View {
             }
         } header: {
             HStack {
-                Text(NSLocalizedString("RECENTLY_SEARCHED"))
-                Spacer()
+                MDSectionLabel(text: NSLocalizedString("RECENTLY_SEARCHED"))
                 Button(NSLocalizedString("CLEAR")) {
                     viewModel.clearHistory()
                 }
+                .font(.mdSystem(size: 14, weight: .semibold))
+                .foregroundStyle(Color.mdAccent)
+                .buttonStyle(.plain)
             }
-            .font(.mdBody)
-            .textCase(nil)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
         }
     }
 
@@ -242,23 +262,27 @@ struct SearchContentView: View {
                     .listRowInsets(.zero)
                     .listRowSeparator(.hidden)
                 } header: {
-                    HStack {
-                        SourceIconView(
-                            sourceId: source.key,
-                            imageUrl: source.imageUrl,
-                            iconSize: 29
-                        )
-                        .scaleEffect(0.75)
-                        Text(source.name)
-
-                        Spacer()
-
-                        Button(NSLocalizedString("VIEW_MORE")) {
-                            openResult(searchResult)
+                    Button {
+                        openResult(searchResult)
+                    } label: {
+                        HStack(spacing: 10) {
+                            SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 28)
+                            Text(source.name)
+                                .font(.mdDisplay(17, weight: .bold))
+                                .foregroundStyle(Color.mdText)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text("\(result.entries.count) result\(result.entries.count == 1 ? "" : "s")")
+                                .font(.mdSystem(size: 12))
+                                .foregroundStyle(Color.mdText3)
+                            Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.mdText3)
                         }
+                        .contentShape(Rectangle())
                     }
-                    .font(.mdBody)
-                    .textCase(nil)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 18)
+                    .padding(.bottom, 4)
                 }
             }
         }

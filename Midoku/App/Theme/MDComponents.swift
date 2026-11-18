@@ -144,6 +144,7 @@ struct MDSearchField: View {
     var prompt = "Search"
     var autofocus = true
     var onClose: (() -> Void)?
+    var onSubmit: (() -> Void)?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -156,6 +157,14 @@ struct MDSearchField: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
+                .onSubmit { onSubmit?() }
+            if onClose == nil, !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 30).background(Color.mdS3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
             if let onClose {
                 Button {
                     text = ""
