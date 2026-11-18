@@ -231,7 +231,7 @@ struct MCDiscoverView: View {
         let installed = installedSources
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
-                MDPageHeader(kicker: "\(installed.count) installed", title: "Sources") {
+                MDPageHeader(kicker: "\(installed.count) extensions", title: "Home") {
                     MDIconButton(systemImage: "puzzlepiece.extension", label: "Manage extensions",
                                  badge: extensionUpdates > 0 ? extensionUpdates : nil, action: openExtensions)
                 }

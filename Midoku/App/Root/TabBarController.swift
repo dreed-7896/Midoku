@@ -33,13 +33,13 @@ class TabBarController: UITabBarController {
     private lazy var customTabBar = MDTabBar(items: [
         .init(title: "Home", image: "MDTabHome"),
         .init(title: NSLocalizedString("LIBRARY"), image: "MDTabLibrary"),
+        .init(title: "Updates", image: "MDTabUpdates"),
         .init(title: "Search", image: "MDTabSearch"),
-        .init(title: "Sources", image: "MDTabSources"),
         .init(title: NSLocalizedString("SETTINGS"), image: "MDTabSettings")
     ])
     private var customTabBarHeight: NSLayoutConstraint?
     private let visibleReaders = NSHashTable<UIViewController>.weakObjects()
-    private static let sourcesTabIndex = 3
+    private static let sourcesTabIndex = 0
 
     private lazy var libraryProgressView = CircularProgressView(frame: CGRect(x: 0, y: 0, width: 20, height: 20))
 
@@ -145,21 +145,21 @@ class TabBarController: UITabBarController {
         searchViewController.hidesBarAtRoot = true
         searchViewController.navigationBar.prefersLargeTitles = true
 
-        // Midoku Web order: Home (updates & history), Library, Search, Sources, Settings.
-        historyViewController.tabBarItem = UITabBarItem(title: "Home", image: UIImage(named: "MDTabHome"), tag: 0)
+        // Home (feed shelves and extensions), Library, Updates (new chapters and history), Search, Settings.
+        browseViewController.tabBarItem = UITabBarItem(title: "Home", image: UIImage(named: "MDTabHome"), tag: 0)
         libraryViewController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("LIBRARY"), image: UIImage(named: "MDTabLibrary"), tag: 1
         )
-        searchViewController.tabBarItem = UITabBarItem(title: "Search", image: UIImage(named: "MDTabSearch"), tag: 2)
-        browseViewController.tabBarItem = UITabBarItem(title: "Sources", image: UIImage(named: "MDTabSources"), tag: 3)
+        historyViewController.tabBarItem = UITabBarItem(title: "Updates", image: UIImage(named: "MDTabUpdates"), tag: 2)
+        searchViewController.tabBarItem = UITabBarItem(title: "Search", image: UIImage(named: "MDTabSearch"), tag: 3)
         settingsViewController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("SETTINGS"), image: UIImage(named: "MDTabSettings"), tag: 4
         )
         viewControllers = [
-            historyViewController,
-            libraryViewController,
-            searchViewController,
             browseViewController,
+            libraryViewController,
+            historyViewController,
+            searchViewController,
             settingsViewController
         ]
         installCustomTabBar()
@@ -168,7 +168,7 @@ class TabBarController: UITabBarController {
 
         let updateCount = AppSettings.browse.updateCount.get()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--history-preview") { selectedIndex = 0 }
+        if ProcessInfo.processInfo.arguments.contains("--history-preview") { selectedIndex = 2 }
         if ProcessInfo.processInfo.arguments.contains("--appearance-preview") { selectedIndex = 4 }
         #endif
         setSourcesBadge(updateCount)
@@ -414,10 +414,10 @@ extension TabBarController {
 
     private func applyOpeningTab() {
         selectedIndex = switch AppSettings.general.openingTab.get() {
-        case .history: 0
+        case .browse: 0
         case .library: 1
-        case .search: 2
-        case .browse: 3
+        case .history: 2
+        case .search: 3
         case .settings: 4
         }
     }
@@ -571,8 +571,13 @@ extension TabBarController {
         view.window?.safeAreaInsets.bottom ?? (view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom)
     }
 
+    /// Hidden only while a reader is actually on screen (or being pushed). Readers that were popped or
+    /// dismissed without reporting it no longer count, so the bar always comes back.
     private var customTabBarVisible: Bool {
-        visibleReaders.allObjects.isEmpty
+        for reader in visibleReaders.allObjects where reader.parent == nil && reader.viewIfLoaded?.window == nil {
+            visibleReaders.remove(reader)
+        }
+        return visibleReaders.allObjects.isEmpty
     }
 
     fileprivate func installCustomTabBar() {
@@ -650,6 +655,8 @@ extension TabBarController {
     func readerDidDisappear(_ reader: UIViewController) {
         visibleReaders.remove(reader)
         refreshCustomTabBar(animated: false)
+        // SwiftUI can finish detaching a reader after it reports; check again once it settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.refreshCustomTabBar(animated: true) }
     }
 
     func setSourcesBadge(_ count: Int) {

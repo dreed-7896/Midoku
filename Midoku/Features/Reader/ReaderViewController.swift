@@ -137,6 +137,8 @@ class ReaderViewController: BaseObservingViewController {
     // controller. Native pushes use hidesBottomBarWhenPushed and must never
     // snapshot or restore UIKit's transient, already-hidden push state.
     var managesAppTabBarVisibility = false
+    /// Kept so the bar can be shown again even after UIKit/SwiftUI has detached this reader.
+    private weak var hostTabBar: TabBarController?
     var onNavigateBack: (() -> Void)?
     var onNavigationExit: (() -> Void)?
     private lazy var popGestureDelegate = ReaderPopGestureDelegate(reader: self)
@@ -444,7 +446,8 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        (tabBarController as? TabBarController)?.readerWillAppear(self)
+        hostTabBar = (tabBarController as? TabBarController) ?? hostTabBar
+        hostTabBar?.readerWillAppear(self)
         hideAppTabBar()
     }
 
@@ -487,7 +490,7 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        (tabBarController as? TabBarController)?.readerDidDisappear(self)
+        hostTabBar?.readerDidDisappear(self)
         popGestureDelegate.restore()
         InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
         if isNavigationScreen, let gesture = barDismissNavigationBarTapGesture {
@@ -793,6 +796,7 @@ extension ReaderViewController {
         popGestureDelegate.restore()
         InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
         restoreAppTabBar()
+        hostTabBar?.readerDidDisappear(self)
         onNavigationExit?()
         onNavigationExit = nil
     }

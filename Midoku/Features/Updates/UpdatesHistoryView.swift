@@ -15,7 +15,7 @@ struct UpdatesHistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MDPageHeader(kicker: weekday, title: "Feed") {
+            MDPageHeader(kicker: weekday, title: "Updates") {
                 if page == .updates {
                     MDIconButton(systemImage: "bell", label: "Manage titles getting new chapters", action: showFollowedTitles)
                 }
@@ -39,7 +39,7 @@ struct UpdatesHistoryView: View {
             }
         }
         .background(Color.mdBg)
-        .navigationTitle("Feed")
+        .navigationTitle("Updates")
     }
 
     /// This screen is hosted in a UIKit navigation controller, where a SwiftUI sheet
