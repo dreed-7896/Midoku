@@ -823,7 +823,6 @@ struct MCEntryView: View {
         })
         return rows
     }
-    }
 
     @ViewBuilder private func chapterLabel(_ slot: MCChapterSlot, grid: Bool, current: Bool = false) -> some View {
         if grid {

@@ -867,21 +867,11 @@ private struct MCDiscoverShelf: View {
                     }
                     Text(feed.subtitle).font(.mdSystem(size: 13)).foregroundStyle(Color.mdText3).lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(feed.listingName) from \(feed.sourceName), see all")
-            Spacer(minLength: 0)
-            Button { openListing(feed) } label: {
-                HStack(spacing: 4) {
-                    Text(feed.isSearch ? "Search" : "Open")
-                    Image(systemName: "arrow.right").font(.system(size: 11, weight: .bold))
-                }
-                .font(.mdSystem(size: 13, weight: .semibold))
-                .foregroundStyle(Color.mdAccent)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(feed.isSearch ? "Open this search in \(feed.sourceName)" : "Open \(feed.listingName) in \(feed.sourceName)")
             MDIconButton(systemImage: "ellipsis", label: "Shelf options") { showOptions = true }
         }
     }
