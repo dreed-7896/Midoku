@@ -640,7 +640,7 @@ struct MCArtistReleasesView: View {
         }
         .overlay {
             if (model.releases[feedID] ?? []).isEmpty, model.artistProgress[feedID] == nil {
-                ContentUnavailableView("No releases yet", systemImage: "paintbrush.pointed",
+                UnavailableView("No releases yet", systemImage: "paintbrush.pointed",
                                        description: Text(model.errors[feedID] ?? "Pull to refresh to search your artists again."))
             }
         }

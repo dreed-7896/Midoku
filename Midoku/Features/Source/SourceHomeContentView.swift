@@ -123,9 +123,10 @@ struct SourceHomeContentView: View {
                         restart: { try await source.restart() },
                         retry: { await reload() }
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity)
-                    .padding()
                 }
             }
             .refreshable {

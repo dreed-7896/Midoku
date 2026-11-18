@@ -46,7 +46,7 @@ struct MCDuplicateFinderView: View {
             }
             .overlay {
                 if groups.isEmpty {
-                    ContentUnavailableView("No duplicates found", systemImage: "checkmark.seal",
+                    UnavailableView("No duplicates found", systemImage: "checkmark.seal",
                         description: Text("Titles with the same name, ignoring case, accents, punctuation and notes in brackets, appear here."))
                 }
             }

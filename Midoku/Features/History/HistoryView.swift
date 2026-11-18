@@ -31,10 +31,9 @@ struct HistoryView: View {
             if viewModel.filteredHistory.isEmpty && viewModel.loadingState == .complete {
                 UnavailableView(
                     NSLocalizedString("NO_HISTORY"),
-                    systemImage: "book.fill",
+                    systemImage: "clock",
                     description: Text(NSLocalizedString("NO_HISTORY_TEXT"))
                 )
-                .ignoresSafeArea()
             } else {
                 List(selection: $listSelection) {
                     let sections = viewModel.filteredHistory.values.sorted { $0.daysAgo < $1.daysAgo }
@@ -175,8 +174,7 @@ struct HistoryView: View {
     var loadMoreView: some View {
         VStack {
             if viewModel.loadingState != .complete {
-                ProgressView()
-                    .progressViewStyle(.circular)
+                MDLoading(label: "Loading history", shape: .rows, count: 2)
                     .onReportScrollVisibilityChange(trigger: $triggerLoadMoreVisibleCheck) { visible in
                         Task {
                             await loadTask?.value

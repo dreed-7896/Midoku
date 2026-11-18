@@ -18,70 +18,46 @@ struct ErrorView: View {
     @State private var loading = false
 
     var body: some View {
-        VStack(alignment: .center, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.mdTitle.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Group {
-                let text = error.midokuDescription()
-                Text(text)
-                    .multilineTextAlignment(.center)
-            }
-            .foregroundStyle(.secondary)
-
-            if let retry {
-                if let error = error as? SourceError {
-                    if case .unimplemented = error {
-                        // don't show retry button
-                    } else {
-                        retryButton(action: retry)
-                    }
-                } else if let restart, let error = error as? Wasm3Error {
-                    switch error {
-                        case .trap, .runtimeDisabled:
-                            retryButton(title: NSLocalizedString("RESTART")) {
-                                do {
-                                    try await restart()
-                                    await retry()
-                                } catch {
-                                    LogManager.logger.error("Failed to restart source: \(error)")
-                                }
-                            }
-                        default:
-                            EmptyView()
-                    }
-                }
-            }
-        }
+        MDEmpty(
+            systemImage: "exclamationmark.triangle",
+            title: "Couldn’t load",
+            detail: Text(error.midokuDescription()),
+            action: retryAction,
+            tone: .error
+        )
     }
 
-    @ViewBuilder
-    func retryButton(title: String = NSLocalizedString("RETRY"), action: @escaping () async -> Void) -> some View {
-        HStack {
-            if loading {
-                ProgressView().progressViewStyle(.circular)
-            } else {
-                Button {
-                    withAnimation {
-                        loading = true
-                    }
-                    Task {
-                        await action()
-                        withAnimation {
-                            loading = false
+    private var retryAction: MDStateAction? {
+        guard let retry else { return nil }
+        if let error = error as? SourceError {
+            if case .unimplemented = error { return nil }
+            return action(NSLocalizedString("RETRY"), retry)
+        }
+        if let restart, let error = error as? Wasm3Error {
+            switch error {
+                case .trap, .runtimeDisabled:
+                    return action(NSLocalizedString("RESTART")) {
+                        do {
+                            try await restart()
+                            await retry()
+                        } catch {
+                            LogManager.logger.error("Failed to restart source: \(error)")
                         }
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.mdBody.weight(.medium))
-                        Text(title)
-                    }
-                }
-                .buttonStyle(.borderless)
+                default:
+                    return nil
             }
         }
-        .padding(.top, 4)
+        return nil
+    }
+
+    private func action(_ title: String, _ run: @escaping () async -> Void) -> MDStateAction {
+        MDStateAction(label: title, busy: loading) {
+            loading = true
+            Task {
+                await run()
+                loading = false
+            }
+        }
     }
 }

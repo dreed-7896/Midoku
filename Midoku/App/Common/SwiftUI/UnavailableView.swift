@@ -7,52 +7,31 @@
 
 import SwiftUI
 
+/// Empty state in Midoku Web's look (`<Empty>`): a dashed card at the top of the page.
 struct UnavailableView: View {
     let title: String
     let systemImage: String
     var description: Text?
+    var action: MDStateAction?
+    var tone: MDTone = .neutral
 
-    init(_ title: String, systemImage: String, description: Text? = nil) {
+    init(_ title: String, systemImage: String, description: Text? = nil, action: MDStateAction? = nil, tone: MDTone = .neutral) {
         self.title = title
         self.systemImage = systemImage
         self.description = description
+        self.action = action
+        self.tone = tone
     }
 
     var body: some View {
-        if #available(iOS 17.0, *) {
-            ContentUnavailableView(title, systemImage: systemImage, description: description)
-        } else {
-            VStack(spacing: 16) {
-                Image(systemName: systemImage)
-                    .font(.mdSystem(size: 48))
-                    .foregroundStyle(.secondary)
-
-                VStack(spacing: 4) {
-                    Text(title)
-                        .font(.mdTitle2.weight(.bold))
-
-                    if let description {
-                        description
-                            .font(.mdCallout)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        MDEmptyPage(systemImage: systemImage, title: title, detail: description, action: action, tone: tone)
     }
 
-    @ViewBuilder
     static func search(text: String) -> some View {
-        if #available(iOS 17.0, *) {
-            ContentUnavailableView.search(text: text)
-        } else {
-            Self(
-                String(format: NSLocalizedString("NO_RESULTS_FOR_%@"), text),
-                systemImage: "magnifyingglass",
-                description: Text(NSLocalizedString("NO_RESULTS_TEXT"))
-            )
-        }
+        Self(
+            String(format: NSLocalizedString("NO_RESULTS_FOR_%@"), text),
+            systemImage: "magnifyingglass",
+            description: Text(NSLocalizedString("NO_RESULTS_TEXT"))
+        )
     }
 }

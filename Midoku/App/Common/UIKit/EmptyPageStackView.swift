@@ -7,91 +7,60 @@
 
 import UIKit
 
+/// Empty page message in Midoku Web's look (`<Empty>` card). Keeps the old stack view API.
 class EmptyPageStackView: UIStackView {
     var imageSystemName: String? {
-        didSet {
-            if let imageSystemName {
-                let config = UIImage.SymbolConfiguration(pointSize: 48, weight: .regular)
-                imageView.image = UIImage(systemName: imageSystemName, withConfiguration: config)
-                imageView.isHidden = false
-            } else {
-                imageView.isHidden = true
-            }
-        }
+        didSet { refresh() }
     }
 
     var title: String? {
-        get { titleLabel.text }
-        set { titleLabel.text = newValue }
+        didSet { refresh() }
     }
 
     var text: String? {
-        get { textLabel.text }
-        set { textLabel.text = newValue }
+        didSet { refresh() }
     }
 
     var buttonText: String? {
-        get { button.title(for: .normal) }
-        set { button.setTitle(newValue, for: .normal) }
+        didSet { refresh() }
     }
 
-    var showsButton: Bool {
-        get { !button.isHidden }
-        set { button.isHidden = !newValue }
+    var showsButton = false {
+        didSet { refresh() }
     }
 
-    private let imageView = UIImageView()
-    private let titleLabel = UILabel()
-    private let textLabel = UILabel()
-    private let button = UIButton(type: .roundedRect)
+    private let card = MDStateCardView()
+    private var widthConstraint: NSLayoutConstraint?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        configure()
+        axis = .vertical
+        alignment = .fill
+        addArrangedSubview(card)
+        refresh()
     }
 
     required init(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure() {
-        axis = .vertical
-        alignment = .center
-        spacing = 4
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        widthConstraint?.isActive = false
+        guard let superview else { return }
+        let width = widthAnchor.constraint(equalTo: superview.widthAnchor, constant: -32)
+        width.priority = .defaultHigh
+        let cap = widthAnchor.constraint(lessThanOrEqualToConstant: 560)
+        NSLayoutConstraint.activate([width, cap])
+        widthConstraint = width
+    }
 
-        imageView.tintColor = .secondaryLabel
-        imageView.contentMode = .scaleAspectFit
-        imageView.isHidden = true
-        addArrangedSubview(imageView)
-        setCustomSpacing(16, after: imageView)
-
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.font = UIFont.preferredFont(forTextStyle: .title2).bold()
-        titleLabel.textColor = .label
-        addArrangedSubview(titleLabel)
-
-        textLabel.adjustsFontForContentSizeCategory = true
-        textLabel.font = UIFont.preferredFont(forTextStyle: .callout)
-        textLabel.textColor = .secondaryLabel
-        textLabel.numberOfLines = 0
-        textLabel.textAlignment = .center
-        addArrangedSubview(textLabel)
-
-        button.isHidden = true
-        addArrangedSubview(button)
+    private func refresh() {
+        card.set(systemImage: imageSystemName ?? "info.circle", title: title ?? "", detail: text)
+        card.setAction(showsButton ? buttonText : nil)
     }
 
     func addButtonTarget(_ target: Any?, action: Selector, for event: UIControl.Event = .touchUpInside) {
-        button.addTarget(target, action: action, for: event)
-    }
-}
-
-private extension UIFont {
-    func bold() -> UIFont {
-        if let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) {
-            UIFont(descriptor: descriptor, size: pointSize)
-        } else {
-            self
-        }
+        card.actionButton.addTarget(target, action: action, for: event)
     }
 }

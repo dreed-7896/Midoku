@@ -107,7 +107,7 @@ struct MCPanelBookmarksView: View {
             }
             .overlay {
                 if filteredBookmarks.isEmpty {
-                    ContentUnavailableView(query.isEmpty ? "No \(filter == .all ? "bookmarks" : filter.rawValue.lowercased()) yet" : "No matching bookmarks",
+                    UnavailableView(query.isEmpty ? "No \(filter == .all ? "bookmarks" : filter.rawValue.lowercased()) yet" : "No matching bookmarks",
                         systemImage: "bookmark", description: Text("Hold a chapter or panel to bookmark it."))
                 }
             }

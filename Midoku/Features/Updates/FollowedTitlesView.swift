@@ -43,7 +43,7 @@ struct MCFollowedTitlesView: View {
             }
             .overlay {
                 if entries.isEmpty {
-                    ContentUnavailableView(query.isEmpty ? "No followed titles" : "No matches", systemImage: "bell.slash")
+                    UnavailableView(query.isEmpty ? "No followed titles" : "No matches", systemImage: "bell.slash")
                 }
             }
             .searchable(text: $query, prompt: "Search followed titles")

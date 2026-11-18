@@ -50,16 +50,12 @@ struct SearchContentView: View {
                     systemImage: "magnifyingglass",
                     description: Text(NSLocalizedString("NO_RECENT_SEARCHES_TEXT"))
                 )
-                .offset(y: -keyboardOffset / 2)
-                .ignoresSafeArea(.all)
+
             } else if !searchText.isEmpty && viewModel.resultsIsEmpty {
                 if viewModel.isLoading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .ignoresSafeArea()
+                    MDLoadingPage(label: "Searching", shape: .rows)
                 } else {
                     UnavailableView.search(text: searchText)
-                        .ignoresSafeArea()
                 }
             } else {
                 List {

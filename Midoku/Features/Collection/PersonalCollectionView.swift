@@ -767,13 +767,9 @@ struct MCCollectionRootView: View {
 
     @ViewBuilder private func readingPage(size: CGSize) -> some View {
         if store.readingEntries.isEmpty {
-            VStack(spacing: 12) {
-                UnavailableView("Nothing in Reading", systemImage: "books.vertical",
-                    description: Text("Add titles you want to read next. Hold any title in your library to add it."))
-                Button("Add Entries", systemImage: "plus") { showReadingAdd = true }
-                    .buttonStyle(.bordered)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            UnavailableView("Nothing in Reading", systemImage: "books.vertical",
+                description: Text("Add titles you want to read next. Hold any title in your library to add it."),
+                action: MDStateAction(label: "Add titles") { showReadingAdd = true })
         } else {
             ScrollView {
                 LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 18 : 14) {
@@ -948,7 +944,7 @@ struct MCCollectionRootView: View {
                                              pageID: String? = nil, subgrouping: MCLibrarySubgrouping = .none) -> some View {
         if values.isEmpty {
             let libraryIsEmpty = store.library.entries.isEmpty
-            UnavailableView(libraryIsEmpty ? "Library Empty" : "No matches", systemImage: "books.vertical.fill",
+            UnavailableView(libraryIsEmpty ? "Library empty" : "No matches", systemImage: libraryIsEmpty ? "books.vertical" : "magnifyingglass",
                 description: Text(libraryIsEmpty ? "Add a title from Browse." : "Try another search, group, or filter."))
         } else {
             let sections = subgroups(values, by: subgrouping)

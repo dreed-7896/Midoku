@@ -28,7 +28,7 @@ struct MCAddChapterToEntryView: View {
 
                 Section("Library entry") {
                     if entries.isEmpty {
-                        ContentUnavailableView(
+                        UnavailableView(
                             query.isEmpty ? "Library empty" : "No entries found",
                             systemImage: "books.vertical",
                             description: Text(query.isEmpty ? "Save an entry to the Library first." : "Try another search.")
@@ -118,7 +118,7 @@ struct MCRemovedChaptersView: View {
         NavigationStack {
             List {
                 if chapters.isEmpty {
-                    ContentUnavailableView("No removed chapters", systemImage: "trash")
+                    UnavailableView("No removed chapters", systemImage: "trash")
                 } else {
                     ForEach(chapters) { chapter in
                         HStack {

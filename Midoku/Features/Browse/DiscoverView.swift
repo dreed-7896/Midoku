@@ -430,42 +430,22 @@ struct MCDiscoverView: View {
                     }.scrollTargetBehavior(.viewAligned)
                 }
             } else if let error = model.errors[feed.id] {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(error).font(.mdSubheadline).foregroundStyle(.secondary)
-                        Button("Try again") { Task { await model.load(feed, force: true) } }.font(.mdSubheadline.weight(.semibold))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding()
-                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 0))
-                .padding(.horizontal)
+                MDEmpty(systemImage: "exclamationmark.triangle", title: "Couldn’t load \(feed.listingName)",
+                        detail: Text(String(error.prefix(140))),
+                        action: MDStateAction(label: "Try again") { Task { await model.load(feed, force: true) } },
+                        tone: .error, compact: true)
+                    .padding(.horizontal, 16)
             } else if model.loading.contains(feed.id) || model.entries[feed.id] == nil {
                 loadingRow(featured: featured)
             } else {
-                Text("Nothing in this tab yet.").font(.mdSubheadline).foregroundStyle(.secondary).padding(.horizontal)
+                MDEmpty(systemImage: "info.circle", title: "Nothing here yet", compact: true).padding(.horizontal, 16)
             }
         }
     }
 
     private func loadingRow(featured: Bool) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: featured ? 14 : 12) {
-                ForEach(0..<4, id: \.self) { _ in
-                    VStack(alignment: .leading, spacing: 8) {
-                        RoundedRectangle(cornerRadius: 0)
-                            .fill(Color(uiColor: .secondarySystemBackground))
-                            .frame(width: featured ? 320 : 118, height: featured ? 250 : 177)
-                        if !featured {
-                            RoundedRectangle(cornerRadius: 0).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 90, height: 12)
-                        }
-                    }
-                }
-            }.padding(.horizontal)
-        }
-        .disabled(true)
-        .accessibilityLabel("Loading")
+        MDLoading(label: "Loading", shape: featured ? .rows : .rail, count: featured ? 1 : 4)
+            .padding(.horizontal, 16)
     }
 
     private func coverCard(_ manga: AidokuRunner.Manga, isNew: Bool) -> some View {
@@ -676,7 +656,7 @@ struct MCDiscoverConfiguration: View {
                             }
                         }
                         if kind == .artists { EmptyView() }
-                        else if loading { ProgressView("Loading…") }
+                        else if loading { MDLoading(label: "Loading", shape: .page) }
                         else if !sourceKey.isEmpty {
                             switch kind {
                                 case .tab: tabFields

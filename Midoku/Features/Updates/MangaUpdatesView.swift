@@ -94,12 +94,8 @@ struct MangaUpdatesView: View {
             }
             .overlay {
                 if hasNoUpdates {
-                    VStack(alignment: .center) {
-                        Spacer()
-                        Text(NSLocalizedString("NO_UPDATES"))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
+                    UnavailableView(NSLocalizedString("NO_UPDATES"), systemImage: "bell",
+                        description: Text("New chapters of the titles you follow show up here."))
                 }
             }
         }
@@ -158,13 +154,9 @@ struct MangaUpdatesView: View {
     }
 
     var loadingView: some View {
-        HStack {
-            Spacer()
-            ProgressView()
-                .id(UUID()) // fixes progress view being invisible
-            Spacer()
-        }
-        .listRowSeparator(.hidden)
+        MDLoading(label: "Loading updates", shape: .rows, count: 2)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }
 

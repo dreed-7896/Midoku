@@ -310,7 +310,7 @@ struct MCEntryView: View {
                         } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Entry options")
                     }
                 }
-            } else { ContentUnavailableView("Entry unavailable", systemImage: "book.closed") }
+            } else { UnavailableView("Entry unavailable", systemImage: "book.closed") }
         }
         .sheet(isPresented: $showAddNested) { MCEntryPlacementView(mode: .addInside(entryID)) }
         .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }

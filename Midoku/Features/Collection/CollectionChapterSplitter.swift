@@ -50,15 +50,12 @@ struct MCChapterSplitter: View {
 
     @ViewBuilder private var content: some View {
         if loading {
-            ProgressView("Loading pages…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            MDLoadingPage(label: "Loading pages", shape: .grid)
         } else if let loadError {
-            ContentUnavailableView {
-                Label("Couldn’t load pages", systemImage: "exclamationmark.triangle")
-            } description: { Text(loadError) } actions: {
-                Button("Retry") { Task { await load() } }
-            }
+            UnavailableView("Couldn’t load pages", systemImage: "exclamationmark.triangle", description: Text(loadError),
+                            action: MDStateAction(label: "Try again") { Task { await load() } }, tone: .error)
         } else if pages.isEmpty {
-            ContentUnavailableView("No pages", systemImage: "doc", description: Text("The source returned no pages for this chapter."))
+            UnavailableView("No pages", systemImage: "doc", description: Text("The source returned no pages for this chapter."))
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
