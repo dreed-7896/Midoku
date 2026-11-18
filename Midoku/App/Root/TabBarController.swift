@@ -88,6 +88,26 @@ class TabBarController: UITabBarController {
         return view
     }()
 
+    override var selectedIndex: Int {
+        didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
+    }
+
+    override var selectedViewController: UIViewController? {
+        didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
+    }
+
+    // The system bar always stays hidden; requests to hide or show it move the web bar instead.
+    override var isTabBarHidden: Bool {
+        get { customTabBarHiddenBySystem }
+        set { setTabBarHidden(newValue, animated: false) }
+    }
+
+    override func setTabBarHidden(_ hidden: Bool, animated: Bool) {
+        customTabBarHiddenBySystem = hidden
+        super.setTabBarHidden(true, animated: false)
+        refreshCustomTabBar(animated: animated)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -627,26 +647,6 @@ extension TabBarController {
         guard tabBarController(self, shouldSelect: controller) else { return }
         selectedIndex = index
         checkForSettingsPop()
-    }
-
-    override var selectedIndex: Int {
-        didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
-    }
-
-    override var selectedViewController: UIViewController? {
-        didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
-    }
-
-    // The system bar always stays hidden; requests to hide or show it move the web bar instead.
-    override var isTabBarHidden: Bool {
-        get { customTabBarHiddenBySystem }
-        set { setTabBarHidden(newValue, animated: false) }
-    }
-
-    override func setTabBarHidden(_ hidden: Bool, animated: Bool) {
-        customTabBarHiddenBySystem = hidden
-        super.setTabBarHidden(true, animated: false)
-        refreshCustomTabBar(animated: animated)
     }
 
     /// Readers cover the whole screen; the bar hides while one is showing inside a tab.
