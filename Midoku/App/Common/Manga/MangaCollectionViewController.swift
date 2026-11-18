@@ -51,6 +51,9 @@ class MangaCollectionViewController: BaseCollectionViewController {
             right: 0
         )
         collectionView.keyboardDismissMode = .onDrag
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleEntryLongPress(_:)))
+        longPress.minimumPressDuration = 0.45
+        collectionView.addGestureRecognizer(longPress)
 
         // pull to refresh
         refreshControl.addTarget(self, action: #selector(refresh(_:)), for: .valueChanged)
@@ -274,86 +277,60 @@ extension MangaCollectionViewController {
         navigationController?.pushViewController(viewController, animated: true)
     }
 
-    func collectionView(
-        _ collectionView: UICollectionView,
-        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
-        point: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        guard
-            indexPaths.count == 1,
-            let indexPath = indexPaths.first,
-            let entry = dataSource.itemIdentifier(for: indexPath)
-        else {
-            return nil
+    /// Long press opens the web options sheet instead of the system context menu.
+    @objc func handleEntryLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began,
+              let indexPath = collectionView.indexPathForItem(at: recognizer.location(in: collectionView)),
+              let entry = dataSource.itemIdentifier(for: indexPath)
+        else { return }
+        presentMDActionSheet(title: entry.title, rows: entryRows(entry))
+    }
+
+    private func entryRows(_ entry: AidokuRunner.Manga) -> [MDActionRow] {
+        var rows: [MDActionRow] = []
+        if entry.isLocal() {
+            rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("REMOVE"), destructive: true) {
+                Task {
+                    await LocalFileManager.shared.removeManga(with: entry.key)
+                    NotificationCenter.default.post(name: .init("refresh-content"), object: nil)
+                }
+            })
         }
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ -> UIMenu? in
-            guard let self else { return nil }
-
-            var actions: [UIAction] = []
-
-            if entry.isLocal() {
-                actions.append(UIAction(
-                    title: NSLocalizedString("REMOVE"),
-                    image: UIImage(systemName: "trash"),
-                    attributes: .destructive
-                ) { _ in
-                    Task {
-                        await LocalFileManager.shared.removeManga(with: entry.key)
-                        NotificationCenter.default.post(name: .init("refresh-content"), object: nil)
-                    }
-                })
-            }
-
-            let inLibrary = bookmarkedItems.contains(entry.key)
-            if inLibrary {
-                actions.append(UIAction(
-                    title: NSLocalizedString("REMOVE_FROM_LIBRARY"),
-                    image: UIImage(systemName: "trash"),
-                    attributes: .destructive
-                ) { _ in
-                    let isTracking = TrackerManager.shared.isTracking(mangaId: entry.identifier)
-                    @MainActor
-                    func commit() {
-                        // remove bookmark icon
-                        self.bookmarkedItems.remove(entry.key)
-                        var snapshot = self.dataSource.snapshot()
-                        snapshot.reloadItems([entry])
-                        self.dataSource.apply(snapshot)
-                        // remove from library
-                        Task {
-                            await MangaManager.shared.removeFromLibrary(mangaId: entry.identifier)
-                        }
-                    }
-                    if isTracking {
-                        self.presentAlert(
-                            title: NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM"),
-                            message: NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM_TEXT"),
-                            actions: [
-                                UIAlertAction(title: NSLocalizedString("CANCEL"), style: .cancel),
-                                UIAlertAction(title: NSLocalizedString("REMOVE"), style: .destructive) { _ in
-                                    commit()
-                                }
-                            ]
-                        )
-                    } else {
-                        commit()
-                    }
-                })
-            } else {
-                actions.append(UIAction(
-                    title: NSLocalizedString("ADD_TO_LIBRARY"),
-                    image: UIImage(systemName: "plus.circle")
-                ) { _ in
-                    Task {
-                        let source = await SourceManager.shared.source(for: entry.sourceKey)
-                        let manga = (try? await source?.getMangaUpdate(manga: entry, needsDetails: true, needsChapters: true)) ?? entry
-                        self.present(UIHostingController(rootView: MCAddSourceView(manga: manga, chapters: manga.chapters ?? [])), animated: true)
-                    }
-                })
-            }
-
-            return UIMenu(title: "", children: actions)
+        if bookmarkedItems.contains(entry.key) {
+            rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("REMOVE_FROM_LIBRARY"), destructive: true) { [weak self] in
+                guard let self else { return }
+                let isTracking = TrackerManager.shared.isTracking(mangaId: entry.identifier)
+                @MainActor
+                func commit() {
+                    self.bookmarkedItems.remove(entry.key)
+                    var snapshot = self.dataSource.snapshot()
+                    snapshot.reloadItems([entry])
+                    self.dataSource.apply(snapshot)
+                    Task { await MangaManager.shared.removeFromLibrary(mangaId: entry.identifier) }
+                }
+                if isTracking {
+                    self.presentAlert(
+                        title: NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM"),
+                        message: NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM_TEXT"),
+                        actions: [
+                            UIAlertAction(title: NSLocalizedString("CANCEL"), style: .cancel),
+                            UIAlertAction(title: NSLocalizedString("REMOVE"), style: .destructive) { _ in commit() }
+                        ]
+                    )
+                } else {
+                    commit()
+                }
+            })
+        } else {
+            rows.append(MDActionRow(systemImage: "plus.circle", title: NSLocalizedString("ADD_TO_LIBRARY")) { [weak self] in
+                Task {
+                    let source = await SourceManager.shared.source(for: entry.sourceKey)
+                    let manga = (try? await source?.getMangaUpdate(manga: entry, needsDetails: true, needsChapters: true)) ?? entry
+                    self?.present(UIHostingController(rootView: MCAddSourceView(manga: manga, chapters: manga.chapters ?? [])), animated: true)
+                }
+            })
         }
+        return rows
     }
 
     func collectionView(

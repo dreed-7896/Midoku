@@ -659,7 +659,7 @@ struct MCCollectionRootView: View {
                                        newCounts: Dictionary(uniqueKeysWithValues: pages.map { page in
                                            (page.id, page.entryIDs.reduce(0) { $0 + (newCounts[$1] == nil ? 0 : 1) })
                                        })) { page in
-                        tabMenu(page)
+                        tabRows(page)
                     }
                 }
                 if !trimmedQuery.isEmpty { pinSearchBar }
@@ -817,34 +817,35 @@ struct MCCollectionRootView: View {
         }
     }
 
-    @ViewBuilder private func tabMenu(_ page: MCLibraryGroupPage) -> some View {
+    /// Long-press options for a library tab, as a web options sheet.
+    private func tabRows(_ page: MCLibraryGroupPage) -> [MDActionRow] {
+        var rows: [MDActionRow] = []
         switch page.kind {
         case .reading:
-            Button("Add to Reading…", systemImage: "plus") { showReadingAdd = true }
-            Button("Clear Reading", systemImage: "arrow.counterclockwise", role: .destructive) { confirmResetReading = true }
-                .disabled(store.library.readingIDs.isEmpty)
-            Divider()
-            Button("Hide Reading tab", systemImage: "eye.slash") { showReadingTab = false }
+            rows.append(MDActionRow(systemImage: "plus", title: "Add to Reading…") { showReadingAdd = true })
+            rows.append(MDActionRow(systemImage: "arrow.counterclockwise", title: "Clear Reading", destructive: true,
+                                    disabled: store.library.readingIDs.isEmpty) { confirmResetReading = true })
+            rows.append(MDActionRow(systemImage: "eye.slash", title: "Hide Reading tab") { showReadingTab = false })
         case .smart(let tab):
-            Button("Rename…", systemImage: "pencil") {
+            rows.append(MDActionRow(systemImage: "pencil", title: "Rename…") {
                 tabName = tab.name
                 namingTab = tab
-            }
-            Button("Show search and filters", systemImage: "line.3.horizontal.decrease.circle") { apply(tab.filter) }
-            Button(tab.filter.queryOnly ? "Unpin" : "Remove tab", systemImage: "pin.slash", role: .destructive) {
+            })
+            rows.append(MDActionRow(systemImage: "line.3.horizontal.decrease.circle", title: "Show search and filters") { apply(tab.filter) })
+            rows.append(MDActionRow(systemImage: "pin.slash", title: tab.filter.queryOnly ? "Unpin" : "Remove tab", destructive: true) {
                 removeSmartTab(tab.id)
-            }
+            })
         case .group, .all:
-            EmptyView()
+            break
         }
         if page.kind != .reading {
-            Picker(selection: subgroupBinding(for: page.id)) {
-                ForEach(MCLibrarySubgrouping.allCases) { Text($0.title).tag($0) }
-            } label: {
-                Label("Group in tab", systemImage: "rectangle.3.group")
+            let binding = subgroupBinding(for: page.id)
+            for option in MCLibrarySubgrouping.allCases {
+                rows.append(MDActionRow(systemImage: binding.wrappedValue == option ? "checkmark" : "rectangle.3.group",
+                                        title: option.title, detail: "Group in tab", keepsOpen: true) { binding.wrappedValue = option })
             }
-            .pickerStyle(.menu)
         }
+        return rows
     }
 
     private var pinSearchBar: some View {
@@ -1061,35 +1062,36 @@ struct MCCollectionRootView: View {
             }
         }.buttonStyle(.plain)
         .accessibilityLabel("\(store.library.title(entry)), \(store.chapterCount(entryID: entry.id)) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 0))
-        .contextMenu {
-            if store.chapterCount(entryID: entry.id) > 0 {
-                Button(entry.lastReadAt == nil ? "Start reading" : "Continue reading", systemImage: "book.pages") { continueReading(entry) }
-                Divider()
-            }
-            if store.library.readingIDs.contains(entry.id) {
-                Button("Remove from Reading", systemImage: "minus.circle") { store.removeFromReading([entry.id]) }
-            } else {
-                Button("Add to Reading", systemImage: "book") { store.addToReading([entry.id]) }
-            }
-            Divider()
-            Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: [entry.id], read: true) }
-            Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [entry.id], read: false) }
-            if !inReading {
-                Divider()
-                Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: entry.id) }
-                if entry.parentEntryID != nil {
-                    Button("Move to library", systemImage: "arrow.up.left") {
-                        store.perform { try $0.library.moveEntry(entry.id, into: nil) }
-                    }
-                }
-                Button("Edit entry", systemImage: "pencil") { editingEntry = MCID(id: entry.id) }
-                Button("Edit category", systemImage: "folder") { categoryEntry = MCID(id: entry.id) }
-                Button("Remove from library", systemImage: "trash", role: .destructive) {
-                    selected = [entry.id]; confirmDelete = true
-                }
-            }
+        .mdLongPressActions(store.library.title(entry), enabled: !selecting) { entryRows(entry, inReading: inReading) }
+    }
+
+    /// Long-press options for a library title, as a web options sheet.
+    private func entryRows(_ entry: MCPersonalEntry, inReading: Bool) -> [MDActionRow] {
+        var rows: [MDActionRow] = []
+        if store.chapterCount(entryID: entry.id) > 0 {
+            rows.append(MDActionRow(systemImage: "book.pages", title: entry.lastReadAt == nil ? "Start reading" : "Continue reading") { continueReading(entry) })
         }
+        if store.library.readingIDs.contains(entry.id) {
+            rows.append(MDActionRow(systemImage: "minus.circle", title: "Remove from Reading") { store.removeFromReading([entry.id]) })
+        } else {
+            rows.append(MDActionRow(systemImage: "book", title: "Add to Reading") { store.addToReading([entry.id]) })
+        }
+        rows.append(MDActionRow(systemImage: "checkmark.circle", title: "Mark read") { store.setRead(entryIDs: [entry.id], read: true) })
+        rows.append(MDActionRow(systemImage: "circle", title: "Mark unread") { store.setRead(entryIDs: [entry.id], read: false) })
+        if !inReading {
+            rows.append(MDActionRow(systemImage: "text.badge.plus", title: "Add to entry") { movingEntry = MCID(id: entry.id) })
+            if entry.parentEntryID != nil {
+                rows.append(MDActionRow(systemImage: "arrow.up.left", title: "Move to library") {
+                    store.perform { try $0.library.moveEntry(entry.id, into: nil) }
+                })
+            }
+            rows.append(MDActionRow(systemImage: "pencil", title: "Edit entry") { editingEntry = MCID(id: entry.id) })
+            rows.append(MDActionRow(systemImage: "folder", title: "Edit category") { categoryEntry = MCID(id: entry.id) })
+            rows.append(MDActionRow(systemImage: "trash", title: "Remove from library", destructive: true) {
+                selected = [entry.id]; confirmDelete = true
+            })
+        }
+        return rows
     }
 
     private var groupMenu: some View {
@@ -1306,13 +1308,13 @@ struct MCCollectionRootView: View {
     }
 }
 
-private struct MCLibraryGroupTabs<TabMenu: View>: View {
+private struct MCLibraryGroupTabs: View {
     let pages: [MCLibraryGroupPage]
     let selected: String?
     let swipePosition: MCLibrarySwipePosition
     /// Titles with unread new chapters on each tab.
     let newCounts: [String: Int]
-    @ViewBuilder let menu: (MCLibraryGroupPage) -> TabMenu
+    let menu: (MCLibraryGroupPage) -> [MDActionRow]
 
     private func tabButton(_ page: MCLibraryGroupPage, active: Bool) -> some View {
         Button { swipePosition.requestedID = page.id } label: {
@@ -1340,7 +1342,7 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
                 HStack(spacing: 8) {
                     ForEach(pages) { page in
                         let active = (selected ?? pages.first?.id) == page.id
-                        tabButton(page, active: active).contextMenu { menu(page) }
+                        tabButton(page, active: active).mdLongPressActions(page.kind == .reading ? "Reading" : page.title) { menu(page) }
                         .id(page.id)
                         .accessibilityLabel(page.kind == .group || page.kind == .all ? page.title
                             : page.kind == .reading ? "Reading" : "Saved tab, \(page.title)")

@@ -432,7 +432,7 @@ struct ExtensionsPageView: View {
                     ForEach(pinned, id: \.sourceId) { info in
                         Button { onOpen(info) } label: { bigTile(info) }
                             .buttonStyle(.plain)
-                            .contextMenu { menu(info, pinned: true) }
+                            .mdLongPressActions(info.name) { menu(info, pinned: true) }
                     }
                 }
             }
@@ -443,7 +443,7 @@ struct ExtensionsPageView: View {
                     ForEach(rest, id: \.sourceId) { info in
                         Button { onOpen(info) } label: { tile(info) }
                             .buttonStyle(.plain)
-                            .contextMenu { menu(info, pinned: false) }
+                            .mdLongPressActions(info.name) { menu(info, pinned: false) }
                     }
                 }
             }
@@ -487,19 +487,22 @@ struct ExtensionsPageView: View {
         .padding(.top, 26)
     }
 
-    @ViewBuilder private func menu(_ info: SourceInfo, pinned: Bool) -> some View {
-        Button("Latest", systemImage: "clock") { onLatest(info) }
+    private func menu(_ info: SourceInfo, pinned: Bool) -> [MDActionRow] {
+        var rows: [MDActionRow] = [
+            MDActionRow(systemImage: "magnifyingglass", title: "Browse", detail: info.name) { onOpen(info) },
+            MDActionRow(systemImage: "clock", title: "Latest") { onLatest(info) }
+        ]
         if model.hasUpdate(info) {
-            Button(NSLocalizedString("UPDATE"), systemImage: "arrow.clockwise") { Task { await model.update(info.sourceId) } }
+            rows.append(MDActionRow(systemImage: "arrow.clockwise", title: NSLocalizedString("UPDATE")) { Task { await model.update(info.sourceId) } })
         }
-        Button(pinned ? NSLocalizedString("UNPIN") : NSLocalizedString("PIN"), systemImage: pinned ? "pin.slash" : "pin") {
+        rows.append(MDActionRow(systemImage: pinned ? "pin.slash" : "pin", title: pinned ? NSLocalizedString("UNPIN") : NSLocalizedString("PIN")) {
             if pinned {
                 SourceManager.shared.unpin(sourceKey: info.sourceId)
             } else {
                 SourceManager.shared.pin(sourceKey: info.sourceId)
             }
-        }
-        Button(info.disabled ? NSLocalizedString("ENABLE") : NSLocalizedString("DISABLE"), systemImage: info.disabled ? "play" : "pause") {
+        })
+        rows.append(MDActionRow(systemImage: info.disabled ? "play" : "pause", title: info.disabled ? NSLocalizedString("ENABLE") : NSLocalizedString("DISABLE")) {
             Task {
                 if info.disabled {
                     await SourceManager.shared.enable(sourceKey: info.sourceId)
@@ -507,8 +510,9 @@ struct ExtensionsPageView: View {
                     await SourceManager.shared.disable(sourceKey: info.sourceId)
                 }
             }
-        }
-        Button(NSLocalizedString("UNINSTALL"), systemImage: "trash", role: .destructive) { onUninstall(info) }
+        })
+        rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("UNINSTALL"), destructive: true) { onUninstall(info) })
+        return rows
     }
 
     // `.tile.tile--big`

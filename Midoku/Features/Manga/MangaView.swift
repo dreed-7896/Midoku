@@ -421,8 +421,8 @@ extension MangaView {
                     }
                 }
             },
-            contextMenu: {
-                contextMenu(
+            rows: {
+                chapterRows(
                     chapter: chapter,
                     downloadStatus: downloadStatus,
                     index: index,
@@ -444,156 +444,75 @@ extension MangaView {
         .matchedTransitionSourcePlease(id: chapter, in: transitionNamespace)
     }
 
-    @ViewBuilder
-    func contextMenu(
+    /// Long-press options for a chapter, as a web options sheet.
+    func chapterRows(
         chapter: AidokuRunner.Chapter,
         downloadStatus: DownloadStatus,
         index: Int,
         last: Bool,
         secondSection: Bool
-    ) -> some View {
+    ) -> [MDActionRow] {
         let identifier = ChapterIdentifier(
             sourceKey: viewModel.manga.sourceKey,
             mangaKey: viewModel.manga.key,
             chapterKey: chapter.key
         )
-
-        Button("Add to entry", systemImage: "text.badge.plus") {
-            addChapterToEntry = chapter
+        var rows: [MDActionRow] = [
+            MDActionRow(systemImage: "book", title: "Read chapter") { openChapter = chapter },
+            MDActionRow(systemImage: "text.badge.plus", title: "Add to entry") { addChapterToEntry = chapter }
+        ]
+        if viewModel.source != nil && !viewModel.manga.isLocal() && downloadStatus != .finished && downloadStatus != .downloading {
+            rows.append(MDActionRow(systemImage: "arrow.down.circle", title: NSLocalizedString("DOWNLOAD")) {
+                let downloadOnlyOnWifi = AppSettings.downloads.downloadOnlyOnWifi.get()
+                if downloadOnlyOnWifi && Reachability.getConnectionType() == .wifi || !downloadOnlyOnWifi {
+                    Task { await DownloadManager.shared.download(manga: viewModel.manga, chapters: [chapter]) }
+                } else {
+                    showConnectionAlert = true
+                }
+            })
         }
-        let hasDownloadButton = viewModel.source != nil && !viewModel.manga.isLocal() && downloadStatus != .finished && downloadStatus != .downloading
-        let hasShareButton = downloadStatus == .finished || chapter.url != nil
-        Section {
-            let inControlGroup = hasDownloadButton && hasShareButton
-            let buttons = Group {
-                if hasDownloadButton {
-                    Button {
-                        let downloadOnlyOnWifi = AppSettings.downloads.downloadOnlyOnWifi.get()
-                        if
-                            downloadOnlyOnWifi && Reachability.getConnectionType() == .wifi
-                                || !downloadOnlyOnWifi
-                        {
-                            Task {
-                                await DownloadManager.shared.download(
-                                    manga: viewModel.manga,
-                                    chapters: [chapter]
-                                )
-                            }
-                        } else {
-                            showConnectionAlert = true
-                        }
-                    } label: {
-                        Label(
-                            NSLocalizedString("DOWNLOAD"),
-                            systemImage: inControlGroup ? "arrow.down.circle.fill" : "arrow.down.circle"
-                        )
-                    }
-                }
-                if hasShareButton {
-                    Button {
-                        showShareSheet(chapter: chapter)
-                    } label: {
-                        Label(
-                            NSLocalizedString("SHARE"),
-                            systemImage: inControlGroup ? "square.and.arrow.up.fill" : "square.and.arrow.up"
-                        )
-                    }
-                }
-            }
-            if inControlGroup {
-                ControlGroup {
-                    buttons
-                }
-            } else {
-                buttons
-            }
+        if downloadStatus == .finished || chapter.url != nil {
+            rows.append(MDActionRow(systemImage: "square.and.arrow.up", title: NSLocalizedString("SHARE")) { showShareSheet(chapter: chapter) })
         }
-
-        Section {
-            if viewModel.readingHistory[chapter.key]?.page != nil {
-                Button {
-                    Task {
-                        await viewModel.markUnread(chapters: [chapter])
-                    }
-                } label: {
-                    Label(NSLocalizedString("MARK_UNREAD"), systemImage: "minus.circle")
-                }
-            }
-            if viewModel.readingHistory[chapter.key]?.page != -1 {
-                Button {
-                    Task {
-                        await viewModel.markRead(chapters: [chapter])
-                    }
-                } label: {
-                    Label(NSLocalizedString("MARK_READ"), systemImage: "checkmark.circle")
-                }
-            }
-            if !last && !secondSection {
-                Menu(NSLocalizedString("MARK_PREVIOUS")) {
-                    Button {
-                        let chapters = [AidokuRunner.Chapter](viewModel.chapters[
-                            index + 1..<viewModel.chapters.count
-                        ])
-                        Task {
-                            await viewModel.markRead(chapters: chapters)
-                        }
-                    } label: {
-                        Label(NSLocalizedString("READ"), systemImage: "checkmark.circle")
-                    }
-                    Button {
-                        let chapters = [AidokuRunner.Chapter](viewModel.chapters[
-                            index + 1..<viewModel.chapters.count
-                        ])
-                        Task {
-                            await viewModel.markUnread(chapters: chapters)
-                        }
-                    } label: {
-                        Label(NSLocalizedString("UNREAD"), systemImage: "minus.circle")
-                    }
-                }
-            }
+        if viewModel.readingHistory[chapter.key]?.page != nil {
+            rows.append(MDActionRow(systemImage: "minus.circle", title: NSLocalizedString("MARK_UNREAD")) {
+                Task { await viewModel.markUnread(chapters: [chapter]) }
+            })
         }
-
-        Section {
-            if viewModel.manga.isLocal() {
-                // if the chapter is from the local source, add a button to remove it instead of download
-                Button(role: .destructive) {
-                    Task {
-                        await LocalFileManager.shared.removeChapter(
-                            mangaId: viewModel.manga.key,
-                            chapterId: chapter.key
-                        )
-                        if let index = viewModel.chapters.firstIndex(of: chapter) {
-                            withAnimation {
-                                _ = viewModel.chapters.remove(at: index)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(NSLocalizedString("REMOVE"), systemImage: "trash")
-                }
-            } else {
-                // a failed download leaves a partial chapter on disk, so it is removable in the same
-                // way a complete one is; it keeps the download button as well, which retries it
-                if downloadStatus == .finished || downloadStatus == .failed {
-                    Button(role: .destructive) {
-                        Task {
-                            await DownloadManager.shared.delete(chapters: [identifier])
-                        }
-                    } label: {
-                        Label(NSLocalizedString("REMOVE_DOWNLOAD"), systemImage: "trash")
-                    }
-                } else if downloadStatus == .downloading {
-                    Button {
-                        Task {
-                            await DownloadManager.shared.cancelDownload(for: identifier)
-                        }
-                    } label: {
-                        Label(NSLocalizedString("CANCEL_DOWNLOAD"), systemImage: "xmark")
-                    }
-                }
-            }
+        if viewModel.readingHistory[chapter.key]?.page != -1 {
+            rows.append(MDActionRow(systemImage: "checkmark.circle", title: NSLocalizedString("MARK_READ")) {
+                Task { await viewModel.markRead(chapters: [chapter]) }
+            })
         }
+        if !last && !secondSection {
+            let previous = [AidokuRunner.Chapter](viewModel.chapters[index + 1..<viewModel.chapters.count])
+            rows.append(MDActionRow(systemImage: "checkmark.circle.fill", title: "Mark previous read", detail: "\(previous.count) chapters") {
+                Task { await viewModel.markRead(chapters: previous) }
+            })
+            rows.append(MDActionRow(systemImage: "circle.dashed", title: "Mark previous unread", detail: "\(previous.count) chapters") {
+                Task { await viewModel.markUnread(chapters: previous) }
+            })
+        }
+        if viewModel.manga.isLocal() {
+            rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("REMOVE"), destructive: true) {
+                Task {
+                    await LocalFileManager.shared.removeChapter(mangaId: viewModel.manga.key, chapterId: chapter.key)
+                    if let index = viewModel.chapters.firstIndex(of: chapter) {
+                        withAnimation { _ = viewModel.chapters.remove(at: index) }
+                    }
+                }
+            })
+        } else if downloadStatus == .finished || downloadStatus == .failed {
+            // a failed download leaves a partial chapter on disk, so it is removable in the same way
+            rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("REMOVE_DOWNLOAD"), destructive: true) {
+                Task { await DownloadManager.shared.delete(chapters: [identifier]) }
+            })
+        } else if downloadStatus == .downloading {
+            rows.append(MDActionRow(systemImage: "xmark", title: NSLocalizedString("CANCEL_DOWNLOAD")) {
+                Task { await DownloadManager.shared.cancelDownload(for: identifier) }
+            })
+        }
+        return rows
     }
 
     @ViewBuilder
@@ -873,7 +792,7 @@ extension MangaView {
     }
 }
 
-private struct ChapterCellView<T: View>: View, Equatable {
+private struct ChapterCellView: View, Equatable {
     let source: AidokuRunner.Source?
     let sourceKey: String
     let chapter: AidokuRunner.Chapter
@@ -889,7 +808,7 @@ private struct ChapterCellView<T: View>: View, Equatable {
     let loadPageCount: (() async -> Void)?
 
     var onPressed: (() -> Void)?
-    var contextMenu: (() -> T)?
+    var rows: (() -> [MDActionRow])?
 
     private var locked: Bool {
         chapter.locked && !(downloadStatus == .finished)
@@ -925,15 +844,13 @@ private struct ChapterCellView<T: View>: View, Equatable {
                 view
             }
             .tint(.primary)
-            .contextMenu {
-                if !locked {
-                    contextMenu?()
-                }
+            .mdLongPressActions(chapter.title ?? chapter.chapterNumber.map { "Chapter \($0.formatted())" } ?? "Chapter", enabled: !locked) {
+                rows?() ?? []
             }
         }
     }
 
-    static nonisolated func == (lhs: ChapterCellView<T>, rhs: ChapterCellView<T>) -> Bool {
+    static nonisolated func == (lhs: ChapterCellView, rhs: ChapterCellView) -> Bool {
         lhs.chapter == rhs.chapter
             && lhs.read == rhs.read
             && lhs.page == rhs.page

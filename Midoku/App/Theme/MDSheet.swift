@@ -233,3 +233,51 @@ extension View {
         modifier(MDActionSheetModifier(isPresented: isPresented, title: title, rows: rows))
     }
 }
+
+/// Long press opens a web options sheet instead of the system context menu.
+private struct MDLongPressActions: ViewModifier {
+    let title: String
+    let rows: () -> [MDActionRow]
+    var enabled = true
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .onLongPressGesture(minimumDuration: 0.45) {
+                guard enabled else { return }
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                shown = true
+            }
+            .mdActionSheet(isPresented: $shown, title: title, rows: rows)
+    }
+}
+
+extension View {
+    func mdLongPressActions(_ title: String, enabled: Bool = true, rows: @escaping () -> [MDActionRow]) -> some View {
+        modifier(MDLongPressActions(title: title, rows: rows, enabled: enabled))
+    }
+}
+
+extension UIViewController {
+    /// UIKit entry point for the web options sheet; the picked row runs once the sheet has closed.
+    func presentMDActionSheet(title: String, rows: [MDActionRow]) {
+        var pending: (() -> Void)?
+        weak var host: UIViewController?
+        let sheet = MDActionSheet(title: title, rows: rows, onPick: { row in
+            if row.keepsOpen {
+                row.action()
+            } else {
+                pending = row.action
+                host?.dismiss(animated: true) { pending?(); pending = nil }
+            }
+        }, onClose: { host?.dismiss(animated: true) })
+        let controller = UIHostingController(rootView: sheet.midokuAccent())
+        host = controller
+        if let presentation = controller.sheetPresentationController {
+            presentation.detents = [.medium(), .large()]
+            presentation.prefersGrabberVisible = false
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        present(controller, animated: true)
+    }
+}

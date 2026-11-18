@@ -718,13 +718,15 @@ struct MCEntryView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(selecting)
-                .contextMenu {
-                    Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: id) }
-                    Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryIDs: [id], read: true) }
-                    Button("Mark unread", systemImage: "circle") { store.setRead(entryIDs: [id], read: false) }
-                    Button("Move to library", systemImage: "arrow.up.left") {
-                        store.perform { try $0.library.moveEntry(id, into: nil) }
-                    }
+                .mdLongPressActions(store.library.title(child), enabled: !selecting) {
+                    [
+                        MDActionRow(systemImage: "text.badge.plus", title: "Add to entry") { movingEntry = MCID(id: id) },
+                        MDActionRow(systemImage: "checkmark.circle", title: "Mark read") { store.setRead(entryIDs: [id], read: true) },
+                        MDActionRow(systemImage: "circle", title: "Mark unread") { store.setRead(entryIDs: [id], read: false) },
+                        MDActionRow(systemImage: "arrow.up.left", title: "Move to library") {
+                            store.perform { try $0.library.moveEntry(id, into: nil) }
+                        }
+                    ]
                 }
             }
         }
@@ -765,54 +767,62 @@ struct MCEntryView: View {
             chapterLabel(slot, grid: grid, current: current).frame(maxWidth: .infinity, alignment: .leading).clipped()
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 0))
-        .contextMenu {
-
-                Button("Read chapter", systemImage: "book") { open(slot) }
-                Button(bookmarkedSlotIDs.contains(slot.id) ? "Remove chapter bookmark" : "Bookmark chapter",
-                       systemImage: bookmarkedSlotIDs.contains(slot.id) ? "bookmark.slash" : "bookmark") {
-                    do {
-                        try MCPanelBookmarks.toggleChapter(entryID: entryID, slotID: slot.id)
-                        UISelectionFeedbackGenerator().selectionChanged()
-                    } catch { store.error = error.localizedDescription }
-                }
-                Button("View panels", systemImage: "square.grid.3x3") { open(slot, showPanels: true) }
-                if let url = chapterWebURL(slot) {
-                    Button("View source", systemImage: "globe") { webPage = MCWebPage(url: url) }
-                }
-                Button("Edit chapter", systemImage: "pencil") { editingChapter = MCID(id: slot.id) }
-                Button(slot.preferred?.pageSelection?.ranges.isEmpty == false ? "Edit split" : "Split chapter", systemImage: "scissors") { splittingChapter = MCID(id: slot.id) }
-                    .disabled(slot.variants.count > 1)
-                Button("Add to entry", systemImage: "text.badge.plus") { addingChapter = MCID(id: slot.id) }
-                Menu("Reading progress", systemImage: "checkmark.circle") {
-                    Button("Mark read", systemImage: "checkmark.circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: true) }
-                    Button("Mark unread", systemImage: "circle") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: false) }
-                    Divider()
-                    let next = store.library.nextSlotIDs(entryID: entryID, after: slot.id)
-                    Button("Read all next", systemImage: "checkmark.circle.fill") { store.setRead(entryID: entryID, slotIDs: next, read: true) }.disabled(next.isEmpty)
-                    Button("Unread all next", systemImage: "circle.dashed") { store.setRead(entryID: entryID, slotIDs: next, read: false) }.disabled(next.isEmpty)
-                }
-                Button("Download", systemImage: "arrow.down.circle") {
-                    guard let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID), let physical = store.physical(chapter.identity) else { return }
-                    Task { await DownloadManager.shared.download(manga: physical.manga, chapters: [physical.chapter]) }
-                }
-                if slot.variants.count > 1 {
-                    Menu("Preferred source") {
-                        ForEach(slot.variants) { variant in
-                            let origin = store.library.chapter(variant.chapterID)
-                            Button(origin.map { store.sourceName($0.identity.listing.connectionID) } ?? "Unavailable") {
-                                store.perform { state in try state.library.editEntry(entryID) { entry in
-                                    guard let i = entry.slots.firstIndex(where: { $0.id == slot.id }) else { throw MCLibraryFailure.missing }
-                                    entry.slots[i].preferredID = variant.id; entry.slots[i].completionOverride = nil
-                                } }
-                            }
-                        }
-                    }
-                }
-                Button("Remove from entry", role: .destructive) { store.perform { try $0.library.removeSlots(entryID: entryID, slotIDs: [slot.id]) } }
-        } preview: {
-            chapterLabel(slot, grid: grid).padding(12).frame(width: 260).background(Color.mdBg)
+        .mdLongPressActions(slot.preferred.map { store.library.chapterDisplayTitle($0) } ?? "Chapter", enabled: !selecting) {
+            chapterRows(slot)
         }
+    }
+
+    /// Long-press options for a chapter, as a web options sheet.
+    private func chapterRows(_ slot: MCChapterSlot) -> [MDActionRow] {
+        let bookmarked = bookmarkedSlotIDs.contains(slot.id)
+        let next = store.library.nextSlotIDs(entryID: entryID, after: slot.id)
+        var rows: [MDActionRow] = [
+            MDActionRow(systemImage: "book", title: "Read chapter") { open(slot) },
+            MDActionRow(systemImage: bookmarked ? "bookmark.slash" : "bookmark", title: bookmarked ? "Remove chapter bookmark" : "Bookmark chapter") {
+                do {
+                    try MCPanelBookmarks.toggleChapter(entryID: entryID, slotID: slot.id)
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } catch { store.error = error.localizedDescription }
+            },
+            MDActionRow(systemImage: "square.grid.3x3", title: "View panels") { open(slot, showPanels: true) }
+        ]
+        if let url = chapterWebURL(slot) {
+            rows.append(MDActionRow(systemImage: "globe", title: "View source", detail: url.host) { webPage = MCWebPage(url: url) })
+        }
+        rows.append(MDActionRow(systemImage: "pencil", title: "Edit chapter") { editingChapter = MCID(id: slot.id) })
+        rows.append(MDActionRow(systemImage: "scissors", title: slot.preferred?.pageSelection?.ranges.isEmpty == false ? "Edit split" : "Split chapter",
+                                disabled: slot.variants.count > 1) { splittingChapter = MCID(id: slot.id) })
+        rows.append(MDActionRow(systemImage: "text.badge.plus", title: "Add to entry") { addingChapter = MCID(id: slot.id) })
+        rows.append(MDActionRow(systemImage: "checkmark.circle", title: "Mark read") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: true) })
+        rows.append(MDActionRow(systemImage: "circle", title: "Mark unread") { store.setRead(entryID: entryID, slotIDs: [slot.id], read: false) })
+        rows.append(MDActionRow(systemImage: "checkmark.circle.fill", title: "Read all next", detail: "\(next.count) chapters", disabled: next.isEmpty) {
+            store.setRead(entryID: entryID, slotIDs: next, read: true)
+        })
+        rows.append(MDActionRow(systemImage: "circle.dashed", title: "Unread all next", detail: "\(next.count) chapters", disabled: next.isEmpty) {
+            store.setRead(entryID: entryID, slotIDs: next, read: false)
+        })
+        rows.append(MDActionRow(systemImage: "arrow.down.circle", title: "Download") {
+            guard let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID), let physical = store.physical(chapter.identity) else { return }
+            Task { await DownloadManager.shared.download(manga: physical.manga, chapters: [physical.chapter]) }
+        })
+        if slot.variants.count > 1 {
+            for variant in slot.variants {
+                let origin = store.library.chapter(variant.chapterID)
+                let name = origin.map { store.sourceName($0.identity.listing.connectionID) } ?? "Unavailable"
+                rows.append(MDActionRow(systemImage: slot.preferredID == variant.id ? "checkmark" : "arrow.triangle.branch",
+                                        title: name, detail: "Preferred source", keepsOpen: true) {
+                    store.perform { state in try state.library.editEntry(entryID) { entry in
+                        guard let i = entry.slots.firstIndex(where: { $0.id == slot.id }) else { throw MCLibraryFailure.missing }
+                        entry.slots[i].preferredID = variant.id; entry.slots[i].completionOverride = nil
+                    } }
+                })
+            }
+        }
+        rows.append(MDActionRow(systemImage: "trash", title: "Remove from entry", destructive: true) {
+            store.perform { try $0.library.removeSlots(entryID: entryID, slotIDs: [slot.id]) }
+        })
+        return rows
+    }
     }
 
     @ViewBuilder private func chapterLabel(_ slot: MCChapterSlot, grid: Bool, current: Bool = false) -> some View {

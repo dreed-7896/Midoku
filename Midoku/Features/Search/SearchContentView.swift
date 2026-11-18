@@ -183,15 +183,16 @@ struct SearchContentView: View {
                 }
             }
         }
-        .contextMenu {
-            Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+        .mdLongPressActions(item) {
+            var rows = [MDActionRow(systemImage: pinned ? "pin.slash" : "pin", title: pinned ? "Unpin" : "Pin") {
                 if pinned { viewModel.unpin(item) } else { viewModel.pin(item) }
-            }
+            }]
             if !pinned {
-                Button(NSLocalizedString("DELETE"), systemImage: "trash", role: .destructive) {
+                rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("DELETE"), destructive: true) {
                     viewModel.removeHistory(item: item)
-                }
+                })
             }
+            return rows
         }
         .foregroundStyle(.primary)
         .listRowBackground(Color.clear)
