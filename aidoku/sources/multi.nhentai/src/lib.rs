@@ -40,8 +40,6 @@ const SEARCH_CACHE_SIZE: usize = 30;
 struct NHentai {
 	cache: RefCell<Option<(String, NHentaiGallery)>>,
 	search_cache: RefCell<Vec<(String, i64, NHentaiSearchResponse)>>,
-	/// Names that turned out to be groups/circles rather than artists.
-	known_groups: RefCell<Vec<String>>,
 }
 
 /// Languages nhentai tags galleries with. A multi-language choice is expressed by excluding
@@ -50,14 +48,12 @@ const LANGUAGES: [&str; 3] = ["english", "japanese", "chinese"];
 /// Upper bound on searches for one page when several artists or `|` terms are combined.
 const MAX_SEARCHES: usize = 24;
 
-/// One search to run: the query, plus a group query to try if an artist query finds nothing.
+/// One search to run, and the exact tag its results must carry. nhentai's `artist:"x"`
+/// search also matches tags that merely contain the words (e.g. "jirou" finds
+/// "tamakichi. jirou"), so results are checked against the tag's id.
 struct PlannedSearch {
 	query: String,
-	fallback: Option<String>,
-	/// Lowercase name whose namespace (artist or group) is remembered after the search.
-	name: Option<String>,
-	/// Artist name this search is for, saved to Saved Artists when it finds something.
-	artist: Option<String>,
+	tag_id: Option<i32>,
 }
 
 impl NHentai {
@@ -193,54 +189,67 @@ impl NHentai {
 			None => vec![query.map(|q| q.trim().into()).filter(|q: &String| !q.is_empty())],
 		};
 
+		// Exact tags for the names: artist first, then group (circles such as "ringoya").
+		// Names nhentai has no tag for are skipped instead of falling back to a loose search.
+		let resolved: Vec<(String, &str, i32)> = {
+			let lookups: Vec<(&str, &str)> =
+				names.iter().map(|(n, ns)| (n.as_str(), *ns)).collect();
+			names
+				.iter()
+				.zip(self.resolve_tags(&lookups))
+				.filter_map(|((name, _), tag)| tag.map(|(ns, id)| (name.clone(), ns, id)))
+				.collect()
+		};
+		settings::remember_artists(
+			&resolved
+				.iter()
+				.filter(|(_, ns, _)| *ns == "artist")
+				.map(|(name, _, _)| name.clone())
+				.collect::<Vec<_>>(),
+		);
+		if !names.is_empty() && resolved.is_empty() {
+			return Ok(MangaPageResult {
+				entries: Vec::new(),
+				has_next_page: false,
+			});
+		}
+
 		let mut plan: Vec<PlannedSearch> = Vec::new();
 		for term in &query_terms {
 			let mut parts = query_parts.clone();
 			if let Some(term) = term {
 				parts.insert(0, term.clone());
 			}
-			if names.is_empty() {
+			if resolved.is_empty() {
 				plan.push(PlannedSearch {
 					query: parts.join(" "),
-					fallback: None,
-					name: None,
-					artist: None,
+					tag_id: None,
 				});
 				continue;
 			}
-			for (name, namespace) in &names {
-				let with = |namespace: &str| {
-					let mut parts = parts.clone();
-					parts.push(format!("{namespace}:\"{name}\""));
-					parts.join(" ")
-				};
-				// Skip the artist attempt for names already known to be groups.
-				let known_group = *namespace == "group" || self.known_groups.borrow().contains(name);
-				let artist = (*namespace == "artist").then(|| name.clone());
-				plan.push(if known_group {
-					PlannedSearch {
-						query: with("group"),
-						fallback: None,
-						name: None,
-						artist,
-					}
-				} else {
-					PlannedSearch {
-						query: with("artist"),
-						fallback: Some(with("group")),
-						name: Some(name.clone()),
-						artist,
-					}
+			for (name, namespace, id) in &resolved {
+				let mut parts = parts.clone();
+				parts.push(format!("{namespace}:\"{name}\""));
+				plan.push(PlannedSearch {
+					query: parts.join(" "),
+					tag_id: Some(*id),
 				});
 			}
 		}
 		plan.truncate(MAX_SEARCHES);
 
 		let responses = self.run_searches(&plan, page, sort)?;
-		let has_next_page = responses.iter().any(|response| page < response.num_pages);
+		let has_next_page = responses.iter().any(|(_, response)| page < response.num_pages);
 		let lists = responses
 			.into_iter()
-			.map(|response| response.result)
+			.map(|(tag_id, response)| match tag_id {
+				Some(id) => response
+					.result
+					.into_iter()
+					.filter(|item| item.tag_ids.contains(&id))
+					.collect(),
+				None => response.result,
+			})
 			.collect::<Vec<_>>();
 		let entries = merge_results(lists, sort == "date")
 			.into_iter()
@@ -259,58 +268,21 @@ impl NHentai {
 		})
 	}
 
-	/// Run planned searches in parallel (the runner's rate limiter still spaces them out),
-	/// then retry artist searches that found nothing as group searches.
+	/// Run planned searches in parallel batches, keeping each result with its tag id.
 	/// A search that fails is skipped unless every search fails.
 	fn run_searches(
 		&self,
 		plan: &[PlannedSearch],
 		page: i32,
 		sort: &str,
-	) -> Result<Vec<NHentaiSearchResponse>> {
+	) -> Result<Vec<(Option<i32>, NHentaiSearchResponse)>> {
 		let queries: Vec<&str> = plan.iter().map(|p| p.query.as_str()).collect();
-		let mut results = self.search_batch(&queries, page, sort);
-
-		let retry: Vec<usize> = (0..plan.len())
-			.filter(|&i| {
-				plan[i].fallback.is_some()
-					&& matches!(&results[i], Ok(response) if response.num_pages == 0)
-			})
-			.collect();
-		if !retry.is_empty() {
-			let fallbacks: Vec<&str> = retry
-				.iter()
-				.filter_map(|&i| plan[i].fallback.as_deref())
-				.collect();
-			let fallback_results = self.search_batch(&fallbacks, page, sort);
-			for (&i, result) in retry.iter().zip(fallback_results) {
-				if let (Ok(response), Some(name)) = (&result, &plan[i].name)
-					&& response.num_pages > 0
-				{
-					let mut groups = self.known_groups.borrow_mut();
-					if !groups.contains(name) {
-						groups.push(name.clone());
-					}
-				}
-				results[i] = result;
-			}
-		}
-
-		let found: Vec<String> = plan
-			.iter()
-			.zip(&results)
-			.filter_map(|(p, r)| match (r, &p.artist) {
-				(Ok(response), Some(artist)) if response.num_pages > 0 => Some(artist.clone()),
-				_ => None,
-			})
-			.collect();
-		settings::remember_artists(&found);
-
+		let results = self.search_batch(&queries, page, sort);
 		let mut responses = Vec::new();
 		let mut first_error = None;
-		for result in results {
+		for (planned, result) in plan.iter().zip(results) {
 			match result {
-				Ok(response) => responses.push(response),
+				Ok(response) => responses.push((planned.tag_id, response)),
 				Err(error) => {
 					if first_error.is_none() {
 						first_error = Some(error);
@@ -324,6 +296,54 @@ impl NHentai {
 			return Err(error);
 		}
 		Ok(responses)
+	}
+
+	/// The exact tag (namespace, id) for each (name, preferred namespace). Artist names that
+	/// have no artist tag are tried as groups. Lookups are remembered across launches.
+	fn resolve_tags(&self, names: &[(&str, &str)]) -> Vec<Option<(&'static str, i32)>> {
+		let mut results: Vec<Option<Option<(&'static str, i32)>>> = names
+			.iter()
+			.map(|(name, _)| settings::cached_tag(name))
+			.collect();
+		for namespace in ["artist", "group"] {
+			let pending: Vec<usize> = (0..names.len())
+				.filter(|&i| {
+					results[i].is_none() && (namespace == "group" || names[i].1 == "artist")
+				})
+				.collect();
+			for chunk in pending.chunks(BATCH_SIZE) {
+				let urls: Vec<String> = chunk
+					.iter()
+					.map(|&i| {
+						let slug = names[i].0.trim().to_lowercase().replace(' ', "-");
+						format!("{API_URL}/tags/{namespace}/{}", encode_uri_component(slug))
+					})
+					.collect();
+				let requests: Vec<Request> =
+					urls.iter().filter_map(|url| api::json_request(url).ok()).collect();
+				if requests.len() != chunk.len() {
+					continue;
+				}
+				for (&i, response) in chunk.iter().zip(Request::send_all(requests)) {
+					let Ok(response) = response else { continue };
+					let status = response.status_code();
+					if status == 404 {
+						if namespace == "group" {
+							// Neither an artist nor a group: remember that too.
+							results[i] = Some(None);
+							settings::cache_tag(names[i].0, None);
+						}
+						continue;
+					}
+					if let Ok(tag) = api::decode_response::<NHentaiTagInfo>(response) {
+						let ns: &'static str = if namespace == "artist" { "artist" } else { "group" };
+						results[i] = Some(Some((ns, tag.id)));
+						settings::cache_tag(names[i].0, Some((ns, tag.id)));
+					}
+				}
+			}
+		}
+		results.into_iter().map(Option::flatten).collect()
 	}
 
 	fn search_url(query: &str, page: i32, sort: &str) -> String {
@@ -456,7 +476,6 @@ impl Source for NHentai {
 		Self {
 			cache: RefCell::new(None),
 			search_cache: RefCell::new(Vec::new()),
-			known_groups: RefCell::new(Vec::new()),
 		}
 	}
 

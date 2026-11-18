@@ -1,5 +1,5 @@
 use aidoku::{
-	alloc::{string::String, vec::Vec},
+	alloc::{format, string::String, vec::Vec},
 	imports::defaults::{DefaultValue, defaults_get, defaults_set},
 };
 const TITLE_PREFERENCE_KEY: &str = "titlePreference";
@@ -10,6 +10,8 @@ const CLEAN_TITLES_KEY: &str = "cleanTitles";
 const SAVED_ARTISTS_KEY: &str = "savedArtists";
 const AUTO_SAVE_ARTISTS_KEY: &str = "autoSaveArtists";
 const MAX_SAVED_ARTISTS: usize = 100;
+const TAG_CACHE_KEY: &str = "artistTagCache";
+const MAX_CACHED_TAGS: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TitlePreference {
@@ -93,4 +95,42 @@ pub fn remember_artists(found: &[String]) {
 	if changed {
 		defaults_set(SAVED_ARTISTS_KEY, DefaultValue::StringArray(saved));
 	}
+}
+
+/// A remembered tag lookup for a name: `Some(None)` means nhentai has no artist or group
+/// tag by that name, `None` means it hasn't been looked up.
+pub fn cached_tag(name: &str) -> Option<Option<(&'static str, i32)>> {
+	let key = name.trim().to_lowercase();
+	defaults_get::<Vec<String>>(TAG_CACHE_KEY)
+		.unwrap_or_default()
+		.iter()
+		.find_map(|line| {
+			let mut parts = line.split('\t');
+			let (Some(n), Some(ns), Some(id)) = (parts.next(), parts.next(), parts.next()) else {
+				return None;
+			};
+			if n != key {
+				return None;
+			}
+			Some(match (ns, id.parse::<i32>()) {
+				("artist", Ok(id)) => Some(("artist", id)),
+				("group", Ok(id)) => Some(("group", id)),
+				_ => None,
+			})
+		})
+}
+
+/// Remember a tag lookup (see `cached_tag`).
+pub fn cache_tag(name: &str, tag: Option<(&str, i32)>) {
+	let key = name.trim().to_lowercase();
+	let mut lines: Vec<String> = defaults_get::<Vec<String>>(TAG_CACHE_KEY).unwrap_or_default();
+	lines.retain(|line| line.split('\t').next() != Some(key.as_str()));
+	if lines.len() >= MAX_CACHED_TAGS {
+		lines.remove(0);
+	}
+	lines.push(match tag {
+		Some((ns, id)) => format!("{key}\t{ns}\t{id}"),
+		None => format!("{key}\tnone\t0"),
+	});
+	defaults_set(TAG_CACHE_KEY, DefaultValue::StringArray(lines));
 }

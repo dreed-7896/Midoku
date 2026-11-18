@@ -19,6 +19,13 @@ pub struct NHentaiTag {
 	pub slug: Option<String>,
 }
 
+/// A tag from `/api/v2/tags/{type}/{slug}`.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct NHentaiTagInfo {
+	pub id: i32,
+	pub name: String,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NHentaiCover {
 	pub path: String,
