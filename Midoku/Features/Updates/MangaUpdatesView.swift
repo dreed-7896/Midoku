@@ -146,8 +146,10 @@ struct MangaUpdatesView: View {
                 }
             } header: {
                 Text(Date.makeRelativeDate(days: entry.day))
-                    .fontWeight(.medium)
-                    .foregroundStyle(.primary)
+                    .font(.mdMono(11, weight: .semibold))
+                    .textCase(.uppercase)
+                    .tracking(1)
+                    .foregroundStyle(Color.mdText3)
             }
             .listRowSeparator(.hidden)
         }

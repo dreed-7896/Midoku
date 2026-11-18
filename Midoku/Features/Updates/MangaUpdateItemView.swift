@@ -29,35 +29,40 @@ struct MangaUpdateItemView: View {
     }
 
     var body: some View {
-        HStack(alignment: count == 1 ? .center : .top) {
+        HStack(spacing: 10) {
             MangaCoverView(
                 source: manga.flatMap { SourceManager.shared.store.source(for: $0.sourceKey) },
                 coverImage: manga?.cover ?? "",
-                width: coverWidth,
-                height: coverHeight
+                width: 38,
+                height: 57
             )
-            .padding(.trailing, 6)
+            .clipped()
 
-            VStack(alignment: .leading) {
-                Text(manga?.title ?? "")
-                    .foregroundStyle(viewed ? .secondary : .primary)
-                    .lineLimit(2)
-
-                ForEach(updates.prefix(chaptersLimit)) { item in
-                    if let chapterTitle = item.chapter?.makeTitle() {
-                        Text(chapterTitle)
-                            .font(.mdFootnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                if count > chaptersLimit {
-                    Text(String(format: NSLocalizedString("%lld_PLUS_MORE"), count - chaptersLimit))
-                        .font(.mdFootnote)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 7) {
+                    if !viewed { Rectangle().fill(Color.mdAccent).frame(width: 7, height: 7).accessibilityLabel("New") }
+                    Text(manga?.title ?? "")
+                        .font(.mdSystem(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.mdText)
                         .lineLimit(1)
                 }
+                let chapters = updates.prefix(chaptersLimit).compactMap { $0.chapter?.makeTitle() }
+                Text(chapters.joined(separator: " · ") + (count > chaptersLimit ? " · " + String(format: NSLocalizedString("%lld_PLUS_MORE"), count - chaptersLimit) : ""))
+                    .font(.mdSystem(size: 11.5))
+                    .foregroundStyle(Color.mdText3)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if count > 1 {
+                Text("+\(count)")
+                    .font(.mdMono(10, weight: .bold))
+                    .foregroundStyle(Color.mdAccent)
+                    .padding(.horizontal, 6)
+                    .frame(height: 20)
+                    .background(Color.mdAccentSoft)
             }
         }
+        .opacity(viewed ? 0.6 : 1)
+        .padding(.vertical, 6)
     }
 }

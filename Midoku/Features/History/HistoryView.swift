@@ -128,10 +128,10 @@ struct HistoryView: View {
 
     func headerView(daysAgo: Int) -> some View {
         Text(Date.makeRelativeDate(days: daysAgo))
-            .font(.mdBody.weight(.medium))
-            .foregroundStyle(.primary)
-            .foregroundColor(.primary) // for ios 15
-            .textCase(.none)
+            .font(.mdMono(11, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(1)
+            .foregroundStyle(Color.mdText3)
             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
     }
 
@@ -292,36 +292,37 @@ private struct HistoryEntryCell: View, @MainActor Equatable {
         Button {
             onPressed?()
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 MangaCoverView(
                     coverImage: manga?.cover ?? "",
-                    width: Self.coverImageWidth,
-                    height: Self.coverImageWidth * 3/2,
+                    width: 38,
+                    height: 57,
                     downsampleWidth: Self.coverImageWidth
                 )
-                VStack(alignment: .leading, spacing: 4) {
+                .clipped()
+                VStack(alignment: .leading, spacing: 2) {
                     Text(manga?.title ?? "")
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(.primary)
-                    Text(makeSubtitle())
-                        .foregroundStyle(.secondary)
-                        .font(.mdSubheadline)
+                        .font(.mdSystem(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.mdText)
                         .lineLimit(1)
-                    if let additionalEntryCount = entry.additionalEntryCount, additionalEntryCount > 0 {
-                        let text = Text(String(format: NSLocalizedString("%lld_PLUS_MORE"), additionalEntryCount))
-                            .foregroundStyle(.secondary)
-                            .font(.mdFootnote)
-                            .lineLimit(1)
-                        if #available(iOS 16.0, *) {
-                            text.contentTransition(.numericText())
-                        } else {
-                            text
-                        }
-                    }
+                    Text(makeSubtitle())
+                        .font(.mdSystem(size: 11.5))
+                        .foregroundStyle(Color.mdText3)
+                        .lineLimit(1)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let additionalEntryCount = entry.additionalEntryCount, additionalEntryCount > 0 {
+                    Text("+\(additionalEntryCount)")
+                        .font(.mdMono(10, weight: .bold))
+                        .foregroundStyle(Color.mdText2)
+                        .padding(.horizontal, 6)
+                        .frame(height: 20)
+                        .background(Color.mdS3)
+                        .contentTransition(.numericText())
+                }
             }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .tint(.primary)
     }
@@ -353,7 +354,7 @@ private struct HistoryEntryCell: View, @MainActor Equatable {
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         components.append(formatter.string(from: entry.date))
-        return components.joined(separator: " - ")
+        return components.joined(separator: " · ")
     }
 
     static func == (lhs: HistoryEntryCell, rhs: HistoryEntryCell) -> Bool {
