@@ -45,29 +45,26 @@ class ReaderToolbarView: UIView {
     }
 
     func configure() {
-        previousChapterButton.setImage(UIImage(systemName: "backward.end.fill"), for: .normal)
+        ReaderBarButton.style(previousChapterButton, symbol: "backward.end.fill")
         previousChapterButton.accessibilityLabel = "Previous chapter"
-        nextChapterButton.setImage(UIImage(systemName: "forward.end.fill"), for: .normal)
+        ReaderBarButton.style(nextChapterButton, symbol: "forward.end.fill")
         nextChapterButton.accessibilityLabel = "Next chapter"
-        let symbol = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
-        for button in [previousChapterButton, nextChapterButton] {
-            button.setPreferredSymbolConfiguration(symbol, forImageIn: .normal)
-        }
         addSubview(previousChapterButton)
         addSubview(nextChapterButton)
-        incognitoModeLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        incognitoModeLabel.textColor = .secondaryLabel
+        incognitoModeLabel.font = MDFont.mono(11, .semibold) ?? .systemFont(ofSize: 11, weight: .medium)
+        incognitoModeLabel.textColor = MDColor.accent
         incognitoModeLabel.textAlignment = .left
         incognitoModeLabel.isHidden = !AppSettings.general.incognitoMode.get()
         addSubview(incognitoModeLabel)
 
-        currentPageLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        currentPageLabel.font = MDFont.mono(12, .semibold) ?? .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        currentPageLabel.textColor = MDColor.text2
         currentPageLabel.textAlignment = .center
         currentPageLabel.sizeToFit()
         addSubview(currentPageLabel)
 
-        pagesLeftLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        pagesLeftLabel.textColor = .secondaryLabel
+        pagesLeftLabel.font = MDFont.mono(11, .regular) ?? .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        pagesLeftLabel.textColor = MDColor.text3
         pagesLeftLabel.textAlignment = .right
         addSubview(pagesLeftLabel)
 
@@ -98,16 +95,14 @@ class ReaderToolbarView: UIView {
 
             previousChapterButton.leadingAnchor.constraint(equalTo: leadingAnchor),
             previousChapterButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            previousChapterButton.widthAnchor.constraint(equalToConstant: 44),
-            previousChapterButton.heightAnchor.constraint(equalToConstant: 44),
+
             nextChapterButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             nextChapterButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            nextChapterButton.widthAnchor.constraint(equalToConstant: 44),
-            nextChapterButton.heightAnchor.constraint(equalToConstant: 44),
+
             sliderView.heightAnchor.constraint(equalToConstant: 44),
             sliderView.centerYAnchor.constraint(equalTo: previousChapterButton.centerYAnchor),
-            sliderView.leadingAnchor.constraint(equalTo: previousChapterButton.trailingAnchor, constant: 4),
-            sliderView.trailingAnchor.constraint(equalTo: nextChapterButton.leadingAnchor, constant: -4)
+            sliderView.leadingAnchor.constraint(equalTo: previousChapterButton.trailingAnchor, constant: 12),
+            sliderView.trailingAnchor.constraint(equalTo: nextChapterButton.leadingAnchor, constant: -12)
         ])
     }
 
@@ -141,7 +136,7 @@ class ReaderToolbarView: UIView {
         } else if page < 1 {
             page = 1
         }
-        currentPageLabel.text = String(format: NSLocalizedString("%i_OF_%i"), page, totalPages)
+        currentPageLabel.text = "\(page) / \(totalPages)"
         currentPageValue = page
     }
 
@@ -158,7 +153,7 @@ class ReaderToolbarView: UIView {
             currentPage = 1
         }
         let pagesLeft = totalPages - currentPage
-        currentPageLabel.text = String(format: NSLocalizedString("%i_OF_%i"), currentPage, totalPages)
+        currentPageLabel.text = "\(currentPage) / \(totalPages)"
         sliderView.accessibilityValue = currentPageLabel.text
         if pagesLeft < 1 {
             pagesLeftLabel.text = nil

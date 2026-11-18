@@ -48,15 +48,15 @@ class ReaderSliderView: UIControl {
 
     private lazy var trackView = {
         let trackView = UIView()
-        trackView.backgroundColor = .secondarySystemFill
-        trackView.layer.cornerRadius = 1.5
+        trackView.backgroundColor = MDColor.line2
+        trackView.layer.cornerRadius = 0
         trackView.isUserInteractionEnabled = false
         return trackView
     }()
     private lazy var progressedTrackView = {
         let progressedTrackView = UIView()
-        progressedTrackView.backgroundColor = tintColor
-        progressedTrackView.layer.cornerRadius = 1.5
+        progressedTrackView.backgroundColor = MDColor.accent
+        progressedTrackView.layer.cornerRadius = 0
         progressedTrackView.isUserInteractionEnabled = false
         return progressedTrackView
     }()

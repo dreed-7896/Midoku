@@ -16,55 +16,47 @@ final class ReaderControlsView: UIVisualEffectView {
     let translationButton = UIButton(type: .system)
 
     init() {
-        super.init(effect: UIBlurEffect(style: .systemThinMaterial))
-        layer.cornerRadius = 0
-        layer.cornerCurve = .continuous
-        clipsToBounds = true
-        for (button, symbol, title, label) in [
-            (chaptersButton, "list.bullet", "Chapters", "Chapters"),
-            (panelsButton, "square.grid.2x2", "Pages", "View pages"),
-            (bookmarkButton, "bookmark", "Bookmark", "Bookmark this page"),
-            (autoScrollButton, "play.fill", "Auto scroll", "Start auto scroll"),
-            (translationButton, "character.bubble", "Translate", "Enable translation"),
-            (settingsButton, "textformat.size", "Settings", "Reader settings")
+        super.init(effect: nil)
+        backgroundColor = MDColor.bg.withAlphaComponent(0.94)
+        clipsToBounds = false
+        for (button, symbol, label) in [
+            (chaptersButton, "list.bullet", "Chapters"),
+            (panelsButton, "square.grid.2x2", "View pages"),
+            (bookmarkButton, "bookmark", "Bookmark this page"),
+            (autoScrollButton, "play.fill", "Start auto scroll"),
+            (translationButton, "character.bubble", "Enable translation"),
+            (settingsButton, "textformat.size", "Reader settings")
         ] {
-            var configuration = UIButton.Configuration.plain()
-            configuration.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
-            configuration.imagePlacement = .top
-            configuration.imagePadding = 4
-            configuration.baseForegroundColor = .label
-            configuration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
-            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-                var attributes = attributes
-                attributes.font = .systemFont(ofSize: 10, weight: .medium)
-                return attributes
-            }
-            configuration.title = title
-            configuration.titleLineBreakMode = .byTruncatingTail
-            button.configuration = configuration
+            ReaderBarButton.style(button, symbol: symbol)
             button.accessibilityLabel = label
-            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
         }
         let actions = UIStackView(arrangedSubviews: [chaptersButton, panelsButton, bookmarkButton, autoScrollButton, translationButton, settingsButton])
         actions.axis = .horizontal
         actions.alignment = .center
-        actions.distribution = .fillEqually
-        actions.spacing = 4
+        actions.distribution = .equalSpacing
 
-        let separator = UIView()
-        separator.backgroundColor = .separator
-        separator.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive = true
+        let border = UIView()
+        border.backgroundColor = MDColor.line
+        border.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(border)
 
-        let stack = UIStackView(arrangedSubviews: [toolbar, separator, actions])
+        let stack = UIStackView(arrangedSubviews: [toolbar, actions])
         stack.axis = .vertical
-        stack.spacing = 6
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
+        let readable = stack.widthAnchor.constraint(lessThanOrEqualToConstant: 600)
+        let fill = stack.widthAnchor.constraint(equalTo: contentView.widthAnchor, constant: -24)
+        fill.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            border.topAnchor.constraint(equalTo: contentView.topAnchor),
+            border.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            border.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            border.heightAnchor.constraint(equalToConstant: 1),
+            readable, fill,
+            stack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -10),
             toolbar.heightAnchor.constraint(equalToConstant: 66)
         ])
     }
@@ -74,7 +66,7 @@ final class ReaderControlsView: UIVisualEffectView {
     func setBookmarked(_ bookmarked: Bool) {
         bookmarkButton.configuration?.image = UIImage(systemName: bookmarked ? "bookmark.fill" : "bookmark",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium))
-        bookmarkButton.configuration?.baseForegroundColor = bookmarked ? .tintColor : .label
+        bookmarkButton.configuration?.baseForegroundColor = bookmarked ? MDColor.accent : MDColor.text
         bookmarkButton.accessibilityLabel = bookmarked ? "Remove page bookmark" : "Bookmark this page"
     }
 }
@@ -87,51 +79,50 @@ final class ReaderTopBarView: UIVisualEffectView {
     private let subtitleLabel = UILabel()
 
     init() {
-        super.init(effect: UIBlurEffect(style: .systemThinMaterial))
-        layer.cornerRadius = 0
-        layer.cornerCurve = .continuous
-        clipsToBounds = true
+        super.init(effect: nil)
+        backgroundColor = MDColor.bg.withAlphaComponent(0.94)
+        clipsToBounds = false
 
-        for (button, symbol, label) in [
-            (closeButton, "chevron.backward", "Back"),
-            (webButton, "safari", "Open in webview")
-        ] {
-            var configuration = UIButton.Configuration.plain()
-            configuration.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
-            configuration.baseForegroundColor = .label
-            configuration.contentInsets = .zero
-            button.configuration = configuration
-            button.accessibilityLabel = label
-            NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 44),
-                button.heightAnchor.constraint(equalToConstant: 44)
-            ])
-        }
+        ReaderBarButton.style(closeButton, symbol: "chevron.backward")
+        closeButton.accessibilityLabel = "Back"
+        ReaderBarButton.style(webButton, symbol: "safari")
+        webButton.accessibilityLabel = "Open in webview"
 
-        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        titleLabel.textAlignment = .center
-        subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        subtitleLabel.textColor = .secondaryLabel
-        subtitleLabel.textAlignment = .center
-        let titles = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
+        // web `.reader__entry` (mono, uppercase, muted) over `.reader__chapter` (15pt bold)
+        subtitleLabel.font = MDFont.mono(11, .semibold) ?? .monospacedSystemFont(ofSize: 11, weight: .semibold)
+        subtitleLabel.textColor = MDColor.text3
+        subtitleLabel.textAlignment = .left
+        titleLabel.font = MDFont.ui(15, .bold) ?? .systemFont(ofSize: 15, weight: .bold)
+        titleLabel.textColor = MDColor.text
+        titleLabel.textAlignment = .left
+        let titles = UIStackView(arrangedSubviews: [subtitleLabel, titleLabel])
         titles.axis = .vertical
         titles.alignment = .fill
-        titles.spacing = 1
+        titles.spacing = 2
         titles.isAccessibilityElement = true
         titles.accessibilityTraits = .header
         titles.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        let border = UIView()
+        border.backgroundColor = MDColor.line
+        border.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(border)
+
         let stack = UIStackView(arrangedSubviews: [closeButton, titles, webButton])
         stack.axis = .horizontal
         stack.alignment = .center
-        stack.spacing = 4
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2)
+            border.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            border.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            border.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            border.heightAnchor.constraint(equalToConstant: 1),
+            stack.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10)
         ])
     }
 
@@ -139,8 +130,27 @@ final class ReaderTopBarView: UIVisualEffectView {
 
     func setTitle(_ title: String, subtitle: String?) {
         titleLabel.text = title
-        subtitleLabel.text = subtitle
+        subtitleLabel.text = subtitle?.uppercased()
         subtitleLabel.isHidden = subtitle?.isEmpty ?? true
         titleLabel.superview?.accessibilityLabel = [title, subtitle].compactMap { $0 }.joined(separator: ", ")
+    }
+}
+
+/// `.icon-btn--glass`: 44pt square, dark translucent fill, faint white hairline.
+enum ReaderBarButton {
+    static func style(_ button: UIButton, symbol: String) {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold))
+        configuration.baseForegroundColor = MDColor.text
+        configuration.contentInsets = .zero
+        configuration.background.backgroundColor = MDColor.bg.withAlphaComponent(0.42)
+        configuration.background.strokeColor = UIColor.white.withAlphaComponent(0.12)
+        configuration.background.strokeWidth = 1
+        configuration.background.cornerRadius = 0
+        button.configuration = configuration
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 44),
+            button.heightAnchor.constraint(equalToConstant: 44)
+        ])
     }
 }

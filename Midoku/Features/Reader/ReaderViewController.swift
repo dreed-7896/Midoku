@@ -326,16 +326,14 @@ class ReaderViewController: BaseObservingViewController {
     }
 
     override func constrain() {
-        let panelWidth = controlsView.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -32)
-        panelWidth.priority = .defaultHigh
+        // Web reader bars: full width, pinned to the top and bottom edges (content stays inside the safe area).
         NSLayoutConstraint.activate([
-            panelWidth,
-            controlsView.widthAnchor.constraint(lessThanOrEqualToConstant: 600),
-            controlsView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            controlsView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            controlsView.topBar.widthAnchor.constraint(equalTo: controlsView.widthAnchor),
-            controlsView.topBar.centerXAnchor.constraint(equalTo: controlsView.centerXAnchor),
-            controlsView.topBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
+            controlsView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controlsView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controlsView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            controlsView.topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controlsView.topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controlsView.topBar.topAnchor.constraint(equalTo: view.topAnchor)
         ])
 
         NSLayoutConstraint.activate([
@@ -703,7 +701,7 @@ extension ReaderViewController {
             }
 
         navigationItem.setTitle(upper: volume, lower: title)
-        controlsView.topBar.setTitle(title, subtitle: [volume, manga.title].compactMap { $0 }.joined(separator: " · "))
+        controlsView.topBar.setTitle(title, subtitle: [manga.title, volume].compactMap { $0 }.joined(separator: " · "))
         controlsView.webButton.isEnabled = chapter.url != nil
         // re-apply theme title colors, since setTitle recreates the title view
         updateTextThemeOverride()
