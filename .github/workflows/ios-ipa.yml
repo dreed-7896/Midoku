@@ -3,7 +3,7 @@ name: Midoku Web IPA
 on:
   push:
     branches: [main, 'claude/**']
-    paths: ['ios/**', 'capacitor.config.ts', 'package.json', 'package-lock.json', 'scripts/publish_sidestore.py', '.github/workflows/ios-ipa.yml']
+    paths: ['ios/**', 'plugins/**', 'capacitor.config.ts', 'package.json', 'package-lock.json', 'scripts/publish_sidestore.py', '.github/workflows/ios-ipa.yml']
   workflow_dispatch:
 
 permissions:

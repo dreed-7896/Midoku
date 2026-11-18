@@ -1,0 +1,10 @@
+{
+  "name": "midoku-sources",
+  "version": "0.1.0",
+  "private": true,
+  "description": "On-device Aidoku extensions for the Midoku iOS shell (AidokuRunner).",
+  "capacitor": {
+    "ios": { "src": "ios" }
+  },
+  "files": ["ios/", "Package.swift"]
+}
