@@ -1,0 +1,70 @@
+name: Midoku Web IPA
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', 'capacitor.config.ts', 'package.json', 'package-lock.json', 'scripts/publish_sidestore.py', '.github/workflows/ios-ipa.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: midoku-web-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build web assets and sync the iOS shell
+        run: |
+          npm ci
+          npm run build
+          npx cap sync ios
+      - name: Build unsigned device app
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="0.1.${GITHUB_RUN_NUMBER}"
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build/DerivedData \
+            -skipPackagePluginValidation COMPILER_INDEX_STORE_ENABLE=NO \
+            MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build \
+            > build.log 2>&1 || { grep -E "error:" build.log | head -50; tail -30 build.log; exit 1; }
+          tail -3 build.log
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/package/Payload build/artifacts
+          app=build/DerivedData/Build/Products/Release-iphoneos/App.app
+          test -s "$app/App"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = com.raahat.MidokuWeb
+          ditto "$app" build/package/Payload/App.app
+          (cd build/package && zip -qry ../artifacts/MidokuWeb-unsigned.ipa Payload)
+          unzip -t build/artifacts/MidokuWeb-unsigned.ipa > /dev/null
+          (cd build/artifacts && shasum -a 256 MidokuWeb-unsigned.ipa > SHA256SUMS.txt)
+          printf 'Commit: %s\nUnsigned iOS device build for SideStore or LiveContainer.\n' "$GITHUB_SHA" > build/artifacts/BUILD.txt
+      - name: Publish release and SideStore source
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_sidestore.py build/artifacts/MidokuWeb-unsigned.ipa
+      - name: Upload IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: MidokuWeb-unsigned-${{ github.sha }}
+          path: build/artifacts/
+          if-no-files-found: error
