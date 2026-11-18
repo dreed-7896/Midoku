@@ -66,6 +66,10 @@ export interface Chapter {
   scanlator?: string
   /** Upload time on the source (ms), for sorting by date. */
   uploadedAt?: number
+  /** Name set by the person; shown as the label instead of the source's. */
+  name?: string
+  /** The source's label, kept while a name is set. */
+  sourceLabel?: string
   /** Bookmarked pages (whole-chapter page numbers). */
   marks?: number[]
   /** Thumbnail picked by the person: "page:N" (a page of the chapter) or an image data URL. */

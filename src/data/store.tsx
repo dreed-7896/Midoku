@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
-  DbLibrary, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
+  DbLibrary, deleteEntryRow, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
   notePageGrowth, saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
 import type { ChapterStateRow } from './db'
@@ -578,7 +578,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           dropped.forEach((c) => changes.delete(c.id))
         }
         editEntry(e.id, (x) => ({ ...x, chapters: x.chapters.map((c) => (changes.has(c.id) ? { ...c, ...changes.get(c.id) } : c)) }))
-        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined || 'thumb' in patch || 'marks' in patch) saveChapters(e.id, new Set(changes.keys()))
+        if (patch.read !== undefined || patch.bookmarked !== undefined || patch.removed !== undefined || patch.page !== undefined || 'thumb' in patch || 'marks' in patch || 'name' in patch) saveChapters(e.id, new Set(changes.keys()))
       },
       /** Reads another version (linked source) of a chapter from now on. */
       chooseVersion: (id: string, chapterId: string, versionIndex: number) => {
@@ -740,6 +740,15 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
         const dbId = ensureEntry(e.id)
         if (dbId) updateEntry(dbId, { custom })
       },
+      /** Names a chapter (empty goes back to the source's name). */
+      renameChapter: (id: string, chapterId: string, name: string) => {
+        const e = find(id)
+        const whole = e?.chapters.find((c) => c.id === physicalIdOf(chapterId))
+        if (!e || !whole) return
+        const clean = name.trim()
+        const original = whole.sourceLabel ?? whole.label
+        actions.editChapters(e.id, new Set([whole.id]), clean ? { name: clean, label: clean, sourceLabel: original } : { name: undefined, label: original, sourceLabel: undefined })
+      },
       /** Bookmarks a page of a chapter (a whole-chapter page number), or takes the bookmark away. */
       toggleMark: (id: string, chapterId: string, wholePage: number) => {
         const e = find(id)
@@ -785,6 +794,29 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           if (e.dbId && canSave()) updateEntry(e.dbId, { in_library: false })
         }
       },
+      /**
+       * Deletes titles for good: their database rows and everything kept with them (progress, sources, tabs).
+       * Titles nested in a deleted series stay, on their own. A server title can be added again from its source.
+       */
+      deleteEntries: (ids: string[]) => {
+        const gone = ids.map(find).filter((e): e is Entry => !!e)
+        if (!gone.length) return
+        const goneIds = new Set(gone.map((e) => e.id))
+        if (canSave()) gone.forEach((e) => { if (e.dbId) deleteEntryRow(e.dbId) })
+        set((s) => ({
+          ...s,
+          queue: s.queue.filter((q) => !goneIds.has(q)),
+          entries: s.entries
+            .filter((e) => !(goneIds.has(e.id) && (!e.remote || e.id.startsWith(LOCAL))))
+            .map((e) => goneIds.has(e.id)
+              // A server title stays browsable, as if never saved.
+              ? { ...e, dbId: undefined, inLibrary: false, tabs: [], readingPos: undefined, parentId: undefined, custom: undefined, chapters: [], remote: e.remote && { ...e.remote, chaptersLoaded: false } }
+              : e.parentId && goneIds.has(e.parentId) ? { ...e, parentId: undefined } : e),
+        }))
+        toast(gone.length === 1 ? `Deleted ${gone[0].title}` : `Deleted ${gone.length} titles`)
+      },
+      /** Titles removed from the library but still kept in the database (with their progress). */
+      removedTitles: () => get().entries.filter((e) => e.dbId && !e.inLibrary),
       /**
        * Groups titles (in the given order) into a new series that holds them, or merges them into one title
        * whose chapters follow each other. Returns the id of the title to open.

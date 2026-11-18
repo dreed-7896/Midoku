@@ -679,6 +679,10 @@ function ChapterSheet({ entryId, chapter, onClose, onInsert, onMove, onAddTo, ca
         )}
         {canEdit && entry.custom?.thumbs && <button type="button" onClick={() => setThumbing(true)}><Icon name="image" size={18} />Edit thumbnail</button>}
         {canEdit && <button type="button" onClick={onInsert}><Icon name="plus" size={18} />Insert after</button>}
+        <button type="button" onClick={() => {
+          const name = window.prompt(`Name for ${whole.label}${whole.sourceLabel ? ` (source: ${whole.sourceLabel})` : ''}. Leave empty for the source's name.`, whole.name ?? whole.label)
+          if (name !== null) done(() => store.renameChapter(entryId, whole.id, name))
+        }}><Icon name="settings" size={18} />Rename</button>
         <button type="button" onClick={onMove}><Icon name="sort" size={18} />Move</button>
         {whole.order != null && <button type="button" onClick={() => done(() => store.resetOrder(entryId, whole.id))}><Icon name="undo" size={18} />Original place</button>}
         {canEdit && <button type="button" onClick={onAddTo}><Icon name="plus" size={18} />Add to entry</button>}

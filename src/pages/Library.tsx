@@ -50,6 +50,8 @@ export default function Library() {
   const [menuFor, setMenuFor] = useState<Entry | null>(null)
   const [readingAdd, setReadingAdd] = useState(false)
   const [tabMenu, setTabMenu] = useState<LibraryTab | null>(null)
+  const [removedOpen, setRemovedOpen] = useState(false)
+  const removed = store.removedTitles()
   // Holding a tab you made (or a saved filter) offers Rename and Delete.
   const tabPress = useLongPress<LibraryTab>((t) => { if (t.kind === 'tab' || t.kind === 'smart') setTabMenu(t) })
   // Shuffle (Reading tab): a tap picks from Reading, a long press (or an empty Reading list) from the whole library.
@@ -222,6 +224,24 @@ export default function Library() {
         </button>
       )}
       {readingAdd && <ReadingAddSheet onClose={() => setReadingAdd(false)} />}
+      <Sheet open={removedOpen} tall title="Removed titles" onClose={() => setRemovedOpen(false)}>
+        <p className="hint">Titles taken out of the library keep their progress here in case you add them back. Delete removes them for good.</p>
+        {!removed.length && <Empty compact icon="check" title="Nothing removed" />}
+        <div className="check-list">
+          {removed.map((e) => (
+            <div key={e.id} className="order-row">
+              <Cover art={e.art} title={e.title} url={e.coverUrl} className="order-row__cover" />
+              <span className="check-row__name check-row__name--stack grow"><strong className="ellipsis">{e.title}</strong><span className="card-meta">{e.sources.find((s) => s.main)?.name ?? (e.sources.length ? '' : 'Series')}</span></span>
+              <button type="button" className="icon-btn icon-btn--sm" aria-label={`Add ${e.title} back`} onClick={() => store.toggleLibrary(e.id)}><Icon name="undo" size={16} /></button>
+              <button type="button" className="icon-btn icon-btn--sm" aria-label={`Delete ${e.title}`} onClick={() => { if (window.confirm(`Delete ${e.title} for good?`)) store.deleteEntries([e.id]) }}><Icon name="trash" size={16} /></button>
+            </div>
+          ))}
+        </div>
+        {removed.length > 1 && <button type="button" className="btn btn--ghost btn--block" onClick={() => {
+          if (!window.confirm(`Delete all ${removed.length} removed titles for good, with their progress?`)) return
+          store.deleteEntries(removed.map((e) => e.id)); setRemovedOpen(false)
+        }}><Icon name="trash" size={16} />Delete all removed titles</button>}
+      </Sheet>
       <Sheet open={!!tabMenu} title={tabMenu?.name ?? ''} onClose={() => setTabMenu(null)}>
         {tabMenu && <div className="menu">
           <MenuRow icon="settings" title="Rename" onClick={() => {
@@ -263,6 +283,11 @@ export default function Library() {
                 close()
                 if (!window.confirm(`Remove ${e.title} from your library?`)) return
                 store.removeFromLibrary([e.id]); store.toast(`Removed ${e.title}`)
+              }} />
+              <MenuRow icon="trash" title="Delete" detail="Removes it and its progress, bookmarks and edits for good" onClick={() => {
+                close()
+                if (!window.confirm(`Delete ${e.title} for good? Its reading progress, bookmarks and edits are deleted too.`)) return
+                store.deleteEntries([e.id])
               }} />
             </div>
           </Sheet>
@@ -317,6 +342,7 @@ export default function Library() {
           <MenuRow icon="shuffle" title="Random from the whole library" onClick={() => { setMore(false); shuffle(true) }} />
           <MenuRow icon="bookmark" title="Bookmarks" detail="Every bookmarked page, by title" onClick={() => { setMore(false); nav.go('/bookmarks') }} />
           <MenuRow icon="clock" title="History" detail="Chapters you read, newest first" onClick={() => { setMore(false); nav.go('/history') }} />
+          {removed.length > 0 && <MenuRow icon="trash" title={`Removed titles · ${removed.length}`} detail="Kept with their progress; add back or delete" onClick={() => { setMore(false); setRemovedOpen(true) }} />}
           <MenuRow icon="layers" title="Find duplicates" detail="Same name or same source title" onClick={() => { setMore(false); setTool('dupes') }} />
         </div>
       </Sheet>

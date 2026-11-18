@@ -129,6 +129,8 @@ export interface ChapterStateRow {
   thumb?: string | null
   /** Bookmarked pages (whole-chapter page numbers). */
   marks?: number[] | null
+  /** Chapter name set by the person. */
+  name?: string | null
 }
 export interface SplitRow { entry_id: string; source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }
 export interface InsertedRow {
@@ -178,7 +180,7 @@ export async function loadLibrary(): Promise<DbLibrary> {
 /** A saved title's reading state, split chapters and inserted chapters. */
 export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
-    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at, thumb, marks').eq('entry_id', entryId)),
+    all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at, thumb, marks, name').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
     all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
   ])
@@ -256,6 +258,8 @@ setInterval(() => { if (outbox.length && navigator.onLine) void flushWrites() },
 const now = () => new Date().toISOString()
 
 export const saveEntry = (row: EntryRow) => enqueue({ kind: 'upsert', table: 'entries', rows: [row] })
+/** Deletes a title and everything kept with it (sources, reading state, splits, inserts and tab filing cascade). */
+export const deleteEntryRow = (id: string) => enqueue({ kind: 'delete', table: 'entries', match: { id } })
 export const updateEntry = (id: string, patch: Partial<EntryRow>) =>
   enqueue({ kind: 'update', table: 'entries', patch: { ...patch, updated_at: now() }, match: { id } })
 export const saveEntrySource = (row: EntrySourceRow) => enqueue({ kind: 'upsert', table: 'entry_sources', rows: [row], onConflict: 'entry_id,source_id,manga_url' })

@@ -140,9 +140,10 @@ export const stateRow = (dbId: string, c: Chapter): ChapterStateRow => ({
   position: c.order ?? null,
   thumb: c.thumb ?? null,
   marks: c.marks?.length ? c.marks : null,
+  name: c.name ?? null,
 })
 
-export type ChapterState = Pick<Chapter, 'page' | 'read' | 'bookmarked' | 'removed' | 'preferred' | 'order' | 'newPages' | 'thumb' | 'marks'> & { sourceId: string; sourceUrl?: string }
+export type ChapterState = Pick<Chapter, 'page' | 'read' | 'bookmarked' | 'removed' | 'preferred' | 'order' | 'newPages' | 'thumb' | 'marks' | 'name'> & { sourceId: string; sourceUrl?: string }
 /** Pages a chapter gained, while it hasn't been opened since (and for a month at most). */
 const grownPages = (r: ChapterStateRow) => {
   if (!r.pages_grew_at || r.pages == null || r.pages_before == null) return undefined
@@ -151,7 +152,7 @@ const grownPages = (r: ChapterStateRow) => {
   return r.pages - r.pages_before > 0 ? r.pages - r.pages_before : undefined
 }
 export const rowState = (r: ChapterStateRow): ChapterState =>
-  ({ sourceId: r.source_id, sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed, preferred: r.preferred, order: r.position == null ? undefined : Number(r.position), newPages: grownPages(r), thumb: r.thumb ?? undefined, marks: r.marks?.length ? r.marks : undefined })
+  ({ sourceId: r.source_id, sourceUrl: r.chapter_url, page: r.page, read: r.read, bookmarked: r.bookmarked, removed: r.removed, preferred: r.preferred, order: r.position == null ? undefined : Number(r.position), newPages: grownPages(r), thumb: r.thumb ?? undefined, marks: r.marks?.length ? r.marks : undefined, name: r.name ?? undefined })
 
 /** Shows a different version (physical chapter) of a slot. */
 export const showVersion = (c: Chapter, v: ChapterVersion, preferred: boolean): Chapter =>
@@ -172,12 +173,12 @@ export function applyStates(chapters: Chapter[], states: ChapterState[]): Chapte
     const s = (picked && byKey.get(chapterKey(picked.sourceId, picked.url))) || keys.map((k) => byKey.get(k)).find(Boolean)
     if (!s) return shown
     const moved = s.order != null ? { order: s.order, number: s.order, sourceNumber: c.sourceNumber ?? c.number } : {}
-    return { ...shown, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined, newPages: s.newPages ?? shown.newPages, thumb: s.thumb, marks: s.marks, ...moved }
+    return { ...shown, page: s.page, read: s.read, bookmarked: s.bookmarked, removed: s.removed || undefined, newPages: s.newPages ?? shown.newPages, thumb: s.thumb, marks: s.marks, name: s.name, ...(s.name ? { label: s.name, sourceLabel: shown.label } : {}), ...moved }
   })
 }
 
 export const statesOf = (chapters: Chapter[]): ChapterState[] =>
-  chapters.filter((c) => c.sourceUrl).map((c) => ({ sourceId: c.sourceId, sourceUrl: c.sourceUrl, page: c.page, read: c.read, bookmarked: c.bookmarked, removed: c.removed, preferred: c.preferred, order: c.order, newPages: c.newPages, thumb: c.thumb, marks: c.marks }))
+  chapters.filter((c) => c.sourceUrl).map((c) => ({ sourceId: c.sourceId, sourceUrl: c.sourceUrl, page: c.page, read: c.read, bookmarked: c.bookmarked, removed: c.removed, preferred: c.preferred, order: c.order, newPages: c.newPages, thumb: c.thumb, marks: c.marks, name: c.name }))
 
 /** Marks chapters saved on this device. */
 export const withDownloads = (chapters: Chapter[]): Chapter[] =>
