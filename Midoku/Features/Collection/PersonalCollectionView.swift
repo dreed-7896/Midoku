@@ -502,52 +502,7 @@ struct MCCollectionRootView: View {
             regularLibraryPage
             .background(Color(uiColor: .systemBackground))
             .navigationTitle("Library")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                if selecting {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { selecting = false; selected.removeAll() } label: {
-                            Image(systemName: "checkmark.circle.fill")
-                        }
-                        .accessibilityLabel("Done selecting")
-                    }
-                } else {
-                    ToolbarItem(placement: .topBarLeading) { groupMenu }
-                    ToolbarItem(placement: .topBarLeading) { filterMenu }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button("Search library", systemImage: "magnifyingglass") {
-                                searchVisible = true
-                                searchFocused = true
-                            }
-                            Divider()
-                            Button("Select entries", systemImage: "checkmark.circle") {
-                                searchFocused = false; searchVisible = false
-                                query = ""
-                                selecting = true; selected.removeAll()
-                            }
-                            Picker("Sort", selection: sortBinding) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
-                                .disabled(activeGroupPage == Self.readingPageID)
-                            Picker(selection: subgroupBinding(for: activeGroupPage)) {
-                                ForEach(MCLibrarySubgrouping.allCases) { Text($0.title).tag($0) }
-                            } label: {
-                                Label("Group in \(activePageTitle)", systemImage: "rectangle.3.group")
-                            }
-                            .pickerStyle(.menu)
-                            .disabled(activeGroupPage == Self.readingPageID || showsFlatResults)
-                            readingMenu
-                            Toggle("Cover grid", isOn: $grid)
-                            Toggle("Chapter grid", isOn: $chapterGrid)
-                            Button("Categories", systemImage: "folder") { showCategories = true }
-                            Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
-                            Button("Reading stats", systemImage: "chart.bar") { showStats = true }
-                            Button("Find duplicates", systemImage: "square.on.square") { showDuplicates = true }
-                            Toggle("Shuffle button", isOn: $showShuffle)
-                            Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
-                        } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Library options")
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if selecting { selectionActions }
             }
@@ -668,6 +623,15 @@ struct MCCollectionRootView: View {
         Group {
             let pages = libraryPages
             VStack(spacing: 0) {
+                libraryHeader
+                if searchVisible {
+                    MDSearchField(text: $query, prompt: "Search library") {
+                        searchVisible = false
+                        searchFocused = false
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                }
                 if !pages.isEmpty && !showsFlatResults {
                     let newCounts = store.newChapterCounts
                     MCLibraryGroupTabs(pages: pages, selected: activeGroupPage, swipePosition: swipePosition,
@@ -737,16 +701,68 @@ struct MCCollectionRootView: View {
             .overlay(alignment: .bottomTrailing) {
                 if !selecting { floatingActions }
             }
-            .customSearchable(
-                text: $query,
-                enabled: $searchVisible,
-                focused: $searchFocused,
-                hidesSearchBarWhenScrolling: false,
-                stacked: false,
-                onCancel: { searchVisible = false; searchFocused = false }
-            )
             .environment(\.autocorrectionDisabled, true)
         }
+    }
+
+    private var libraryKicker: String {
+        let roots = store.library.entries.filter { $0.parentEntryID == nil }
+        let unread = roots.reduce(0) { $0 + store.unreadCount(entryID: $1.id) }
+        return "\(roots.count) titles · \(unread) unread"
+    }
+
+    private var libraryHeader: some View {
+        MDPageHeader(kicker: libraryKicker, title: "Library") {
+            if selecting {
+                MDIconButton(systemImage: "checkmark", label: "Done selecting", active: true) {
+                    selecting = false; selected.removeAll()
+                }
+            } else {
+                MDIconButton(systemImage: "magnifyingglass", label: "Search library", active: searchVisible) {
+                    searchVisible.toggle()
+                    if !searchVisible { query = "" }
+                }
+                filterMenu
+                libraryOptionsMenu
+            }
+        }
+    }
+
+    private var libraryOptionsMenu: some View {
+        Menu {
+            Button("Select entries", systemImage: "checkmark.circle") {
+                searchFocused = false; searchVisible = false
+                query = ""
+                selecting = true; selected.removeAll()
+            }
+            Picker("Sort", selection: sortBinding) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
+                .disabled(activeGroupPage == Self.readingPageID)
+            Picker(selection: $grouping) {
+                ForEach(MCLibraryGrouping.allCases) { Text($0.title).tag($0) }
+            } label: {
+                Label("Group by", systemImage: "square.stack.3d.up")
+            }
+            .pickerStyle(.menu)
+            Picker(selection: subgroupBinding(for: activeGroupPage)) {
+                ForEach(MCLibrarySubgrouping.allCases) { Text($0.title).tag($0) }
+            } label: {
+                Label("Group in \(activePageTitle)", systemImage: "rectangle.3.group")
+            }
+            .pickerStyle(.menu)
+            .disabled(activeGroupPage == Self.readingPageID || showsFlatResults)
+            readingMenu
+            Toggle("Cover grid", isOn: $grid)
+            Toggle("Chapter grid", isOn: $chapterGrid)
+            Button("Categories", systemImage: "folder") { showCategories = true }
+            Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
+            Button("Reading stats", systemImage: "chart.bar") { showStats = true }
+            Button("Find duplicates", systemImage: "square.on.square") { showDuplicates = true }
+            Toggle("Shuffle button", isOn: $showShuffle)
+            Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
+        } label: {
+            MDIconBox(systemImage: "ellipsis")
+        }
+        .accessibilityLabel("Library options")
     }
 
     @ViewBuilder private func readingPage(size: CGSize) -> some View {
@@ -760,7 +776,7 @@ struct MCCollectionRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
-                LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
+                LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 18 : 14) {
                     ForEach(store.readingEntries) { entry in entryButton(entry, kind: .reading) }
                 }
                 .padding(.horizontal).padding(.vertical)
@@ -925,7 +941,7 @@ struct MCCollectionRootView: View {
 
     private func columns(for size: CGSize) -> [GridItem] {
         let count = grid ? (size.width > size.height ? min(10, max(2, landscapeColumns)) : min(6, max(2, portraitColumns))) : 1
-        return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: count)
+        return Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: count)
     }
 
     @ViewBuilder private func collectionPage(values: [MCPersonalEntry], size: CGSize, kind: MCLibraryPageKind? = nil,
@@ -938,7 +954,7 @@ struct MCCollectionRootView: View {
             let sections = subgroups(values, by: subgrouping)
             ScrollView {
                 if sections.isEmpty {
-                    LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14) {
+                    LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 18 : 14) {
                         ForEach(values) { entry in
                             entryButton(entry, kind: kind)
                         }
@@ -946,7 +962,7 @@ struct MCCollectionRootView: View {
                     .padding(.horizontal)
                     .padding(.vertical)
                 } else {
-                    LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 20 : 14, pinnedViews: [.sectionHeaders]) {
+                    LazyVGrid(columns: columns(for: size), alignment: .leading, spacing: grid ? 18 : 14, pinnedViews: [.sectionHeaders]) {
                         ForEach(sections) { section in
                             let key = "\(pageID ?? "all")|\(subgrouping.rawValue)|\(section.id)"
                             let collapsed = collapsedSubgroups.contains(key)
@@ -1126,22 +1142,24 @@ struct MCCollectionRootView: View {
                 }
             }
         } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                if hasActiveFilters {
-                    Text("\(activeFilterCount)").font(.mdSystem(size: 8, weight: .bold)).foregroundStyle(.white)
-                        .frame(minWidth: 13, minHeight: 13).background(Color.accentColor, in: Circle()).offset(x: 5, y: -5)
-                }
-            }
+            MDIconBox(systemImage: "slider.horizontal.3", active: hasActiveFilters,
+                      badge: hasActiveFilters ? activeFilterCount : nil)
         }
         .accessibilityLabel(hasActiveFilters ? "Library filters, \(activeFilterCount) active" : "Filter library")
     }
 
     @ViewBuilder private func entryLabel(_ entry: MCPersonalEntry) -> some View {
         if grid {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 8) {
                 MCEntryCover(entry: entry)
                     .aspectRatio(2/3, contentMode: .fit)
+                    .overlay(alignment: .bottom) {
+                        if gridStyle != .compact {
+                            let total = store.chapterCount(entryID: entry.id)
+                            MDProgressBar(fraction: total == 0 ? 0 : Double(total - store.unreadCount(entryID: entry.id)) / Double(total))
+                        }
+                    }
+                    .overlay(Rectangle().strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
                     .overlay(alignment: .topTrailing) { unreadBadge(entry).padding(6) }
                     .overlay(alignment: .topLeading) { newBadge(entry).padding(6) }
                     .overlay(alignment: .bottomLeading) {
@@ -1160,8 +1178,20 @@ struct MCCollectionRootView: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 0))
                 if gridStyle == .standard {
-                    Text(store.library.title(entry)).font(.mdSubheadline.weight(.semibold)).lineLimit(2, reservesSpace: true).frame(maxWidth: .infinity, alignment: .leading)
-                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.status.title)").font(.mdCaption).foregroundStyle(.secondary).lineLimit(1)
+                    let total = store.chapterCount(entryID: entry.id)
+                    let unread = store.unreadCount(entryID: entry.id)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.library.title(entry))
+                            .font(.mdSystem(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.mdText)
+                            .lineLimit(1)
+                        Text("\(unread) unread · \(total) ch")
+                            .font(.mdSystem(size: 11.5))
+                            .foregroundStyle(Color.mdText3)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         } else {
@@ -1191,9 +1221,7 @@ struct MCCollectionRootView: View {
     @ViewBuilder private func unreadBadge(_ entry: MCPersonalEntry) -> some View {
         let unread = store.unreadCount(entryID: entry.id)
         if unread > 0 && !selecting {
-            Text("\(unread)").font(.mdCaption2.bold()).foregroundStyle(.white)
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Color.accentColor, in: Rectangle())
+            MDBadge(text: "\(unread)")
                 .accessibilityLabel("\(unread) unread chapters")
         }
     }
@@ -1209,30 +1237,20 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
 
     private func tabButton(_ page: MCLibraryGroupPage, active: Bool) -> some View {
         Button { swipePosition.requestedID = page.id } label: {
-            HStack(spacing: 6) {
-                switch page.kind {
-                case .reading: Image(systemName: "book").font(.mdCaption.weight(.semibold))
-                case .smart(let tab): Image(systemName: tab.filter.queryOnly ? "pin.fill" : "line.3.horizontal.decrease")
-                    .font(.mdCaption2.weight(.semibold))
-                case .group, .all: EmptyView()
-                }
-                Text(page.title).font(.mdSubheadline.weight(.medium)).lineLimit(1)
-                Text("\(page.entryIDs.count)")
-                    .font(.mdCaption2.weight(.semibold))
-                    .foregroundStyle(active ? Color.accentColor : .secondary)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Rectangle())
-                if let new = newCounts[page.id], new > 0 {
-                    Text("\(new) new")
-                        .font(.mdCaption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(Color.accentColor, in: Rectangle())
-                        .accessibilityLabel("\(new) titles with new chapters")
-                }
+            let icon: String? = switch page.kind {
+            case .reading: "book"
+            case .smart(let tab): tab.filter.queryOnly ? "pin.fill" : "line.3.horizontal.decrease"
+            case .group, .all: nil
             }
-            .foregroundStyle(active ? Color.accentColor : .secondary)
-            .padding(.vertical, 12)
+            MDChip(title: page.title, count: page.entryIDs.count, active: active, systemImage: icon)
+                .overlay(alignment: .topTrailing) {
+                    if let new = newCounts[page.id], new > 0 {
+                        MDBadge(text: "\(new)")
+                            .scaleEffect(0.8)
+                            .offset(x: 7, y: -8)
+                            .accessibilityLabel("\(new) titles with new chapters")
+                    }
+                }
         }
         .buttonStyle(.plain)
     }
@@ -1240,7 +1258,7 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 24) {
+                HStack(spacing: 8) {
                     ForEach(pages) { page in
                         let active = (selected ?? pages.first?.id) == page.id
                         tabButton(page, active: active).contextMenu { menu(page) }
@@ -1252,27 +1270,9 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
                         .anchorPreference(key: MCLibraryTabAnchors.self, value: .bounds) { [page.id: $0] }
                     }
                 }
-                .padding(.horizontal)
-                .overlayPreferenceValue(MCLibraryTabAnchors.self) { anchors in
-                    GeometryReader { geometry in
-                        if !pages.isEmpty {
-                            let progress = min(CGFloat(pages.count - 1), max(0, swipePosition.page))
-                            let index = Int(progress)
-                            let nextIndex = min(index + 1, pages.count - 1)
-                            if let first = anchors[pages[index].id], let second = anchors[pages[nextIndex].id] {
-                                let start = geometry[first]
-                                let end = geometry[second]
-                                let fraction = progress - CGFloat(index)
-                                let width = start.width + (end.width - start.width) * fraction
-                                let x = start.minX + (end.minX - start.minX) * fraction
-                                Rectangle().fill(Color.accentColor)
-                                    .frame(width: width, height: 3)
-                                    .position(x: x + width / 2, y: geometry.size.height - 1.5)
-                            }
-                        }
-                    }
-                    .allowsHitTesting(false)
-                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
             }
             .onChange(of: Int(swipePosition.page.rounded())) { _, index in
                 guard pages.indices.contains(index) else { return }
@@ -1283,7 +1283,6 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .background(alignment: .bottom) { Divider() }
     }
 }
 

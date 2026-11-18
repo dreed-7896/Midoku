@@ -138,8 +138,10 @@ class TabBarController: UITabBarController {
 
         // The collection hosts its native SwiftUI navigation stack.
         // Root screens get the web's big display-face page titles.
-        browseViewController.navigationBar.prefersLargeTitles = true
-        historyViewController.navigationBar.prefersLargeTitles = true
+        browseViewController.navigationBar.prefersLargeTitles = false
+        historyViewController.navigationBar.prefersLargeTitles = false
+        browseViewController.hidesBarAtRoot = true
+        historyViewController.hidesBarAtRoot = true
         searchViewController.navigationBar.prefersLargeTitles = true
 
         // Midoku Web order: Home (updates & history), Library, Search, Sources, Settings.

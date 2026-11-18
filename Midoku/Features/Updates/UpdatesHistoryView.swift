@@ -9,16 +9,28 @@ struct UpdatesHistoryView: View {
     @State private var page = Page.updates
     @EnvironmentObject private var path: NavigationCoordinator
 
+    private var weekday: String {
+        Date.now.formatted(.dateTime.weekday(.wide))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Updates and history", selection: $page) {
-                ForEach(Page.allCases, id: \.self) { item in
-                    Text(item.rawValue).tag(item)
+            MDPageHeader(kicker: weekday, title: "Feed") {
+                if page == .updates {
+                    MDIconButton(systemImage: "bell", label: "Manage titles getting new chapters", action: showFollowedTitles)
                 }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            HStack(spacing: 8) {
+                ForEach(Page.allCases, id: \.self) { item in
+                    Button { page = item } label: { MDChip(title: item.rawValue, active: page == item) }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(page == item ? .isSelected : [])
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
 
             if page == .updates {
                 MangaUpdatesView()
@@ -26,16 +38,8 @@ struct UpdatesHistoryView: View {
                 HistoryView()
             }
         }
-        .toolbar {
-            if page == .updates {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: showFollowedTitles) { Image(systemName: "bell.badge") }
-                        .accessibilityLabel("Manage titles getting new chapters")
-                }
-            }
-        }
-        .navigationTitle("Updates")
-        .navigationBarTitleDisplayMode(.large)
+        .background(Color.mdBg)
+        .navigationTitle("Feed")
     }
 
     /// This screen is hosted in a UIKit navigation controller, where a SwiftUI sheet

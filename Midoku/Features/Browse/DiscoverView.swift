@@ -231,6 +231,10 @@ struct MCDiscoverView: View {
         let installed = installedSources
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
+                MDPageHeader(kicker: "\(installed.count) installed", title: "Sources") {
+                    MDIconButton(systemImage: "puzzlepiece.extension", label: "Manage extensions",
+                                 badge: extensionUpdates > 0 ? extensionUpdates : nil, action: openExtensions)
+                }
                 if !installed.isEmpty {
                     extensionStrip(installed)
                 } else if sources.hasLoaded {
@@ -259,10 +263,9 @@ struct MCDiscoverView: View {
                     }
                 }
             }
-            .padding(.top, 4)
             .padding(.bottom, 32)
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color.mdBg)
         .refreshable { await model.reload() }
         .onAppear { extensionUpdates = AppSettings.browse.updateCount.get() }
         .midokuAccent()

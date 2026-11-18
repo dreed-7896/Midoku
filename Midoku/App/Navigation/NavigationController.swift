@@ -19,12 +19,52 @@ class NavigationController: UINavigationController {
         interactivePopGestureRecognizer?.isEnabled = true
         if #available(iOS 26.0, *) { interactiveContentPopGestureRecognizer?.isEnabled = true }
     }
+    /// Tab roots that draw the web page header themselves hide the navigation bar; pushed screens show it.
+    var hidesBarAtRoot = false {
+        didSet { if isViewLoaded { syncRootBar(animated: false) } }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        syncRootBar(animated: false)
+    }
+
+    private func syncRootBar(animated: Bool) {
+        guard hidesBarAtRoot else { return }
+        setNavigationBarHidden(viewControllers.count <= 1, animated: animated)
+    }
+
+    @discardableResult
+    override func popViewController(animated: Bool) -> UIViewController? {
+        let popped = super.popViewController(animated: animated)
+        afterPop(animated: animated)
+        return popped
+    }
+
+    @discardableResult
+    override func popToRootViewController(animated: Bool) -> [UIViewController]? {
+        let popped = super.popToRootViewController(animated: animated)
+        afterPop(animated: animated)
+        return popped
+    }
+
+    private func afterPop(animated: Bool) {
+        guard hidesBarAtRoot, viewControllers.count <= 1 else { return }
+        setNavigationBarHidden(true, animated: animated)
+        // A cancelled swipe back stays on the pushed screen: show its bar again.
+        transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
+            guard let self, context.isCancelled else { return }
+            self.setNavigationBarHidden(false, animated: true)
+        }
+    }
+
     // Only tab roots use large titles (the web's big page headings); pushed screens keep inline titles.
     override func pushViewController(_ viewController: UIViewController, animated: Bool) {
         if !viewControllers.isEmpty, viewController.navigationItem.largeTitleDisplayMode == .automatic {
             viewController.navigationItem.largeTitleDisplayMode = .never
         }
         super.pushViewController(viewController, animated: animated)
+        if hidesBarAtRoot, viewControllers.count > 1 { setNavigationBarHidden(false, animated: animated) }
     }
 
     // This is a workaround to fix an iOS bug that occurs when mixing UIKit with SwiftUI,
