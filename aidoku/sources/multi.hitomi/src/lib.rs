@@ -477,6 +477,7 @@ impl Hitomi {
 		};
 		let mut lists: Vec<Vec<i64>> = Vec::new();
 		let mut missing: Vec<&String> = Vec::new();
+		let mut found_names: Vec<String> = Vec::new();
 		let urls: Vec<(usize, String)> = artists
 			.iter()
 			.enumerate()
@@ -494,6 +495,7 @@ impl Hitomi {
 			if found.iter().all(|ids| ids.is_empty()) {
 				missing.push(name);
 			} else {
+				found_names.push(name.clone());
 				lists.extend(found);
 			}
 		}
@@ -501,6 +503,7 @@ impl Hitomi {
 			let group_urls: Vec<String> = missing.iter().flat_map(|name| urls_for("group", name)).collect();
 			lists.extend(self.fetch_nozomis(&group_urls).into_iter().flatten());
 		}
+		settings::remember_artists(&found_names);
 		union_ids(lists.into_iter())
 	}
 }
@@ -751,7 +754,11 @@ impl DynamicFilters for Hitomi {
 	fn get_dynamic_filters(&self) -> Result<Vec<Filter>> {
 		let artists = settings::get_saved_artists();
 		if artists.is_empty() {
-			return Ok(Vec::new());
+			let mut note = Filter::note(
+				"Saved Artists: no artists yet. Artists you search by name are saved here as chips, or add them in the source settings.",
+			);
+			note.id = "saved_artists_note".into();
+			return Ok(vec![note]);
 		}
 		Ok(vec![
 			MultiSelectFilter {

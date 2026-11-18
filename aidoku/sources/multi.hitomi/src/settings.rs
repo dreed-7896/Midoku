@@ -1,11 +1,13 @@
 use aidoku::{
 	alloc::{String, Vec},
-	imports::defaults::defaults_get,
+	imports::defaults::{DefaultValue, defaults_get, defaults_set},
 };
 
 const LANGUAGE_KEY: &str = "language";
 const TITLE_PREFERENCE_KEY: &str = "titlePreference";
 const SAVED_ARTISTS_KEY: &str = "savedArtists";
+const AUTO_SAVE_ARTISTS_KEY: &str = "autoSaveArtists";
+const MAX_SAVED_ARTISTS: usize = 100;
 
 pub fn get_nozomi_language() -> String {
 	defaults_get::<String>(LANGUAGE_KEY)
@@ -72,4 +74,26 @@ pub fn get_saved_artists() -> Vec<String> {
 		}
 	}
 	artists
+}
+
+/// Add artists that a search found to Saved Artists (if enabled), so they show up as chips.
+pub fn remember_artists(found: &[String]) {
+	if found.is_empty() || !defaults_get::<bool>(AUTO_SAVE_ARTISTS_KEY).unwrap_or(true) {
+		return;
+	}
+	let mut saved: Vec<String> = defaults_get::<Vec<String>>(SAVED_ARTISTS_KEY).unwrap_or_default();
+	let mut changed = false;
+	for name in found {
+		let name = name.trim().to_lowercase();
+		if !name.is_empty()
+			&& saved.len() < MAX_SAVED_ARTISTS
+			&& !saved.iter().any(|s| s.trim().to_lowercase() == name)
+		{
+			saved.push(name);
+			changed = true;
+		}
+	}
+	if changed {
+		defaults_set(SAVED_ARTISTS_KEY, DefaultValue::StringArray(saved));
+	}
 }

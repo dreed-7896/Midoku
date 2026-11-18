@@ -70,6 +70,13 @@
 		"footer": "Shown as a pick list in the search filters. Use the artist's name exactly as nhentai tags it.",
 		"items": [
 			{
+				"type": "switch",
+				"key": "autoSaveArtists",
+				"title": "Save Searched Artists",
+				"subtitle": "Artists you search by name that have results are added here.",
+				"default": true
+			},
+			{
 				"type": "editable-list",
 				"key": "savedArtists",
 				"title": "Add Artist",

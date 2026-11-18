@@ -1,7 +1,8 @@
 [
 	{
 		"type": "note",
-		"text": "Artist matches the artist tag only. Use | to search several artists (e.g. hyji|jirou), or pick from Saved Artists, which you add in the source settings."
+		"text": "Artist matches the artist tag only. Use | to search several artists (e.g. hyji|jirou), or pick from Saved Artists, which you add in the source settings.",
+		"id": "artist_help"
 	},
 	{
 		"type": "text",

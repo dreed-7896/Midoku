@@ -56,6 +56,8 @@ struct PlannedSearch {
 	fallback: Option<String>,
 	/// Lowercase name whose namespace (artist or group) is remembered after the search.
 	name: Option<String>,
+	/// Artist name this search is for, saved to Saved Artists when it finds something.
+	artist: Option<String>,
 }
 
 impl NHentai {
@@ -202,6 +204,7 @@ impl NHentai {
 					query: parts.join(" "),
 					fallback: None,
 					name: None,
+					artist: None,
 				});
 				continue;
 			}
@@ -213,17 +216,20 @@ impl NHentai {
 				};
 				// Skip the artist attempt for names already known to be groups.
 				let known_group = *namespace == "group" || self.known_groups.borrow().contains(name);
+				let artist = (*namespace == "artist").then(|| name.clone());
 				plan.push(if known_group {
 					PlannedSearch {
 						query: with("group"),
 						fallback: None,
 						name: None,
+						artist,
 					}
 				} else {
 					PlannedSearch {
 						query: with("artist"),
 						fallback: Some(with("group")),
 						name: Some(name.clone()),
+						artist,
 					}
 				});
 			}
@@ -289,6 +295,16 @@ impl NHentai {
 				results[i] = result;
 			}
 		}
+
+		let found: Vec<String> = plan
+			.iter()
+			.zip(&results)
+			.filter_map(|(p, r)| match (r, &p.artist) {
+				(Ok(response), Some(artist)) if response.num_pages > 0 => Some(artist.clone()),
+				_ => None,
+			})
+			.collect();
+		settings::remember_artists(&found);
 
 		let mut responses = Vec::new();
 		let mut first_error = None;
@@ -606,7 +622,11 @@ impl DynamicFilters for NHentai {
 	fn get_dynamic_filters(&self) -> Result<Vec<Filter>> {
 		let artists = settings::get_saved_artists();
 		if artists.is_empty() {
-			return Ok(Vec::new());
+			let mut note = Filter::note(
+				"Saved Artists: no artists yet. Artists you search by name are saved here as chips, or add them in the source settings.",
+			);
+			note.id = "saved_artists_note".into();
+			return Ok(vec![note]);
 		}
 		Ok(vec![
 			MultiSelectFilter {
