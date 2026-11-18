@@ -6,7 +6,7 @@ use aidoku::{
 	helpers::uri::encode_uri_component,
 	imports::{
 		error::AidokuError,
-		net::{Request, TimeUnit, set_rate_limit},
+		net::Request,
 		std::current_date,
 	},
 	prelude::*,
@@ -29,9 +29,10 @@ const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X)
 						  AppleWebKit/605.1.15 (KHTML, like Gecko) GSA/300.0.598994205 \
 						  Mobile/15E148 Safari/604";
 
-/// Requests allowed per period, and the period length in seconds.
-const RATE_LIMIT_PERMITS: i32 = 5;
-const RATE_LIMIT_PERIOD: i32 = 1;
+/// Searches sent at once. The runner's rate limiter and `sleep` block a shared thread while
+/// they wait, which can stall every source when several shelves load together, so requests
+/// are throttled by batching instead.
+const BATCH_SIZE: usize = 4;
 /// How long, in seconds, a search page stays cached.
 const SEARCH_CACHE_TTL: i64 = 300;
 const SEARCH_CACHE_SIZE: usize = 30;
@@ -351,30 +352,26 @@ impl NHentai {
 			urls.iter().map(|url| self.cached_search(url).map(Ok)).collect();
 
 		let missing: Vec<usize> = (0..urls.len()).filter(|&i| results[i].is_none()).collect();
-		if missing.len() == 1 {
-			let i = missing[0];
-			results[i] = Some(request_json(&urls[i]));
-		} else if !missing.is_empty() {
-			let requests: Vec<Request> = missing
+		for chunk in missing.chunks(BATCH_SIZE) {
+			if chunk.len() == 1 {
+				results[chunk[0]] = Some(request_json(&urls[chunk[0]]));
+				continue;
+			}
+			let requests: Vec<Request> = chunk
 				.iter()
 				.filter_map(|&i| api::json_request(&urls[i]).ok())
 				.collect();
-			if requests.len() == missing.len() {
-				for (&i, response) in missing.iter().zip(Request::send_all(requests)) {
-					let result = match response {
-						Ok(response) if matches!(response.status_code(), 429 | 503) => {
-							drop(response);
-							request_json(&urls[i])
-						}
-						Ok(response) => api::decode_response(response),
-						Err(error) => Err(error.into()),
-					};
-					results[i] = Some(result);
-				}
-			} else {
-				for &i in &missing {
+			if requests.len() != chunk.len() {
+				for &i in chunk {
 					results[i] = Some(request_json(&urls[i]));
 				}
+				continue;
+			}
+			for (&i, response) in chunk.iter().zip(Request::send_all(requests)) {
+				results[i] = Some(match response {
+					Ok(response) => api::decode_response(response),
+					Err(error) => Err(error.into()),
+				});
 			}
 		}
 
@@ -440,9 +437,6 @@ fn merge_results(
 
 impl Source for NHentai {
 	fn new() -> Self {
-		// nhentai's API sits behind Cloudflare and answers bursts with HTTP 429.
-		// Queue requests in the runner instead of firing them all at once.
-		set_rate_limit(RATE_LIMIT_PERMITS, RATE_LIMIT_PERIOD, TimeUnit::Seconds);
 		Self {
 			cache: RefCell::new(None),
 			search_cache: RefCell::new(Vec::new()),
@@ -629,3 +623,4 @@ impl DynamicFilters for NHentai {
 }
 
 register_source!(NHentai, Home, ListingProvider, DeepLinkHandler, DynamicFilters);
+

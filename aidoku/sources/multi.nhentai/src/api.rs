@@ -1,6 +1,6 @@
 use aidoku::{
 	alloc::{String, string::ToString},
-	imports::{error::AidokuError, net::{Request, Response}, std::sleep},
+	imports::{error::AidokuError, net::{Request, Response}},
 	prelude::*,
 	Result,
 };
@@ -28,9 +28,6 @@ pub fn gallery_id(key: &str, url: Option<&str>) -> Result<String> {
 	bail!("This nhentai entry has no valid gallery ID. Open its original gallery link and add it again.");
 }
 
-/// Retries after a 429/503 before reporting the error.
-const MAX_RETRIES: i32 = 2;
-
 /// A GET request for a JSON endpoint with the headers nhentai expects.
 pub fn json_request(url: &str) -> Result<Request> {
 	Ok(Request::get(url)?
@@ -39,26 +36,10 @@ pub fn json_request(url: &str) -> Result<Request> {
 		.header("Accept", "application/json"))
 }
 
-/// GET a JSON endpoint, waiting and retrying when nhentai rate limits the request.
+/// GET a JSON endpoint. Rate limiting (HTTP 429) is reported as an error rather than waited
+/// out: `sleep` blocks a shared thread in the runner.
 pub fn request_json<T: DeserializeOwned>(url: &str) -> Result<T> {
-	let mut attempt = 0;
-	loop {
-		let response = json_request(url)?.send()?;
-		let status = response.status_code();
-		if (status == 429 || status == 503) && attempt < MAX_RETRIES {
-			// Honour Retry-After when nhentai sends it, otherwise back off 2s, then 4s.
-			let wait = response
-				.get_header("Retry-After")
-				.and_then(|value| value.trim().parse::<i32>().ok())
-				.unwrap_or(2 << attempt)
-				.clamp(1, 10);
-			drop(response);
-			sleep(wait);
-			attempt += 1;
-			continue;
-		}
-		return decode_response(response);
-	}
+	decode_response(json_request(url)?.send()?)
 }
 
 pub fn decode_response<T: DeserializeOwned>(response: Response) -> Result<T> {
