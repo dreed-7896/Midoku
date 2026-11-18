@@ -2,10 +2,10 @@
 
 Midoku/Aidoku source list.
 
-Add this URL in Midoku → Settings → Source Lists (keep the trailing slash):
+Add this URL in Midoku → Settings → Source Lists:
 
 ```
-https://raw.githubusercontent.com/dreed-7896/extensions/main/
+https://raw.githubusercontent.com/dreed-7896/extensions/main/index.min.json
 ```
 
 ## Sources
