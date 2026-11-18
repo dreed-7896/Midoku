@@ -1,7 +1,11 @@
-use aidoku::{alloc::String, imports::defaults::defaults_get};
+use aidoku::{
+	alloc::{String, Vec},
+	imports::defaults::defaults_get,
+};
 
 const LANGUAGE_KEY: &str = "language";
 const TITLE_PREFERENCE_KEY: &str = "titlePreference";
+const SAVED_ARTISTS_KEY: &str = "savedArtists";
 
 pub fn get_nozomi_language() -> String {
 	defaults_get::<String>(LANGUAGE_KEY)
@@ -56,4 +60,16 @@ pub fn get_title_preference() -> TitlePreference {
 	defaults_get::<String>(TITLE_PREFERENCE_KEY)
 		.map(TitlePreference::from)
 		.unwrap_or_default()
+}
+
+/// Artists saved in the source settings, offered as a pick list in the search filters.
+pub fn get_saved_artists() -> Vec<String> {
+	let mut artists: Vec<String> = Vec::new();
+	for artist in defaults_get::<Vec<String>>(SAVED_ARTISTS_KEY).unwrap_or_default() {
+		let artist = artist.trim().to_lowercase();
+		if !artist.is_empty() && !artists.contains(&artist) {
+			artists.push(artist);
+		}
+	}
+	artists
 }

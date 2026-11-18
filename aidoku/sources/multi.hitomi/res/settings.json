@@ -90,5 +90,24 @@
 				"default": "english"
 			}
 		]
+	},
+	{
+		"type": "group",
+		"title": "Saved Artists",
+		"footer": "Shown as a pick list in the search filters. Use the artist's name as hitomi.la tags it.",
+		"items": [
+			{
+				"type": "editable-list",
+				"key": "savedArtists",
+				"title": "Add Artist",
+				"lineLimit": 1,
+				"inline": true,
+				"placeholder": "Artist name",
+				"default": [],
+				"refreshes": [
+					"filters"
+				]
+			}
+		]
 	}
 ]

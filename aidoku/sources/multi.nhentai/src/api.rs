@@ -31,15 +31,19 @@ pub fn gallery_id(key: &str, url: Option<&str>) -> Result<String> {
 /// Retries after a 429/503 before reporting the error.
 const MAX_RETRIES: i32 = 2;
 
+/// A GET request for a JSON endpoint with the headers nhentai expects.
+pub fn json_request(url: &str) -> Result<Request> {
+	Ok(Request::get(url)?
+		.header("User-Agent", USER_AGENT)
+		.header("Referer", BASE_URL)
+		.header("Accept", "application/json"))
+}
+
 /// GET a JSON endpoint, waiting and retrying when nhentai rate limits the request.
 pub fn request_json<T: DeserializeOwned>(url: &str) -> Result<T> {
 	let mut attempt = 0;
 	loop {
-		let response = Request::get(url)?
-			.header("User-Agent", USER_AGENT)
-			.header("Referer", BASE_URL)
-			.header("Accept", "application/json")
-			.send()?;
+		let response = json_request(url)?.send()?;
 		let status = response.status_code();
 		if (status == 429 || status == 503) && attempt < MAX_RETRIES {
 			// Honour Retry-After when nhentai sends it, otherwise back off 2s, then 4s.

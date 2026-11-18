@@ -7,6 +7,7 @@ const LANGUAGE_KEY: &str = "language";
 const BLOCKLIST_KEY: &str = "blocklist";
 const LIST_VIEWER_KEY: &str = "isListView";
 const CLEAN_TITLES_KEY: &str = "cleanTitles";
+const SAVED_ARTISTS_KEY: &str = "savedArtists";
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TitlePreference {
@@ -56,4 +57,16 @@ pub fn get_list_viewer() -> bool {
 /// Whether titles should drop their bracketed circle/artist, language and translator parts.
 pub fn get_clean_titles() -> bool {
 	defaults_get(CLEAN_TITLES_KEY).unwrap_or(false)
+}
+
+/// Artists saved in the source settings, offered as a pick list in the search filters.
+pub fn get_saved_artists() -> Vec<String> {
+	let mut artists: Vec<String> = Vec::new();
+	for artist in defaults_get::<Vec<String>>(SAVED_ARTISTS_KEY).unwrap_or_default() {
+		let artist = artist.trim().to_lowercase();
+		if !artist.is_empty() && !artists.contains(&artist) {
+			artists.push(artist);
+		}
+	}
+	artists
 }

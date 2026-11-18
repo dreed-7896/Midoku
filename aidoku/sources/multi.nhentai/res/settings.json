@@ -63,5 +63,24 @@
 				]
 			}
 		]
+	},
+	{
+		"type": "group",
+		"title": "Saved Artists",
+		"footer": "Shown as a pick list in the search filters. Use the artist's name exactly as nhentai tags it.",
+		"items": [
+			{
+				"type": "editable-list",
+				"key": "savedArtists",
+				"title": "Add Artist",
+				"lineLimit": 1,
+				"inline": true,
+				"placeholder": "Artist name",
+				"default": [],
+				"refreshes": [
+					"filters"
+				]
+			}
+		]
 	}
 ]

@@ -3,13 +3,73 @@
 		"type": "text",
 		"id": "artist",
 		"title": "Artist",
-		"placeholder": "Artist name"
+		"placeholder": "Artist name (separate several with |)"
 	},
 	{
 		"type": "text",
 		"id": "group",
 		"title": "Group",
 		"placeholder": "Group name"
+	},
+	{
+		"type": "multi-select",
+		"id": "languages",
+		"title": "Languages",
+		"canExclude": true,
+		"options": [
+			"English",
+			"Indonesian",
+			"Javanese",
+			"Catalan",
+			"Cebuano",
+			"Czech",
+			"Danish",
+			"German",
+			"Estonian",
+			"Spanish",
+			"Esperanto",
+			"French",
+			"Italian",
+			"Hindi",
+			"Hungarian",
+			"Polish",
+			"Portuguese",
+			"Vietnamese",
+			"Turkish",
+			"Russian",
+			"Ukrainian",
+			"Arabic",
+			"Korean",
+			"Chinese",
+			"Japanese"
+		],
+		"ids": [
+			"english",
+			"indonesian",
+			"javanese",
+			"catalan",
+			"cebuano",
+			"czech",
+			"danish",
+			"german",
+			"estonian",
+			"spanish",
+			"esperanto",
+			"french",
+			"italian",
+			"hindi",
+			"hungarian",
+			"polish",
+			"portuguese",
+			"vietnamese",
+			"turkish",
+			"russian",
+			"ukrainian",
+			"arabic",
+			"korean",
+			"chinese",
+			"japanese"
+		]
 	},
 	{
 		"type": "sort",
@@ -36,6 +96,13 @@
 			"Image Set",
 			"Manga"
 		],
-		"ids": ["", "artistcg", "doujinshi", "gamecg", "imageset", "manga"]
+		"ids": [
+			"",
+			"artistcg",
+			"doujinshi",
+			"gamecg",
+			"imageset",
+			"manga"
+		]
 	}
 ]

@@ -1,7 +1,7 @@
 [
 	{
 		"type": "note",
-		"text": "Artist matches the artist tag only. Use | to search several artists, e.g. hyji|jirou."
+		"text": "Artist matches the artist tag only. Use | to search several artists (e.g. hyji|jirou), or pick from Saved Artists, which you add in the source settings."
 	},
 	{
 		"type": "text",
@@ -16,24 +16,20 @@
 		"placeholder": "Group name"
 	},
 	{
-		"type": "select",
-		"id": "language",
-		"title": "Language",
+		"type": "multi-select",
+		"id": "languages",
+		"title": "Languages",
+		"canExclude": true,
 		"options": [
-			"Default (settings)",
-			"Any",
 			"English",
 			"Japanese",
 			"Chinese"
 		],
 		"ids": [
-			"default",
-			"any",
 			"english",
 			"japanese",
 			"chinese"
-		],
-		"default": "default"
+		]
 	},
 	{
 		"type": "check",

@@ -1,7 +1,8 @@
 #![no_std]
 use aidoku::{
-	Chapter, DeepLinkHandler, DeepLinkResult, FilterValue, HashMap, ImageRequestProvider, Listing,
-	ListingProvider, Manga, MangaPageResult, Page, PageContent, PageContext, Result, Source,
+	Chapter, DeepLinkHandler, DeepLinkResult, DynamicFilters, Filter, FilterValue, HashMap,
+	ImageRequestProvider, Listing, ListingProvider, Manga, MangaPageResult, MultiSelectFilter, Page,
+	PageContent, PageContext, Result, Source,
 	alloc::{String, Vec, string::ToString, vec},
 	imports::{
 		net::Request,
@@ -28,8 +29,13 @@ pub const LTN_URL: &str = "https://ltn.gold-usergeneratedcontent.net";
 pub const CDN_DOMAIN: &str = "gold-usergeneratedcontent.net";
 pub const PAGE_SIZE: i32 = 25;
 
+/// How long, in seconds, a downloaded nozomi ID list is reused.
+const NOZOMI_CACHE_TTL: i64 = 300;
+const NOZOMI_CACHE_SIZE: usize = 24;
+
 struct Hitomi {
 	gg_cache: RefCell<Option<(GgState, i64)>>,
+	nozomi_cache: RefCell<Vec<(String, i64, Vec<i64>)>>,
 }
 
 impl Hitomi {
@@ -38,8 +44,16 @@ impl Hitomi {
 		query: Option<String>,
 		page: i32,
 		filters: Vec<FilterValue>,
+		artists: &[String],
+		languages: &[String],
 	) -> Result<MangaPageResult> {
-		let lang = settings::get_nozomi_language();
+		// One language is used in the nozomi file names; several fall back to "all" plus a
+		// union of the per-language results.
+		let lang: String = match languages {
+			[] => settings::get_nozomi_language(),
+			[one] => one.clone(),
+			_ => "all".into(),
+		};
 
 		let mut sort_area: Option<String> = None;
 		let mut sort_tag: String = "index".into();
@@ -168,8 +182,10 @@ impl Hitomi {
 		}
 
 		let is_default_sort = sort_area.is_none() && sort_tag == "index";
+		// Artist lists are already per language, so skip the (large) language index for them.
 		if lang != "all"
 			&& is_default_sort
+			&& artists.is_empty()
 			&& !positive_terms
 				.iter()
 				.chain(negative_terms.iter())
@@ -183,8 +199,9 @@ impl Hitomi {
 			None => format!("{LTN_URL}/{sort_tag}-{lang}.nozomi"),
 		};
 
-		let use_sort_base =
-			(positive_terms.is_empty() && author_name.is_none()) || !is_default_sort;
+		let has_union = !artists.is_empty() || languages.len() > 1;
+		let use_sort_base = (positive_terms.is_empty() && author_name.is_none() && !has_union)
+			|| !is_default_sort;
 
 		// Parallelize network-bound term queries (ns:tag nozomi requests).
 		let mut positive_results: Vec<Vec<i64>> = Vec::new();
@@ -229,6 +246,24 @@ impl Hitomi {
 					Err(_) => positive_results[idx] = Vec::new(),
 				}
 			}
+		}
+
+		// Several artists (typed with `|` or picked from Saved Artists): union of their nozomi
+		// lists, fetched in one parallel batch. With several languages, each artist is fetched
+		// per language, which also applies the language choice.
+		if !artists.is_empty() {
+			let langs: Vec<String> = if languages.len() > 1 {
+				languages.to_vec()
+			} else {
+				vec![lang.clone()]
+			};
+			positive_results.push(self.artist_union(artists, &langs));
+		} else if languages.len() > 1 {
+			let urls: Vec<String> = languages
+				.iter()
+				.map(|l| format!("{LTN_URL}/index-{l}.nozomi"))
+				.collect();
+			positive_results.push(union_ids(self.fetch_nozomis(&urls).into_iter().flatten()));
 		}
 
 		// "author" from detail page: union of artist: and group: nozomis (parallel)
@@ -315,10 +350,10 @@ impl Hitomi {
 		negative_ids.dedup();
 
 		let mut result_ids: Vec<i64> = if use_sort_base {
-			let data = Request::get(&sort_nozomi_url)?
-				.header("Referer", REFERER)
-				.data()?;
-			decode_nozomi(&data)
+			match self.fetch_nozomis(core::slice::from_ref(&sort_nozomi_url)).pop().flatten() {
+				Some(ids) => ids,
+				None => bail!("hitomi.la did not return the gallery list. Please try again."),
+			}
 		} else {
 			Vec::new()
 		};
@@ -388,10 +423,101 @@ impl Hitomi {
 	}
 }
 
+impl Hitomi {
+	/// Download nozomi ID lists in one parallel batch, reusing lists fetched in the last few
+	/// minutes. `None` for a list that is missing (e.g. an unknown artist) or failed.
+	fn fetch_nozomis(&self, urls: &[String]) -> Vec<Option<Vec<i64>>> {
+		let now = current_date();
+		let mut results: Vec<Option<Option<Vec<i64>>>> = {
+			let mut cache = self.nozomi_cache.borrow_mut();
+			cache.retain(|(_, time, _)| now - *time < NOZOMI_CACHE_TTL);
+			urls.iter()
+				.map(|url| {
+					cache
+						.iter()
+						.find(|(key, _, _)| key == url)
+						.map(|(_, _, ids)| Some(ids.clone()))
+				})
+				.collect()
+		};
+		let missing: Vec<usize> = (0..urls.len()).filter(|&i| results[i].is_none()).collect();
+		let requests: Vec<Request> = missing
+			.iter()
+			.filter_map(|&i| Request::get(&urls[i]).ok().map(|r| r.header("Referer", REFERER)))
+			.collect();
+		if requests.len() == missing.len() && !requests.is_empty() {
+			for (&i, response) in missing.iter().zip(Request::send_all(requests)) {
+				let ids = response.ok().and_then(|response| {
+					if !(200..300).contains(&response.status_code()) {
+						return None;
+					}
+					response.get_data().ok().map(|data| decode_nozomi(&data))
+				});
+				if let Some(ids) = &ids {
+					let mut cache = self.nozomi_cache.borrow_mut();
+					if cache.len() >= NOZOMI_CACHE_SIZE {
+						cache.remove(0);
+					}
+					cache.push((urls[i].clone(), now, ids.clone()));
+				}
+				results[i] = Some(ids);
+			}
+		}
+		results.into_iter().map(Option::flatten).collect()
+	}
+
+	/// Galleries by any of the artists, in any of the languages. A name with no artist list is
+	/// retried as a group/circle.
+	fn artist_union(&self, artists: &[String], langs: &[String]) -> Vec<i64> {
+		let urls_for = |namespace: &str, name: &str| -> Vec<String> {
+			langs
+				.iter()
+				.filter_map(|l| nozomi_url_for_ns_tag(&format!("{namespace}:{name}"), l))
+				.collect()
+		};
+		let mut lists: Vec<Vec<i64>> = Vec::new();
+		let mut missing: Vec<&String> = Vec::new();
+		let urls: Vec<(usize, String)> = artists
+			.iter()
+			.enumerate()
+			.flat_map(|(i, name)| urls_for("artist", name).into_iter().map(move |url| (i, url)))
+			.collect();
+		let plain: Vec<String> = urls.iter().map(|(_, url)| url.clone()).collect();
+		let fetched = self.fetch_nozomis(&plain);
+		for (i, name) in artists.iter().enumerate() {
+			let found: Vec<Vec<i64>> = urls
+				.iter()
+				.zip(&fetched)
+				.filter(|((owner, _), _)| *owner == i)
+				.filter_map(|(_, ids)| ids.clone())
+				.collect();
+			if found.iter().all(|ids| ids.is_empty()) {
+				missing.push(name);
+			} else {
+				lists.extend(found);
+			}
+		}
+		if !missing.is_empty() {
+			let group_urls: Vec<String> = missing.iter().flat_map(|name| urls_for("group", name)).collect();
+			lists.extend(self.fetch_nozomis(&group_urls).into_iter().flatten());
+		}
+		union_ids(lists.into_iter())
+	}
+}
+
+/// Merge ID lists without duplicates, newest (highest ID) first.
+fn union_ids(lists: impl Iterator<Item = Vec<i64>>) -> Vec<i64> {
+	let mut ids: Vec<i64> = lists.flatten().collect();
+	ids.sort_unstable_by(|a, b| b.cmp(a));
+	ids.dedup();
+	ids
+}
+
 impl Source for Hitomi {
 	fn new() -> Self {
 		Self {
 			gg_cache: RefCell::new(None),
+			nozomi_cache: RefCell::new(Vec::new()),
 		}
 	}
 
@@ -401,12 +527,61 @@ impl Source for Hitomi {
 		page: i32,
 		filters: Vec<FilterValue>,
 	) -> Result<MangaPageResult> {
-		if let Some(variants) = multi_search::variants(query.as_deref(), &filters) {
+		// Artists and languages are combined into one search (union of their ID lists) rather
+		// than a search per artist; everything else still goes through multi_search.
+		let mut artists: Vec<String> = Vec::new();
+		let mut languages: Vec<String> = Vec::new();
+		let mut excluded_terms: Vec<String> = Vec::new();
+		let mut rest: Vec<FilterValue> = Vec::new();
+		let add = |list: &mut Vec<String>, name: &str| {
+			let name = name.trim().trim_matches('"').trim().to_lowercase().replace('_', " ");
+			if !name.is_empty() && !list.contains(&name) {
+				list.push(name);
+			}
+		};
+		for filter in filters {
+			match filter {
+				FilterValue::Text { ref id, ref value } if id == "artist" => {
+					for name in value.split('|') {
+						add(&mut artists, name);
+					}
+				}
+				FilterValue::MultiSelect { ref id, ref included, ref excluded } if id == "saved_artists" => {
+					for name in included {
+						add(&mut artists, name);
+					}
+					for name in excluded {
+						excluded_terms.push(format!("artist:{}", name.trim().to_lowercase().replace(' ', "_")));
+					}
+				}
+				FilterValue::MultiSelect { ref id, ref included, ref excluded } if id == "languages" => {
+					for language in included {
+						add(&mut languages, language);
+					}
+					for language in excluded {
+						excluded_terms.push(format!("language:{language}"));
+					}
+				}
+				other => rest.push(other),
+			}
+		}
+		// Exclusions ride along as `-ns:tag` query tokens, which search_single already handles.
+		let query = if excluded_terms.is_empty() {
+			query
+		} else {
+			let mut q = query.unwrap_or_default();
+			for term in excluded_terms {
+				q.push_str(" -");
+				q.push_str(&term);
+			}
+			Some(q)
+		};
+		if let Some(variants) = multi_search::variants(query.as_deref(), &rest) {
 			return multi_search::search(variants, |(query, filters)| {
-				self.search_single(query, page, filters)
+				self.search_single(query, page, filters, &artists, &languages)
 			});
 		}
-		self.search_single(query, page, filters)
+		self.search_single(query, page, rest, &artists, &languages)
 	}
 
 	fn get_manga_update(
@@ -571,9 +746,31 @@ impl ImageRequestProvider for Hitomi {
 	}
 }
 
+impl DynamicFilters for Hitomi {
+	/// Saved artists (from the source settings) as a pick list next to the typed Artist field.
+	fn get_dynamic_filters(&self) -> Result<Vec<Filter>> {
+		let artists = settings::get_saved_artists();
+		if artists.is_empty() {
+			return Ok(Vec::new());
+		}
+		Ok(vec![
+			MultiSelectFilter {
+				id: "saved_artists".into(),
+				title: Some("Saved Artists".into()),
+				can_exclude: true,
+				uses_tag_style: true,
+				options: artists.into_iter().map(Into::into).collect(),
+				..Default::default()
+			}
+			.into(),
+		])
+	}
+}
+
 register_source!(
 	Hitomi,
 	ListingProvider,
 	ImageRequestProvider,
-	DeepLinkHandler
+	DeepLinkHandler,
+	DynamicFilters
 );
