@@ -33,7 +33,7 @@
 				"default": "english"
 			},
 			{
-				"type": "toggle",
+				"type": "switch",
 				"key": "cleanTitles",
 				"title": "Hide Artist & Tags in Titles",
 				"subtitle": "Shows \"[Circle (Artist)] Title [English]\" as \"Title\"",
