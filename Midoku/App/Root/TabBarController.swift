@@ -38,7 +38,6 @@ class TabBarController: UITabBarController {
         .init(title: NSLocalizedString("SETTINGS"), image: "MDTabSettings")
     ])
     private var customTabBarHeight: NSLayoutConstraint?
-    private var customTabBarHiddenBySystem = false
     private let visibleReaders = NSHashTable<UIViewController>.weakObjects()
     private static let sourcesTabIndex = 3
 
@@ -94,18 +93,6 @@ class TabBarController: UITabBarController {
 
     override var selectedViewController: UIViewController? {
         didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
-    }
-
-    // The system bar always stays hidden; requests to hide or show it move the web bar instead.
-    override var isTabBarHidden: Bool {
-        get { customTabBarHiddenBySystem }
-        set { setTabBarHidden(newValue, animated: false) }
-    }
-
-    override func setTabBarHidden(_ hidden: Bool, animated: Bool) {
-        customTabBarHiddenBySystem = hidden
-        super.setTabBarHidden(true, animated: false)
-        refreshCustomTabBar(animated: animated)
     }
 
     override func viewDidLoad() {
@@ -582,11 +569,11 @@ extension TabBarController {
     }
 
     private var customTabBarVisible: Bool {
-        !customTabBarHiddenBySystem && visibleReaders.allObjects.isEmpty
+        visibleReaders.allObjects.isEmpty
     }
 
     fileprivate func installCustomTabBar() {
-        super.setTabBarHidden(true, animated: false)
+        setTabBarHidden(true, animated: false)
         customTabBar.translatesAutoresizingMaskIntoConstraints = false
         customTabBar.onSelect = { [weak self] index in self?.selectTab(at: index) }
         view.addSubview(customTabBar)
@@ -602,6 +589,8 @@ extension TabBarController {
     }
 
     fileprivate func layoutCustomTabBar() {
+        // UIKit can bring the system bar back (e.g. after popping a screen that hid it); keep it hidden.
+        if !isTabBarHidden { setTabBarHidden(true, animated: false) }
         let height = MDTabBar.height(safeBottom: safeBottom)
         if customTabBarHeight?.constant != height { customTabBarHeight?.constant = height }
         view.bringSubviewToFront(customTabBar)

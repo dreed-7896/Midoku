@@ -298,6 +298,17 @@ enum MidokuTheme {
         }
     }
 
+    /// Runs `make` unless a font override is already running on this thread (UIKit can call the
+    /// overridden methods while building a font), in which case the system font is used.
+    nonisolated private static func guarded(_ make: () -> UIFont?, fallback: () -> UIFont) -> UIFont {
+        let key = "MidokuTheme.fontOverride"
+        let dictionary = Thread.current.threadDictionary
+        if dictionary[key] != nil { return fallback() }
+        dictionary[key] = true
+        defer { dictionary.removeObject(forKey: key) }
+        return make() ?? fallback()
+    }
+
     /// UIKit text (labels, cells, alerts, bars) uses Inter instead of San Francisco.
     nonisolated private static func overrideSystemFonts() {
         let cls: AnyClass = UIFont.self
@@ -307,7 +318,9 @@ enum MidokuTheme {
         if let method = class_getClassMethod(cls, sizeWeightSelector) {
             let original = unsafeBitCast(method_getImplementation(method), to: SizeWeight.self)
             let block: @convention(block) (AnyClass, CGFloat, CGFloat) -> UIFont = { c, size, weight in
-                MDFont.ui(size, UIFont.Weight(rawValue: weight)) ?? original(c, sizeWeightSelector, size, weight)
+                guarded({ MDFont.ui(size, UIFont.Weight(rawValue: weight)) }) {
+                    original(c, sizeWeightSelector, size, weight)
+                }
             }
             method_setImplementation(method, imp_implementationWithBlock(block))
         }
@@ -318,7 +331,7 @@ enum MidokuTheme {
             guard let method = class_getClassMethod(cls, selector) else { continue }
             let original = unsafeBitCast(method_getImplementation(method), to: Size.self)
             let block: @convention(block) (AnyClass, CGFloat) -> UIFont = { c, size in
-                MDFont.ui(size, weight) ?? original(c, selector, size)
+                guarded({ MDFont.ui(size, weight) }) { original(c, selector, size) }
             }
             method_setImplementation(method, imp_implementationWithBlock(block))
         }
@@ -328,7 +341,9 @@ enum MidokuTheme {
         if let method = class_getClassMethod(cls, styleSelector) {
             let original = unsafeBitCast(method_getImplementation(method), to: Style.self)
             let block: @convention(block) (AnyClass, NSString) -> UIFont = { c, style in
-                MDFont.preferred(UIFont.TextStyle(rawValue: style as String)) ?? original(c, styleSelector, style)
+                guarded({ MDFont.preferred(UIFont.TextStyle(rawValue: style as String)) }) {
+                    original(c, styleSelector, style)
+                }
             }
             method_setImplementation(method, imp_implementationWithBlock(block))
         }
@@ -338,8 +353,9 @@ enum MidokuTheme {
         if let method = class_getClassMethod(cls, styleTraitsSelector) {
             let original = unsafeBitCast(method_getImplementation(method), to: StyleTraits.self)
             let block: @convention(block) (AnyClass, NSString, UITraitCollection?) -> UIFont = { c, style, traits in
-                MDFont.preferred(UIFont.TextStyle(rawValue: style as String), traits: traits)
-                    ?? original(c, styleTraitsSelector, style, traits)
+                guarded({ MDFont.preferred(UIFont.TextStyle(rawValue: style as String), traits: traits) }) {
+                    original(c, styleTraitsSelector, style, traits)
+                }
             }
             method_setImplementation(method, imp_implementationWithBlock(block))
         }
