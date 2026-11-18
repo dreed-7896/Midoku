@@ -350,7 +350,7 @@ extension SettingView {
                     Section {
                         body
                     } header: {
-                        Text(setting.title)
+                        MDSettingsHeader(title: setting.title)
                     } footer: {
                         Text(footer)
                     }
@@ -362,8 +362,10 @@ extension SettingView {
                     }
                 }
             } else if !setting.title.isEmpty {
-                Section(setting.title) {
+                Section {
                     body
+                } header: {
+                    MDSettingsHeader(title: setting.title)
                 }
             } else {
                 Section {
@@ -1530,5 +1532,17 @@ extension SettingView {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Web `.label`: mono, uppercase, muted section label.
+struct MDSettingsHeader: View {
+    let title: String
+    var body: some View {
+        Text(NSLocalizedString(title))
+            .font(.mdMono(11, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(1)
+            .foregroundStyle(Color.mdText3)
     }
 }

@@ -68,16 +68,17 @@ struct SettingHeaderView: View {
     @ViewBuilder
     static func iconView(source: AidokuRunner.Source?, icon: Icon, size: CGFloat) -> some View {
         switch icon {
-            case let .system(name, color, inset):
+            case let .system(name, _, inset):
+                // web `.setting__icon`: muted symbol on a raised square with a hairline
                 Image(systemName: name)
                     .resizable()
                     .renderingMode(.template)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.mdText2)
                     .aspectRatio(contentMode: .fit)
-                    .padding(CGFloat(inset) / 29 * size)
+                    .padding((CGFloat(inset) / 29 * size) + size * 0.12)
                     .frame(width: size, height: size)
-                    .background(color.toColor())
-                    .clipShape(RoundedRectangle(cornerRadius: 0))
+                    .background(Color.mdS2)
+                    .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
             case let .url(string):
                 SourceImageView(
                     source: source,
