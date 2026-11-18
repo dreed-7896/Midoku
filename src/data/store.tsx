@@ -1,10 +1,10 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { isOffline, pruneEntryCopies, readEntryCopy, readJSON, writeEntryCopy, writeJSON } from './cache'
 import {
-  DbLibrary, deleteEntryRow, deleteEntrySource, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
+  DbLibrary, deleteEntryRow, deleteEntrySource, deleteImports, deleteInserted, mergeEntryRows, deleteSplit, deleteTabRow, flushWrites, loadEntryExtras, loadLibrary, onWriteError, saveChapterStates,
   notePageGrowth, saveEntry, saveEntrySource, saveInserted, saveSplit, saveTabs, setEntryTab, updateEntry, updateEntrySource, useAuth,
 } from './db'
-import type { ChapterStateRow } from './db'
+import type { ChapterStateRow, ImportRow } from './db'
 import { chapterKey, download, DownloadJob, getSavedList, removeDownload, useDownloads } from './downloads'
 import {
   applyCustom, applyStates, entriesFromDb, LOCAL, entryRow, expandSplits, insertedFromRow, shownPages, insertedRow, LibrarySnapshot, mergeChapters, physicalIdOf, rowState, showVersion,
@@ -190,7 +190,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
       const dbId = find(id)?.dbId
       if (!dbId || get().server.status === 'signin') return
       await loadEntryExtras(dbId)
-        .then(({ states, splits, inserts }) => editEntry(id, (e) => {
+        .then(({ states, splits, inserts, imports }) => { editEntry(id, (e) => {
           const inserted = inserts.map(insertedFromRow)
           return {
             ...e,
@@ -198,8 +198,45 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
             splits: Object.fromEntries(splits.map((r) => [chapterKey(r.source_id, r.chapter_url), { breaks: r.breaks, skip: r.excluded ?? [] }])),
             chapters: withDownloads(applyStates(withInserted(e.chapters, inserted), states.map(rowState))),
           }
-        }))
+        }); if (imports.length) applyImports(id, dbId, imports) })
         .catch((e: Error) => { if (!isOffline(e)) toast(`Couldn't load reading progress: ${e.message}`) })
+    }
+
+    /**
+     * Reading state imported from a backup is kept by source title + chapter number until the title's chapters
+     * have loaded; then each is matched to its chapter, saved as normal reading state, and the import is dropped.
+     * Sources whose chapters didn't load keep theirs for next time.
+     */
+    const applyImports = (id: string, dbId: string, imports: ImportRow[]) => {
+      const e = find(id)
+      if (!e?.remote?.chaptersLoaded) return
+      const versions = e.chapters.flatMap((c) => (c.alts?.length ? c.alts : c.sourceUrl ? [{ sourceId: c.sourceId, url: c.sourceUrl, mangaUrl: e.sources.find((s) => s.sourceId === c.sourceId)?.mangaUrl, number: c.sourceNumber ?? c.number }] : []).map((v) => ({ c, v })))
+      const rows: ChapterStateRow[] = []
+      const splitRows: { source_id: string; chapter_url: string; breaks: number[]; excluded: number[] }[] = []
+      const done = new Set<string>()
+      for (const r of imports) {
+        const mine = versions.filter(({ v }) => v.sourceId === r.source_id && v.mangaUrl === r.manga_url)
+        if (!mine.length) continue // this source's chapters aren't loaded yet
+        done.add(`${r.source_id}|${r.manga_url}`)
+        const hit = (r.number != null ? mine.find(({ v }) => v.number != null && Math.abs(Number(v.number) - Number(r.number)) < 1e-6) : undefined)
+          ?? (r.only_chapter || mine.length === 1 ? mine[0] : undefined)
+        if (!hit) continue
+        const { c, v } = hit
+        rows.push({ entry_id: dbId, source_id: v.sourceId, chapter_url: v.url, chapter_number: c.number, page: r.page, read: r.read, bookmarked: false, removed: r.removed,
+          preferred: r.preferred, position: r.position == null ? null : Number(r.position), name: r.name, thumb: r.thumb })
+        if (r.breaks?.length || r.excluded?.length) splitRows.push({ source_id: v.sourceId, chapter_url: v.url, breaks: r.breaks ?? [], excluded: r.excluded ?? [] })
+      }
+      if (!rows.length && !done.size) return
+      if (canSave()) {
+        if (rows.length) saveChapterStates(rows)
+        splitRows.forEach((s) => saveSplit({ entry_id: dbId, ...s }))
+        done.forEach((k) => { const [sid, ...u] = k.split('|'); deleteImports(dbId, sid, u.join('|')) })
+      }
+      editEntry(id, (x) => ({
+        ...x,
+        splits: { ...x.splits, ...Object.fromEntries(splitRows.map((s) => [chapterKey(s.source_id, s.chapter_url), { breaks: s.breaks, skip: s.excluded }])) },
+        chapters: applyStates(x.chapters, rows.map(rowState)),
+      }))
     }
 
     /**
@@ -323,7 +360,7 @@ function useActions(set: (fn: (s: State) => State) => void, get: () => State) {
           try {
             // Followed sources are asked for new chapters; the others keep the chapters the server has.
             const sources = [...e.sources].sort((a, b) => Number(!!b.main) - Number(!!a.main)).filter((s) => s.mangaId != null)
-            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, s.following).then((chapters) => ({ sourceId: s.sourceId, name: s.name, segment: s.segment, chapters }))))
+            const lists = await Promise.all(sources.map((s) => getChapters(s.mangaId!, s.following).then((chapters) => ({ sourceId: s.sourceId, mangaUrl: s.mangaUrl, name: s.name, segment: s.segment, chapters }))))
             const merged = mergeChapters(lists, e.renumber)
             // The newest chapter can gain pages after it comes out. When the server has fetched its pages
             // before, they are fetched again and compared; more pages are noted for Updates.

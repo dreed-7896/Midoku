@@ -189,7 +189,7 @@ export const withDownloads = (chapters: Chapter[]): Chapter[] =>
 
 const slotKey = (n: number) => n.toFixed(3)
 
-type SourceChapters = { sourceId: string; name?: string; segment?: number; chapters: SChapter[] }
+type SourceChapters = { sourceId: string; mangaUrl?: string; name?: string; segment?: number; chapters: SChapter[] }
 
 /**
  * Chapters from every linked source merged into one list: chapters with the same number share a slot
@@ -206,11 +206,11 @@ export function mergeChapters(lists: SourceChapters[], renumber = false): Chapte
 
 function mergeSegment(lists: SourceChapters[]): Chapter[] {
   const slots = new Map<string, Chapter>()
-  for (const { sourceId, name, chapters } of lists) {
+  for (const { sourceId, mangaUrl, name, chapters } of lists) {
     for (const raw of chapters) {
       const c = toChapter(raw, sourceId)
       const key = raw.chapterNumber >= 0 ? slotKey(raw.chapterNumber) : `${sourceId}:${raw.id}`
-      const alt: ChapterVersion = { sourceId, url: raw.url, remoteId: raw.id, name: [name ?? sourceId, raw.scanlator].filter(Boolean).join(' · '), title: c.title, scanlator: raw.scanlator || undefined }
+      const alt: ChapterVersion = { sourceId, url: raw.url, remoteId: raw.id, name: [name ?? sourceId, raw.scanlator].filter(Boolean).join(' · '), title: c.title, scanlator: raw.scanlator || undefined, mangaUrl, number: raw.chapterNumber }
       const slot = slots.get(key)
       if (slot) {
         slot.alts = [...(slot.alts ?? []), alt]

@@ -103,7 +103,7 @@ export interface Chapter {
   sourceNumber?: number
 }
 
-export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string; scanlator?: string }
+export interface ChapterVersion { sourceId: string; url: string; remoteId: number; name: string; title: string; scanlator?: string; mangaUrl?: string; number?: number }
 
 export interface InsertedChapter {
   id: string

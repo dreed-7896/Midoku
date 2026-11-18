@@ -178,13 +178,23 @@ export async function loadLibrary(): Promise<DbLibrary> {
 }
 
 /** A saved title's reading state, split chapters and inserted chapters. */
+/** A chapter's imported reading state, kept until the title's chapters load (see `applyImports` in the store). */
+export interface ImportRow {
+  source_id: string; manga_url: string; number: number | null; title: string | null; read: boolean; page: number; removed: boolean; preferred: boolean
+  position: number | null; name: string | null; thumb: string | null; breaks: number[] | null; excluded: number[] | null; only_chapter: boolean
+}
+export const deleteImports = (entryId: string, sourceId: string, mangaUrl: string) =>
+  enqueue({ kind: 'delete', table: 'chapter_imports', match: { entry_id: entryId, source_id: sourceId, manga_url: mangaUrl } })
+
 export async function loadEntryExtras(entryId: string) {
   const [states, splits, inserts] = await Promise.all([
     all<ChapterStateRow>(db.from('chapter_states').select('entry_id, source_id, chapter_url, chapter_number, page, read, bookmarked, removed, preferred, position, read_at, pages, pages_before, pages_grew_at, thumb, marks, name').eq('entry_id', entryId)),
     all<SplitRow>(db.from('chapter_splits').select('entry_id, source_id, chapter_url, breaks, excluded').eq('entry_id', entryId)),
     all<InsertedRow>(db.from('inserted_chapters').select('id, entry_id, source_id, manga_url, chapter_url, server_chapter_id, number, label, from_title').eq('entry_id', entryId)),
   ])
-  return { states, splits, inserts }
+  // Reading state from a backup that is still waiting for this title's chapters (usually none).
+  const imports = await all<ImportRow>(db.from('chapter_imports').select('source_id, manga_url, number, title, read, page, removed, preferred, position, name, thumb, breaks, excluded, only_chapter').eq('entry_id', entryId)).catch(() => [] as ImportRow[])
+  return { states, splits, inserts, imports }
 }
 
 // Writes: an ordered outbox kept in localStorage. Each change is queued, then sent in order; without a
