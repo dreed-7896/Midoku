@@ -32,7 +32,7 @@ enum MCShelfLayout: String, Codable, CaseIterable {
         switch self {
         case .hero: "Featured cards"
         case .rail: "Cover row"
-        case .grid: "Grid"
+        case .grid: "Two-row grid"
         }
     }
 
@@ -705,16 +705,18 @@ private struct MCDiscoverShelf: View {
                 }
                 .scrollTargetBehavior(.viewAligned)
             case .grid:
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 3), spacing: 14) {
-                    ForEach(items.prefix(9), id: \.key) { manga in
-                        Button { openManga(manga) } label: { gridCard(manga, isNew: fresh.contains(manga.key)) }
-                            .buttonStyle(.plain)
+                // Two rows of small covers that scroll sideways together.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHGrid(rows: [GridItem(.fixed(150), spacing: 14, alignment: .top), GridItem(.fixed(150), alignment: .top)], spacing: 10) {
+                        ForEach(items.prefix(40), id: \.key) { manga in
+                            Button { openManga(manga) } label: { gridCard(manga, isNew: fresh.contains(manga.key)) }
+                                .buttonStyle(.plain)
+                        }
                     }
+                    .scrollTargetLayout()
+                    .padding(.horizontal, 16)
                 }
-                .padding(12)
-                .background(Color.mdS1)
-                .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
-                .padding(.horizontal, 16)
+                .scrollTargetBehavior(.viewAligned)
             }
         } else if let error = model.errors[feed.id] {
             MDEmpty(systemImage: "exclamationmark.triangle", title: "Couldn’t load \(feed.listingName)",
@@ -723,8 +725,8 @@ private struct MCDiscoverShelf: View {
                     tone: .error, compact: true)
                 .padding(.horizontal, 16)
         } else if model.loading.contains(feed.id) || model.entries[feed.id] == nil {
-            MDLoading(label: "Loading", shape: layout == .hero ? .rows : layout == .grid ? .grid : .rail,
-                      count: layout == .hero ? 1 : layout == .grid ? 3 : 4)
+            MDLoading(label: "Loading", shape: layout == .hero ? .rows : .rail,
+                      count: layout == .hero ? 1 : 4)
                 .padding(.horizontal, 16)
         } else {
             MDEmpty(systemImage: "info.circle", title: "Nothing here yet", compact: true).padding(.horizontal, 16)
@@ -744,15 +746,13 @@ private struct MCDiscoverShelf: View {
     }
 
     private func gridCard(_ manga: AidokuRunner.Manga, isNew: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Color.clear
-                .aspectRatio(2 / 3, contentMode: .fit)
-                .overlay { cover(manga) }
-                .clipped()
+        VStack(alignment: .leading, spacing: 5) {
+            cover(manga).frame(width: 82, height: 123)
                 .overlay(alignment: .topLeading) { if isNew { MCDiscoverNewBadge().padding(4) } }
-            Text(manga.title).font(.mdSystem(size: 12, weight: .semibold)).foregroundStyle(Color.mdText)
-                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+            Text(manga.title).font(.mdSystem(size: 11, weight: .semibold)).foregroundStyle(Color.mdText)
+                .lineLimit(1).frame(width: 82, alignment: .leading)
         }
+        .frame(width: 82)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isNew ? "New: \(manga.title)" : manga.title)
     }
