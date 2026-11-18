@@ -10,14 +10,13 @@ import SwiftUI
 struct CloseButton: View {
     let action: () -> Void
 
+    /// A flat square × (Midoku Web `.icon-btn`), not the system glass close button.
     var body: some View {
-        if #available(iOS 26.0, *) {
-            Button(role: .close) {
-                action()
-            }
-        } else {
-            CloseButtonUIKit(action: action)
+        Button(action: action) {
+            MDIconBox(systemImage: "xmark", size: 34)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(NSLocalizedString("CLOSE"))
     }
 }
 

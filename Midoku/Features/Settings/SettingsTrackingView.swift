@@ -55,7 +55,7 @@ struct SettingsTrackingView: View {
                 Text(NSLocalizedString("AUTO_SYNC_HISTORY_INFO"))
             }
 
-            Section(NSLocalizedString("TRACKERS")) {
+            Section(header: MDSettingsHeader(title: "TRACKERS")) {
                 ForEach(trackers.indices, id: \.self) { index in
                     let tracker = trackers[index]
                     let needsRelogin = trackersNeedingRelogin.contains(tracker.id)
@@ -143,7 +143,7 @@ struct SettingsTrackingView: View {
                         }
                     }
                 } header: {
-                    Text(NSLocalizedString("ENHANCED_TRACKERS"))
+                    MDSettingsHeader(title: "ENHANCED_TRACKERS")
                 } footer: {
                     Text(NSLocalizedString("ENHANCED_TRACKERS_INFO"))
                         .padding(.bottom, 8) // fix tab bar being too close to text on ios 26

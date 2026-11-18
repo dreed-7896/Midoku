@@ -40,7 +40,7 @@ struct SourceListsView: View {
                         }
                     }
                 } header: {
-                    Text(NSLocalizedString("UNAVAILABLE_SOURCE_LISTS"))
+                    MDSettingsHeader(title: "UNAVAILABLE_SOURCE_LISTS")
                 } footer: {
                     Text(NSLocalizedString("UNAVAILABLE_SOURCE_LISTS_TEXT"))
                 }

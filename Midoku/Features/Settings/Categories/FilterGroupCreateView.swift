@@ -32,7 +32,7 @@ struct FilterGroupCreateView: View {
                     }
                 }
 
-                Section(NSLocalizedString("FILTERS")) {
+                Section(header: MDSettingsHeader(title: "FILTERS")) {
                     ForEach(LibraryFilter.FilterMethod.allCases, id: \.self) { method in
                         if method.isAvailable {
                             let state = filterState(for: method)

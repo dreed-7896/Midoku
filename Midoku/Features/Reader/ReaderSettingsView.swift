@@ -93,7 +93,7 @@ struct ReaderSettingsView: View {
                         )
                     )
                 } header: {
-                    Text(NSLocalizedString("TAP_ZONES"))
+                    MDSettingsHeader(title: "TAP_ZONES")
                 }
 
                 if reader == .text {
@@ -125,7 +125,7 @@ struct ReaderSettingsView: View {
                                 )
                             }
                         } header: {
-                            Text(NSLocalizedString("UPSCALING"))
+                            MDSettingsHeader(title: "UPSCALING")
                         } footer: {
                             if upscaleImages.value {
                                 Text(NSLocalizedString("UPSCALE_MAX_IMAGE_HEIGHT_TEXT"))
@@ -182,7 +182,7 @@ struct ReaderSettingsView: View {
 
 extension ReaderSettingsView {
     var generalSection: some View {
-        Section(NSLocalizedString("GENERAL")) {
+        Section(header: MDSettingsHeader(title: "GENERAL")) {
             if reader != .text {
                 let readingModeKey = "Reader.readingMode.\(mangaId)"
                 SettingView(
@@ -440,12 +440,12 @@ extension ReaderSettingsView {
                 )
             }
         } header: {
-            Text(NSLocalizedString("DICTIONARY_LOOKUP"))
+            MDSettingsHeader(title: "DICTIONARY_LOOKUP")
         }
     }
 
     var pagedSection: some View {
-        Section(NSLocalizedString("PAGED")) {
+        Section(header: MDSettingsHeader(title: "PAGED")) {
             SettingView(
                 setting: .init(
                     key: "Reader.pagesToPreload",
@@ -566,7 +566,7 @@ extension ReaderSettingsView {
                 )
             )
         } header: {
-            Text(NSLocalizedString("WEBTOON"))
+            MDSettingsHeader(title: "WEBTOON")
         } footer: {
             Text(NSLocalizedString("PILLARBOX_ORIENTATION_INFO"))
         }

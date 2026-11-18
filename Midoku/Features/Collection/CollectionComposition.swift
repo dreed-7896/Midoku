@@ -22,11 +22,11 @@ struct MCAddChapterToEntryView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Chapter") {
+                Section(header: MDSettingsHeader(title: "Chapter")) {
                     TextField("Chapter name", text: $chapterName)
                 }
 
-                Section("Library entry") {
+                Section(header: MDSettingsHeader(title: "Library entry")) {
                     if entries.isEmpty {
                         UnavailableView(
                             query.isEmpty ? "Library empty" : "No entries found",
@@ -76,7 +76,7 @@ struct MCAddChapterToEntryView: View {
                     .disabled(selectedEntryID == nil || chapterName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .padding(.horizontal)
                     .padding(.vertical, 8)
-                    .background(.bar)
+                    .background(Color.mdS2)
             }
             .onAppear {
                 guard !loaded else { return }
@@ -238,7 +238,7 @@ struct MCEntrySourcesView: View {
                         }
                     }
                     if !entry.exclusions.isEmpty {
-                        Section("Removed chapters") {
+                        Section(header: MDSettingsHeader(title: "Removed chapters")) {
                             ForEach(store.library.chapters.filter { entry.exclusions.contains($0.id) }) { chapter in
                                 Button {
                                     store.perform { try $0.library.restoreChapter(entryID: entryID, chapterID: chapter.id) }

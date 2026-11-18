@@ -498,6 +498,11 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
         if accessory.superview == nil {
             accessory.layer.cornerRadius = 0
             accessory.clipsToBounds = true
+            // flat web surface instead of a blur
+            accessory.effect = nil
+            accessory.backgroundColor = MDColor.s2.withAlphaComponent(0.96)
+            accessory.layer.borderWidth = 1
+            accessory.layer.borderColor = MDColor.line2.cgColor
             // Stepping through dialogue sits on the right.
             let buttons = [allButton, listButton, translateButton, optionsButton, retryButton, closeDialogueButton,
                            previousButton, nextButton]

@@ -48,7 +48,7 @@ struct DictionaryVocabDetailsView: View {
         NavigationStack {
             List {
                 if !isEditing {
-                    Section(NSLocalizedString("DEFINITION")) {
+                    Section(header: MDSettingsHeader(title: "DEFINITION")) {
                         PopupWebView(
                             content: definitionContent,
                             position: .zero,
@@ -66,7 +66,7 @@ struct DictionaryVocabDetailsView: View {
                 }
 
                 if isEditing || entry.sentence != nil {
-                    Section(NSLocalizedString("VOCAB_CONTEXT")) {
+                    Section(header: MDSettingsHeader(title: "VOCAB_CONTEXT")) {
                         if isEditing {
                             ClozeTextEditor(
                                 text: $editedSentence,
@@ -81,7 +81,7 @@ struct DictionaryVocabDetailsView: View {
                 }
 
                 if !isEditing && (!sourceLoaded || sourceManga != nil) {
-                    Section(NSLocalizedString("VOCAB_SOURCE")) {
+                    Section(header: MDSettingsHeader(title: "VOCAB_SOURCE")) {
                         Button {
                             if sourceChapter != nil {
                                 chapterOpened = true

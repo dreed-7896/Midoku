@@ -29,7 +29,7 @@ struct MCEntryPlacementView: View {
         NavigationStack {
             List {
                 if case .addInside(let parent) = mode {
-                    Section("Create nested title") {
+                    Section(header: MDSettingsHeader(title: "Create nested title")) {
                         TextField("Title", text: $newTitle)
                         Button("Create title", systemImage: "plus") {
                             if store.perform({ state in

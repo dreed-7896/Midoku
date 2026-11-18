@@ -22,7 +22,7 @@ struct AutomaticBackupsView: View {
                     }
                 }
 
-                Section(NSLocalizedString("LIBRARY")) {
+                Section(header: MDSettingsHeader(title: "LIBRARY")) {
                         toggle(key: AppSettings.backups.autoBackups.libraryEntries.key, title: NSLocalizedString("LIBRARY_ENTRIES"))
                         toggle(key: AppSettings.backups.autoBackups.chapters.key, title: NSLocalizedString("CHAPTERS"))
                         toggle(key: AppSettings.backups.autoBackups.tracking.key, title: NSLocalizedString("TRACKING"))
@@ -32,7 +32,7 @@ struct AutomaticBackupsView: View {
                         toggle(key: AppSettings.backups.autoBackups.vocabulary.key, title: NSLocalizedString("VOCABULARY"))
                         toggle(key: AppSettings.backups.autoBackups.updates.key, title: NSLocalizedString("MANGA_UPDATES"))
                     }
-                Section(NSLocalizedString("SETTINGS")) {
+                Section(header: MDSettingsHeader(title: "SETTINGS")) {
                         toggle(key: AppSettings.backups.autoBackups.settings.key, title: NSLocalizedString("SETTINGS"))
                         toggle(key: AppSettings.backups.autoBackups.sourceLists.key, title: NSLocalizedString("SOURCE_LISTS"))
                         toggle(key: AppSettings.backups.autoBackups.sensitiveSettings.key, title: NSLocalizedString("SENSITIVE_SETTINGS"))

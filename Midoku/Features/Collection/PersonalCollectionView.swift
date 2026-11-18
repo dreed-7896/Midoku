@@ -1406,7 +1406,7 @@ private struct MCBatchCategoryEditor: View {
                 }
 
                 }
-                Section("Categories") {
+                Section(header: MDSettingsHeader(title: "Categories")) {
                     ForEach(store.snapshot.categories) { category in
                         Toggle(category.name, isOn: Binding(
                             get: { categories.contains(category.id) },

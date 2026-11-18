@@ -21,7 +21,7 @@ struct MCReadingStatsView: View {
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     }
-                    Section("Chapters per week") {
+                    Section(header: MDSettingsHeader(title: "Chapters per week")) {
                         Chart(stats.weeks) { week in
                             BarMark(x: .value("Week", week.start, unit: .weekOfYear), y: .value("Chapters", week.chapters))
                                 .foregroundStyle(Color.accentColor)
@@ -32,7 +32,7 @@ struct MCReadingStatsView: View {
                         .frame(height: 160)
                         .padding(.vertical, 6)
                     }
-                    Section("Most read titles") {
+                    Section(header: MDSettingsHeader(title: "Most read titles")) {
                         if stats.topTitles.isEmpty { Text("Read a library title to see it here.").foregroundStyle(.secondary) }
                         ForEach(stats.topTitles) { item in
                             HStack(spacing: 12) {
@@ -46,7 +46,7 @@ struct MCReadingStatsView: View {
                         }
                     }
                     if !stats.topArtists.isEmpty {
-                        Section("Most read artists") {
+                        Section(header: MDSettingsHeader(title: "Most read artists")) {
                             ForEach(stats.topArtists) { item in
                                 LabeledContent(item.id, value: "\(item.chapters) ch")
                             }

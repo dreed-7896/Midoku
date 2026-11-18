@@ -114,7 +114,7 @@ struct MCPanelBookmarksView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 Picker("Bookmark type", selection: $filter) {
                     ForEach(BookmarkFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 10).background(.bar)
+                }.pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 10).background(Color.mdS2)
             }
             .searchable(text: $query, prompt: "Search bookmarks")
             .navigationTitle("Bookmarks")

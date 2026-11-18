@@ -44,12 +44,12 @@ struct MCEntryStatusEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                if includeStatus { Section("Reading status") {
+                if includeStatus { Section(header: MDSettingsHeader(title: "Reading status")) {
                     Picker("Status", selection: $status) {
                         ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) }
                     }
                 } }
-                Section("Categories") {
+                Section(header: MDSettingsHeader(title: "Categories")) {
                     ForEach(store.snapshot.categories) { category in
                         Toggle(category.name, isOn: Binding(
                             get: { categories.contains(category.id) },

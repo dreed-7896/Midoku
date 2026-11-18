@@ -160,7 +160,7 @@ struct SelfHostedSourceSetupView: View {
                     .onSubmit { self.focusNextField($focusedField) }
                     .disabled(isLoading)
             } header: {
-                Text(NSLocalizedString("SOURCE_NAME"))
+                MDSettingsHeader(title: "SOURCE_NAME")
             } footer: {
                 if !uniqueName {
                     Text(NSLocalizedString("SOURCE_NAME_UNIQUE_ERROR"))
@@ -189,7 +189,7 @@ struct SelfHostedSourceSetupView: View {
                         }
                     }
             } header: {
-                Text(NSLocalizedString("SERVER_URL"))
+                MDSettingsHeader(title: "SERVER_URL")
             } footer: {
                 if !uniqueServer {
                     Text(NSLocalizedString("SERVER_URL_UNIQUE_ERROR"))
@@ -202,7 +202,7 @@ struct SelfHostedSourceSetupView: View {
             if let check = loginCheck {
                 let hasMultipleLoginMethods = [check.canLoginBasic, check.canLoginApiKey, check.canLoginOIDC].filter({ $0 }).count > 1
                 if hasMultipleLoginMethods {
-                    Section(NSLocalizedString("LOGIN")) {
+                    Section(header: MDSettingsHeader(title: "LOGIN")) {
                         Picker(NSLocalizedString("LOGIN_METHOD"), selection: $loginMethod) {
                             if check.canLoginApiKey {
                                 Text(NSLocalizedString("API_KEY")).tag(LoginMethod.apiKey)

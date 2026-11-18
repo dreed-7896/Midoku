@@ -213,7 +213,7 @@ struct AddSourceView: View {
     }
 
     var builtInSources: some View {
-        Section(NSLocalizedString("BUILT_IN_SOURCES")) {
+        Section(header: MDSettingsHeader(title: "BUILT_IN_SOURCES")) {
 //            if !CoreDataManager.shared.hasSource(key: "demo", context: CoreDataManager.shared.context) {
 //                ExternalSourceTableCell(
 //                    source: .init(

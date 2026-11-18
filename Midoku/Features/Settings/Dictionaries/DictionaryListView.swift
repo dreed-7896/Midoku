@@ -55,7 +55,7 @@ struct DictionaryListView: View {
                         DictionaryManager.shared.updateDictionaries()
                     }
                 } header: {
-                    Text(NSLocalizedString("DICTIONARY_UPDATES"))
+                    MDSettingsHeader(title: "DICTIONARY_UPDATES")
                 } footer: {
                     let progressView = ProgressView()
                         .progressViewStyle(.circular)

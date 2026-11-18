@@ -33,7 +33,7 @@ struct BackupCreateView: View {
                         .autocorrectionDisabled()
                         .submitLabel(.done)
                 } header: {
-                    Text(NSLocalizedString("BACKUP_NAME"))
+                    MDSettingsHeader(title: "BACKUP_NAME")
                 }
                 Section {
                     Toggle(NSLocalizedString("LIBRARY_ENTRIES"), isOn: $libraryEntries)
@@ -45,14 +45,14 @@ struct BackupCreateView: View {
                     Toggle(NSLocalizedString("VOCABULARY"), isOn: $vocabulary)
                     Toggle(NSLocalizedString("MANGA_UPDATES"), isOn: $updates)
                 } header: {
-                    Text(NSLocalizedString("LIBRARY"))
+                    MDSettingsHeader(title: "LIBRARY")
                 }
                 Section {
                     Toggle(NSLocalizedString("SETTINGS"), isOn: $settings)
                     Toggle(NSLocalizedString("SOURCE_LISTS"), isOn: $sourceLists)
                     Toggle(NSLocalizedString("SENSITIVE_SETTINGS"), isOn: $sensitiveSettings)
                 } header: {
-                    Text(NSLocalizedString("SETTINGS"))
+                    MDSettingsHeader(title: "SETTINGS")
                 }
             }
             .navigationTitle(NSLocalizedString("CREATE_BACKUP"))

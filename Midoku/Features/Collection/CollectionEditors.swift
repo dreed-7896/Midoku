@@ -102,7 +102,7 @@ struct MCEntryEditor: View {
                              : "Drag to choose the order of titles and their chapters.")
                     }
                 }
-                Section("Details") {
+                Section(header: MDSettingsHeader(title: "Details")) {
                     TextField("Title", text: $title)
                     TextField("Artist", text: $artist)
                     TextField("Author", text: $author)
@@ -112,7 +112,7 @@ struct MCEntryEditor: View {
                         Toggle("Get new chapters", isOn: $getNewChapters)
                     }
                 }
-                Section("Cover") {
+                Section(header: MDSettingsHeader(title: "Cover")) {
                     if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 100, height: 150)).frame(width: 100, height: 150) }
                     MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                         Task { await useCoverURL() }
@@ -124,7 +124,7 @@ struct MCEntryEditor: View {
                     }.disabled(loadingCoverURL)
                     if restoreCover && entryID != nil { Text("The original source cover will be restored when you save.").font(.mdCaption).foregroundStyle(.secondary) }
                 }
-                Section("Categories") {
+                Section(header: MDSettingsHeader(title: "Categories")) {
                     ForEach(store.snapshot.categories) { item in
                         Toggle(item.name, isOn: Binding(get: { categories.contains(item.id) }, set: { if $0 { categories.insert(item.id) } else { categories.remove(item.id) } }))
                     }
@@ -342,7 +342,7 @@ struct MCCategoriesPage: View {
     @State private var renamedTitle = ""
     var body: some View {
         Form {
-            Section("Categories") {
+            Section(header: MDSettingsHeader(title: "Categories")) {
                 ForEach(store.snapshot.categories) { category in
                     HStack {
                         Text(category.name)
@@ -416,7 +416,7 @@ struct MCAddSourceView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Details") {
+                Section(header: MDSettingsHeader(title: "Details")) {
                     TextField("Title", text: $title)
                     TextField("Artist", text: $artist)
                     TextField("Author", text: $author)
@@ -424,14 +424,14 @@ struct MCAddSourceView: View {
                     Picker("Reading status", selection: $status) { ForEach(MCPersonalStatus.allCases) { Text($0.title).tag($0) } }
                     Toggle("Get new chapters", isOn: $follow)
                 }
-                Section("Cover") {
+                Section(header: MDSettingsHeader(title: "Cover")) {
                     if let cover { MCCustomCoverImage(cover: cover, size: CGSize(width: 94, height: 140)).frame(width: 94, height: 140) }
                     MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                         Task { await useCoverURL() }
                     }
                     Text("Use an image URL so the cover can reload after clearing the cache.").font(.mdCaption).foregroundStyle(.secondary)
                 }
-                Section("Categories") {
+                Section(header: MDSettingsHeader(title: "Categories")) {
                     ForEach(store.snapshot.categories) { item in
                         Toggle(item.name, isOn: Binding(get: { categories.contains(item.id) }, set: { if $0 { categories.insert(item.id) } else { categories.remove(item.id) } }))
                     }
@@ -531,7 +531,7 @@ struct MCBatchChapterEditor: View {
                     Toggle("Set volume", isOn: $setsVolume)
                     if setsVolume { TextField("Volume (empty restores source)", text: $volume) }
                 }
-                Section("Preview") {
+                Section(header: MDSettingsHeader(title: "Preview")) {
                     if let edit {
                         let results = store.library.batchResults(entryID: entryID, slotIDs: Array(slotIDs.prefix(60)), edit: edit)
                         ForEach(results, id: \.slotID) { result in

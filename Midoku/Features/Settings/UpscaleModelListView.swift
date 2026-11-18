@@ -20,7 +20,7 @@ struct UpscaleModelListView: View {
 
     var body: some View {
         List {
-            Section(NSLocalizedString("ENABLED_MODEL")) {
+            Section(header: MDSettingsHeader(title: "ENABLED_MODEL")) {
                 Button {
                     enabledModel = nil
                     ModelManager.shared.setEnabledModel(fileName: nil)
@@ -69,7 +69,7 @@ struct UpscaleModelListView: View {
                             modelItem(model: model, installed: false)
                         }
                     } header: {
-                        Text(NSLocalizedString("AVAILABLE_MODELS"))
+                        MDSettingsHeader(title: "AVAILABLE_MODELS")
                     }
                 } else if failedToLoad {
                     Section {
