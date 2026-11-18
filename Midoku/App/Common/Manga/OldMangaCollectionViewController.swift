@@ -230,7 +230,7 @@ extension OldMangaCollectionViewController {
             let parameters = UIPreviewParameters()
             let padding: CGFloat = 8
             let rect = cell.bounds.insetBy(dx: -padding, dy: -padding)
-            parameters.visiblePath = UIBezierPath(roundedRect: rect, cornerRadius: 12)
+            parameters.visiblePath = UIBezierPath(roundedRect: rect, cornerRadius: 0)
 
             return UITargetedPreview(view: cell.contentView, parameters: parameters)
         } else if cell is MangaGridCell {

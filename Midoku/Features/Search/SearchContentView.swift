@@ -39,6 +39,10 @@ struct SearchContentView: View {
     }
 
     var body: some View {
+        midokuBody.font(.mdBody)
+    }
+
+    @ViewBuilder private var midokuBody: some View {
         Group {
             if searchText.isEmpty && viewModel.history.isEmpty && viewModel.pinned.isEmpty {
                 UnavailableView(
@@ -174,7 +178,7 @@ struct SearchContentView: View {
             }
         } header: {
             Text("Pinned")
-                .font(.body)
+                .font(.mdBody)
                 .textCase(nil)
         }
     }
@@ -185,11 +189,11 @@ struct SearchContentView: View {
             if pinned { viewModel.unpin(term) } else { viewModel.pin(term) }
         } label: {
             Label(pinned ? "Unpin “\(term)”" : "Pin “\(term)”", systemImage: pinned ? "pin.slash" : "pin")
-                .font(.subheadline.weight(.medium))
+                .font(.mdSubheadline.weight(.medium))
                 .lineLimit(1)
         }
         .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
+        .buttonBorderShape(.roundedRectangle(radius: 0))
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
         .padding(.vertical, 6)
@@ -211,7 +215,7 @@ struct SearchContentView: View {
                     viewModel.clearHistory()
                 }
             }
-            .font(.body)
+            .font(.mdBody)
             .textCase(nil)
         }
     }
@@ -257,7 +261,7 @@ struct SearchContentView: View {
                             openResult(searchResult)
                         }
                     }
-                    .font(.body)
+                    .font(.mdBody)
                     .textCase(nil)
                 }
             }

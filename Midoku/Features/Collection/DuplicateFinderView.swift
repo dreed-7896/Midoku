@@ -40,7 +40,7 @@ struct MCDuplicateFinderView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
-                        .font(.subheadline.weight(.medium))
+                        .font(.mdSubheadline.weight(.medium))
                     }
                 }
             }
@@ -66,16 +66,16 @@ struct MCDuplicateFinderView: View {
 
     private func row(_ entry: MCPersonalEntry) -> some View {
         HStack(spacing: 12) {
-            MCEntryCover(entry: entry).frame(width: 40, height: 60).clipShape(RoundedRectangle(cornerRadius: 5))
+            MCEntryCover(entry: entry).frame(width: 40, height: 60).clipShape(RoundedRectangle(cornerRadius: 0))
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.library.title(entry)).font(.body.weight(.medium)).lineLimit(2)
+                Text(store.library.title(entry)).font(.mdBody.weight(.medium)).lineLimit(2)
                 if let path = store.library.parentPath(of: entry) {
-                    Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(path).font(.mdCaption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 let sources = entry.links.compactMap { store.library.listing($0.listingID)?.identity.connectionID }
                     .map(store.sourceName)
                 Text("\(store.chapterCount(entryID: entry.id)) chapters · \(sources.isEmpty ? "No source" : sources.joined(separator: ", "))")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.mdCaption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)

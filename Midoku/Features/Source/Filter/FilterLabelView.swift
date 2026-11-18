@@ -51,23 +51,23 @@ struct FilterLabelView: View {
         .lineLimit(1)
         .padding(.horizontal, 9)
         .padding(.vertical, hasBadge ? 6 : 8)
-        .font(.caption.weight(.medium))
+        .font(.mdCaption.weight(.medium))
 
         if #available(iOS 26.0, *) {
             label
                 .glassEffect(
                     highlighted ? .regular.tint(.accentColor.opacity(highlighted && colorScheme == .light ? 0.1 : 1)) : .regular,
-                    in: .capsule
+                    in: .rect
                 )
         } else {
             label
                 .background(
-                    RoundedRectangle(cornerRadius: 100) // enough to make it fully rounded
+                    RoundedRectangle(cornerRadius: 0) // enough to make it fully rounded
                         .foregroundColor(
                             highlighted ? .accentColor : .init(uiColor: .secondarySystemFill)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 100)
+                            RoundedRectangle(cornerRadius: 0)
                                 .stroke(Color(uiColor: .tertiarySystemFill), style: .init(lineWidth: 1))
                         )
                         .opacity(highlighted && colorScheme == .light ? 0.1 : 1)

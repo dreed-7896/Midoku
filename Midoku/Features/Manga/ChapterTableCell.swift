@@ -47,14 +47,14 @@ struct ChapterTableCell: View {
                     width: 40,
                     height: 56
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 8 / 3) {
                 let title = chapter.formattedTitle(forceMode: displayMode)
                 Text(title)
                     .foregroundStyle(locked || read ? .secondary : .primary)
-                    .font(.system(size: 16))
+                    .font(.mdSystem(size: 16))
                     .lineLimit(1)
                 if let subtitle = chapter.formattedSubtitle(
                     page: page,
@@ -64,7 +64,7 @@ struct ChapterTableCell: View {
                 ) {
                     Text(subtitle)
                         .foregroundStyle(.secondary)
-                        .font(.system(size: 14))
+                        .font(.mdSystem(size: 14))
                         .lineLimit(1)
                 }
             }

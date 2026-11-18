@@ -35,9 +35,9 @@ struct MangaCoverView: View {
             bookmarkView,
             alignment: .topTrailing
         )
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
         .overlay(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: 0)
                 .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
         )
     }

@@ -70,7 +70,7 @@ struct MCChapterSplitter: View {
                             }
                         }
                         Text("The last part also gets any pages the source adds later. Each part can be renamed with Edit chapter.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.mdFootnote).foregroundStyle(.secondary)
                     }.padding()
                 }
             }
@@ -85,7 +85,7 @@ struct MCChapterSplitter: View {
             Text(mode == .split
                  ? "Tap the first page of each new part. Tap it again to remove the split."
                  : "Tap pages to leave them out of every part.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.mdFootnote).foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(Array(partRanges.enumerated()), id: \.offset) { index, range in
@@ -93,19 +93,19 @@ struct MCChapterSplitter: View {
                             withAnimation { proxy.scrollTo(range.lowerBound, anchor: .top) }
                         } label: {
                             Text("Part \(index + 1) · \(range.lowerBound == range.upperBound ? "p\(range.lowerBound)" : "p\(range.lowerBound)–\(range.upperBound)")")
-                                .font(.caption.weight(.semibold))
+                                .font(.mdCaption.weight(.semibold))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(partColor(index).opacity(0.25), in: Capsule())
+                                .background(partColor(index).opacity(0.25), in: Rectangle())
                         }.buttonStyle(.plain)
                     }
                     if !starts.isEmpty || !excluded.isEmpty {
                         Button("Clear", systemImage: "arrow.uturn.backward", role: .destructive) { confirmClear = true }
-                            .font(.caption).buttonStyle(.bordered)
+                            .font(.mdCaption).buttonStyle(.bordered)
                     }
                 }
             }
             if !excluded.isEmpty {
-                Text("\(excluded.count) page\(excluded.count == 1 ? "" : "s") excluded").font(.caption).foregroundStyle(.secondary)
+                Text("\(excluded.count) page\(excluded.count == 1 ? "" : "s") excluded").font(.mdCaption).foregroundStyle(.secondary)
             }
         }
     }
@@ -132,17 +132,17 @@ struct MCChapterSplitter: View {
                     MCSplitPageThumbnail(page: pages[page - 1], sourceKey: sourceKey)
                         .opacity(isExcluded ? 0.3 : 1)
                     if isExcluded {
-                        Image(systemName: "xmark.circle.fill").font(.title2)
+                        Image(systemName: "xmark.circle.fill").font(.mdTitle2)
                             .foregroundStyle(.white, .red)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    Text("\(page)").font(.caption2.monospacedDigit().weight(.bold))
+                    Text("\(page)").font(.mdCaption2.monospacedDigit().weight(.bold))
                         .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(.black.opacity(0.65), in: Capsule())
+                        .background(.black.opacity(0.65), in: Rectangle())
                         .foregroundStyle(.white).padding(4)
                 }
                 Text(isStart ? "Part \(part + 1) starts" : "Part \(part + 1)")
-                    .font(.caption2.weight(isStart ? .bold : .regular))
+                    .font(.mdCaption2.weight(isStart ? .bold : .regular))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 3)
@@ -150,8 +150,8 @@ struct MCChapterSplitter: View {
                     .foregroundStyle(isStart ? Color.white : Color.primary)
             }
             .background(Color(uiColor: .secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color, lineWidth: isStart ? 3 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
+            .overlay(RoundedRectangle(cornerRadius: 0).stroke(color, lineWidth: isStart ? 3 : 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Page \(page), part \(part + 1)\(isStart ? ", part start" : "")\(isExcluded ? ", excluded" : "")")

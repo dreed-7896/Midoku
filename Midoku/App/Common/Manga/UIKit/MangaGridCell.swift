@@ -59,7 +59,7 @@ class MangaGridCell: UICollectionViewCell {
         let shadowOverlayView = UIView()
         shadowOverlayView.alpha = 0
         shadowOverlayView.backgroundColor = UIColor(white: 0, alpha: 0.5)
-        shadowOverlayView.layer.cornerRadius = layer.cornerRadius
+        shadowOverlayView.layer.cornerRadius = 0
         shadowOverlayView.translatesAutoresizingMaskIntoConstraints = false
         return shadowOverlayView
     }()
@@ -80,7 +80,7 @@ class MangaGridCell: UICollectionViewCell {
 
     func configure() {
         contentView.clipsToBounds = true
-        contentView.layer.cornerRadius = 5
+        contentView.layer.cornerRadius = 0
         contentView.layer.borderWidth = 1
         contentView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
 
@@ -94,11 +94,11 @@ class MangaGridCell: UICollectionViewCell {
             UIColor(white: 0, alpha: 0).cgColor,
             UIColor(white: 0, alpha: 0.85).cgColor
         ]
-        gradient.cornerRadius = layer.cornerRadius
+        gradient.cornerRadius = 0
         gradient.needsDisplayOnBoundsChange = true
 
         overlayView.layer.insertSublayer(gradient, at: 0)
-        overlayView.layer.cornerRadius = layer.cornerRadius
+        overlayView.layer.cornerRadius = 0
         contentView.addSubview(overlayView)
 
         titleLabel.textColor = .white
@@ -122,7 +122,7 @@ class MangaGridCell: UICollectionViewCell {
 
         highlightView.alpha = 0
         highlightView.backgroundColor = UIColor(white: 0, alpha: 0.5)
-        highlightView.layer.cornerRadius = layer.cornerRadius
+        highlightView.layer.cornerRadius = 0
         contentView.addSubview(highlightView)
 
         selectionView.isHidden = true

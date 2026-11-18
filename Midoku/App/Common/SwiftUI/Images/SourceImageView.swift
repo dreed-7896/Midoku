@@ -68,7 +68,7 @@ struct SourceImageView: View {
     private var remoteImage: some View {
         Group {
             if let placeholderSymbol {
-                Image(systemName: placeholderSymbol).font(.title3).foregroundStyle(.tertiary)
+                Image(systemName: placeholderSymbol).font(.mdTitle3).foregroundStyle(.tertiary)
                     .frame(width: width, height: height).background(Color(uiColor: .secondarySystemBackground))
             } else if ["MangaPlaceholder", "MidokuCoverPlaceholder", "MidokuChapterPlaceholder"].contains(placeholder) {
                 MCArtworkPlaceholder().frame(width: width, height: height)

@@ -17,12 +17,12 @@ struct TextFieldWrapper<Content: View>: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 10)
+        .background(RoundedRectangle(cornerRadius: 0)
             .fill(Color(uiColor: .secondarySystemBackground)))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
         .overlay {
             if hasError {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 0)
                     .strokeBorder(Color.red, lineWidth: 1)
             }
         }

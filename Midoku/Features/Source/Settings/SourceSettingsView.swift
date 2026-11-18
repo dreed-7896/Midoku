@@ -35,7 +35,7 @@ struct SourceSettingsView: View {
             }
             .listRowBackground(
                 Color(uiColor: .secondarySystemGroupedBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
             )
 
             // source settings

@@ -120,7 +120,7 @@ struct FilterHeaderView: View {
                 Image(systemName: "line.3.horizontal.decrease")
                     .opacity(0.6)
                     .foregroundColor(.primary)
-                    .font(.footnote.weight(.medium))
+                    .font(.mdFootnote.weight(.medium))
 
                 if !enabledFilters.isEmpty {
                     FilterBadgeView(count: filterCount)
@@ -129,13 +129,13 @@ struct FilterHeaderView: View {
             .frame(height: 18)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .font(.caption.weight(.medium))
+            .font(.mdCaption.weight(.medium))
 
             if #available(iOS 26.0, *) {
                 if enabledFilters.isEmpty {
                     label.glassEffect(.regular, in: .circle)
                 } else {
-                    label.glassEffect(.regular, in: .capsule)
+                    label.glassEffect(.regular, in: .rect)
                 }
             } else {
                 label
@@ -145,7 +145,7 @@ struct FilterHeaderView: View {
                                 Circle()
                             } else {
                                 // allow space for the badge
-                                RoundedRectangle(cornerRadius: 100)
+                                RoundedRectangle(cornerRadius: 0)
                             }
                         }
                             .foregroundColor(.init(uiColor: .secondarySystemFill))
@@ -155,7 +155,7 @@ struct FilterHeaderView: View {
                             Circle()
                                 .stroke(Color(uiColor: .tertiarySystemFill), style: .init(lineWidth: 1))
                         } else {
-                            RoundedRectangle(cornerRadius: 100)
+                            RoundedRectangle(cornerRadius: 0)
                                 .stroke(Color(uiColor: .tertiarySystemFill), style: .init(lineWidth: 1))
                         }
                     }

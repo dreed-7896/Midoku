@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StatsGridView: View {
-    static let cornerRadius: CGFloat = 12
+    static let cornerRadius: CGFloat = 0
     static let spacing: CGFloat = 8
 
     let chartLabel: String
@@ -105,10 +105,10 @@ struct StatsGridView: View {
                                 let total = selectedChartTotal
                                 Text(total, format: .number.notation(.compactName))
                                     .contentTransition(.numericText())
-                                    .font(.system(size: 64).weight(.bold))
+                                    .font(.mdSystem(size: 64).weight(.bold))
                                     .minimumScaleFactor(0.5)
                                 Text(total == 1 ? chartSingularLabel ?? chartLabel : chartLabel)
-                                    .font(.system(size: 17).weight(.semibold))
+                                    .font(.mdSystem(size: 17).weight(.semibold))
                                     .padding(.bottom, 5)
                             }
                             .frame(width: 120, alignment: .leading)
@@ -273,9 +273,9 @@ struct StatsGridView: View {
             ZStack {
                 VStack {
                     Text(items[index].total, format: .number.notation(.compactName))
-                        .font(.system(size: expanded ? 52 : 36).weight(.bold))
+                        .font(.mdSystem(size: expanded ? 52 : 36).weight(.bold))
                     Text(items[index].total == 1 ? items[index].singularSubtitle ?? items[index].subtitle : items[index].subtitle)
-                        .font(.system(size: expanded ? 18 : 14).weight(expanded ? .medium : .regular))
+                        .font(.mdSystem(size: expanded ? 18 : 14).weight(expanded ? .medium : .regular))
                 }
                 if expanded {
                     VStack {
@@ -283,16 +283,16 @@ struct StatsGridView: View {
                         HStack {
                             VStack {
                                 Text(items[index].thisMonth, format: .number.notation(.compactName))
-                                    .font(.title.weight(.bold))
+                                    .font(.mdTitle.weight(.bold))
                                 Text(NSLocalizedString("THIS_MONTH"))
-                                    .font(.system(size: 14))
+                                    .font(.mdSystem(size: 14))
                             }
                             Spacer()
                             VStack {
                                 Text(items[index].thisYear, format: .number.notation(.compactName))
-                                    .font(.title.weight(.bold))
+                                    .font(.mdTitle.weight(.bold))
                                 Text(NSLocalizedString("THIS_YEAR"))
-                                    .font(.system(size: 14))
+                                    .font(.mdSystem(size: 14))
                             }
                         }
                         .padding()
@@ -331,11 +331,11 @@ struct StatsGridView: View {
                         selectedYear = year
                     }
                 }
-                .font(.callout)
+                .font(.mdCallout)
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 12)
-            .background(RoundedRectangle(cornerRadius: 100).fill(selected ? Color(uiColor: .secondarySystemFill) : .clear))
+            .background(RoundedRectangle(cornerRadius: 0).fill(selected ? Color(uiColor: .secondarySystemFill) : .clear))
             .foregroundStyle(selected ? .primary : .secondary)
         }
     }

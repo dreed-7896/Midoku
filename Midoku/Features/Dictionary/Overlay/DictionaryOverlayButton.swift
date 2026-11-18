@@ -37,7 +37,7 @@ final class DictionaryOverlayButton: UIButton {
     func apply(overlay: TextRecognizer.ParagraphOverlay) {
         overlayText = overlay.text
         frame = overlay.rect
-        layer.cornerRadius = 4
+        layer.cornerRadius = 0
         clipsToBounds = true
         configureLabelsAndHits(for: overlay)
     }

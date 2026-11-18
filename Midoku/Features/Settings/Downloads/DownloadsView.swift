@@ -17,20 +17,20 @@ struct DownloadsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text(NSLocalizedString("TOTAL_DOWNLOADS"))
-                            .font(.headline)
+                            .font(.mdHeadline)
                         Spacer()
                         if viewModel.isLoading {
                             ProgressView()
                         } else {
                             Text(viewModel.totalSize)
-                                .font(.headline)
+                                .font(.mdHeadline)
                                 .foregroundStyle(.primary)
                         }
                     }
 
                     HStack {
                         Text(String(format: NSLocalizedString("%i_SERIES"), viewModel.totalCount))
-                            .font(.subheadline)
+                            .font(.mdSubheadline)
                             .foregroundStyle(.secondary)
                         Spacer()
                         let totalChapters = viewModel.downloadedManga.reduce(0) { $0 + $1.chapterCount }
@@ -42,7 +42,7 @@ struct DownloadsView: View {
                             )
                             .lowercased()
                         )
-                        .font(.subheadline)
+                        .font(.mdSubheadline)
                         .foregroundStyle(.secondary)
                     }
                 }
@@ -134,12 +134,12 @@ private struct DownloadedMangaRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(manga.displayTitle)
-                    .font(.callout)
+                    .font(.mdCallout)
                     .lineLimit(2)
 
                 // Format like chapter subtitles: chapters • size
                 Text(formatMangaSubtitle())
-                    .font(.footnote)
+                    .font(.mdFootnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
@@ -148,7 +148,7 @@ private struct DownloadedMangaRow: View {
                         Image(systemName: "books.vertical.fill")
                             .imageScale(.small)
                         Text(NSLocalizedString("IN_LIBRARY"))
-                            .font(.footnote)
+                            .font(.mdFootnote)
                     }
                     .foregroundStyle(.tint)
                 }

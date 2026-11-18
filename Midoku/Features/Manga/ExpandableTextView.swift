@@ -66,7 +66,7 @@ struct ExpandableTextView: View {
                 .lineLimit(expanded ? nil : 4)
                 .foregroundStyle(.secondary)
                 .foregroundColor(.secondary)
-                .font(.subheadline)
+                .font(.mdSubheadline)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
@@ -119,7 +119,7 @@ struct ExpandableTextView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.tint)
-            .font(.system(size: 12))
+            .font(.mdSystem(size: 12))
             .background(Color(UIColor.systemBackground))
             .background(GeometryReader {
                 Color.clear.preference(

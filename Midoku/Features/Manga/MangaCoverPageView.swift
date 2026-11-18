@@ -131,7 +131,7 @@ struct MangaCoverPageView: View {
         VStack(alignment: .center) {
             Spacer()
             MangaCoverView(source: source, coverImage: coverImage, contentMode: .fit)
-                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 0, style: .continuous))
                 .contextMenu {
                     if let url = URL(string: coverImage) {
                         Button {

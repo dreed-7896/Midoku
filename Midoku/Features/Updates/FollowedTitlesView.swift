@@ -19,16 +19,16 @@ struct MCFollowedTitlesView: View {
                     ForEach(entries) { entry in
                         HStack(spacing: 12) {
                             MCEntryCover(entry: entry).frame(width: 40, height: 60)
-                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                                .clipShape(RoundedRectangle(cornerRadius: 0))
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(store.library.title(entry)).font(.subheadline.weight(.medium))
+                                Text(store.library.title(entry)).font(.mdSubheadline.weight(.medium))
                                 if let path = store.library.parentPath(of: entry) {
-                                    Text(path).font(.caption).foregroundStyle(.secondary)
+                                    Text(path).font(.mdCaption).foregroundStyle(.secondary)
                                 }
                             }
                             Spacer()
                             Button(role: .destructive) { stopFollowing(entry.id) } label: {
-                                Image(systemName: "minus.circle").font(.title3).frame(width: 44, height: 44)
+                                Image(systemName: "minus.circle").font(.mdTitle3).frame(width: 44, height: 44)
                             }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Stop getting new chapters for \(store.library.title(entry))")

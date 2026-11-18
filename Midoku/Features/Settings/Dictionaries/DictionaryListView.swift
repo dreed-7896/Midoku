@@ -109,7 +109,7 @@ struct DictionaryListView: View {
             if dictionaryManager.isImporting {
                 ProgressView(NSLocalizedString("IMPORTING_DICTIONARY"))
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 0))
             }
         }
         .sheet(isPresented: $importing) {
@@ -142,14 +142,14 @@ struct DictionaryListView: View {
         ZStack(alignment: .topTrailing) {
             HStack(alignment: .top, spacing: 16) {
                 Image(systemName: "character.book.closed")
-                    .font(.title)
+                    .font(.mdTitle)
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(NSLocalizedString("ABOUT_DICTIONARIES"))
                         .fontWeight(.medium)
                         .foregroundStyle(.primary)
                     Text(NSLocalizedString("ABOUT_DICTIONARIES_TEXT"))
-                        .font(.callout)
+                        .font(.mdCallout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                     Button {
@@ -158,7 +158,7 @@ struct DictionaryListView: View {
                         Text(NSLocalizedString("LEARN_MORE"))
                             .padding(.vertical, 5)
                             .padding(.horizontal, 11)
-                            .background(Capsule().fill(.tint.opacity(0.1)))
+                            .background(Rectangle().fill(.tint.opacity(0.1)))
                     }
                     .buttonStyle(.borderless)
                     .padding(.top, 4)
@@ -171,7 +171,7 @@ struct DictionaryListView: View {
                 }
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 14).weight(.bold))
+                    .font(.mdSystem(size: 14).weight(.bold))
                     .foregroundStyle(.secondary)
                     .padding(6)
                     .background(Circle().fill(Color(uiColor: .tertiarySystemFill)))

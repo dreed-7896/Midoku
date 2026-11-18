@@ -19,6 +19,14 @@ class NavigationController: UINavigationController {
         interactivePopGestureRecognizer?.isEnabled = true
         if #available(iOS 26.0, *) { interactiveContentPopGestureRecognizer?.isEnabled = true }
     }
+    // Only tab roots use large titles (the web's big page headings); pushed screens keep inline titles.
+    override func pushViewController(_ viewController: UIViewController, animated: Bool) {
+        if !viewControllers.isEmpty, viewController.navigationItem.largeTitleDisplayMode == .automatic {
+            viewController.navigationItem.largeTitleDisplayMode = .never
+        }
+        super.pushViewController(viewController, animated: animated)
+    }
+
     // This is a workaround to fix an iOS bug that occurs when mixing UIKit with SwiftUI,
     // that causes the current TabBarItem title to be lost when navigating inside SwiftUI views.
     // See: https://stackoverflow.com/questions/62662313/uitabbar-containing-swiftui-view

@@ -28,8 +28,8 @@ private struct ReaderPanelGrid: View {
                                 ReaderPanelThumbnail(page: pages[index], temporaryPageStore: temporaryPageStore)
                                     .frame(height: 150).clipped()
                                     .background(Color(uiColor: .secondarySystemBackground))
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                Text("\(index + 1)").font(.caption).foregroundStyle(.secondary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 0))
+                                Text("\(index + 1)").font(.mdCaption).foregroundStyle(.secondary)
                             }
                         }.buttonStyle(.plain)
                     }
@@ -446,6 +446,7 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        (tabBarController as? TabBarController)?.readerWillAppear(self)
         hideAppTabBar()
     }
 
@@ -488,6 +489,7 @@ class ReaderViewController: BaseObservingViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        (tabBarController as? TabBarController)?.readerDidDisappear(self)
         popGestureDelegate.restore()
         InterfaceOrientationCoordinator.shared.unregister(orientationsWithID: orientationRegistrationID)
         if isNavigationScreen, let gesture = barDismissNavigationBarTapGesture {

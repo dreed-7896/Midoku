@@ -174,7 +174,7 @@ struct MangaDetailsHeaderView: View {
                         .id(manga.cover ?? "")
                     }
                     .buttonStyle(DarkOverlayButtonStyle())
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
                     .matchedTransitionSourcePlease(id: manga.identifier, in: transitionNamespace)
                 }
 
@@ -190,7 +190,7 @@ struct MangaDetailsHeaderView: View {
                     } label: {
                         // The full title shows; the header grows to fit it.
                         Text(manga.title)
-                            .font(.system(.title2).weight(.semibold))
+                            .font(.mdSystem(.title2).weight(.semibold))
                             .foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
                             .contentTransitionDisabledPlease()
@@ -209,7 +209,7 @@ struct MangaDetailsHeaderView: View {
                         let label = Text(value)
                             .lineLimit(1)
                             .foregroundStyle(.secondary)
-                            .font(.callout)
+                            .font(.mdCallout)
                             .padding(.bottom, 6)
                             .textSelection(.enabled)
                             .transition(.opacity)
@@ -259,11 +259,11 @@ struct MangaDetailsHeaderView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 14, weight: .medium))
+                .font(.mdSystem(size: 14, weight: .medium))
                 .padding(11)
                 .foregroundStyle(.white)
                 .background(Color.accentColor)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
                 .allowsHitTesting(!readButtonDisabled)
 
                 Button {
@@ -278,12 +278,12 @@ struct MangaDetailsHeaderView: View {
                 .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                     showLibraryEditor()
                 })
-                .font(.system(size: 14, weight: .medium))
+                .font(.mdSystem(size: 14, weight: .medium))
                 .padding(10)
                 .foregroundStyle(Color.accentColor)
                 .background(Color(UIColor.secondarySystemFill))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.accentColor.opacity(0.28)))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 0, style: .continuous).stroke(Color.accentColor.opacity(0.28)))
+                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
                 .allowsHitTesting(isSaved || source != nil)
             }
             .padding(.bottom, 20)
@@ -604,11 +604,11 @@ struct LabelView: View {
         Text(text)
             .lineLimit(1)
             .foregroundStyle(.secondary)
-            .font(.caption2)
+            .font(.mdCaption2)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(background)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
     }
 }
 
@@ -619,12 +619,12 @@ private struct TagView: View {
         Text(text)
             .lineLimit(1)
             .foregroundStyle(.secondary)
-            .font(.footnote)
+            .font(.mdFootnote)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .textSelection(.enabled)
             .background(Color(UIColor.tertiarySystemFill))
-            .clipShape(RoundedRectangle(cornerRadius: 100))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
     }
 }
 
@@ -644,10 +644,10 @@ private struct MangaActionButtonStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(selected ? Color.white : Color.accentColor)
             .opacity(configuration.isPressed ? 0.4 : 1)
-            .font(.system(size: 16, weight: .semibold))
+            .font(.mdSystem(size: 16, weight: .semibold))
             .frame(width: 40, height: 32)
             .background(selected ? Color.accentColor : Color(UIColor.secondarySystemFill))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
     }
 }
 

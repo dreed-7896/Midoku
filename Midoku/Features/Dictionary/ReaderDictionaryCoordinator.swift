@@ -273,7 +273,7 @@ final class ReaderDictionaryCoordinator {
 
         let path = UIBezierPath()
         for rect in rects {
-            path.append(UIBezierPath(roundedRect: rect, cornerRadius: 2))
+            path.append(UIBezierPath(roundedRect: rect, cornerRadius: 0))
         }
         let shapeLayer = CAShapeLayer()
         shapeLayer.path = path.cgPath
@@ -302,7 +302,7 @@ final class ReaderDictionaryCoordinator {
 
         let path = UIBezierPath()
         for rect in rects {
-            path.append(UIBezierPath(roundedRect: rect, cornerRadius: 2))
+            path.append(UIBezierPath(roundedRect: rect, cornerRadius: 0))
         }
 
         let highlight = UIView(frame: owner.view.bounds)

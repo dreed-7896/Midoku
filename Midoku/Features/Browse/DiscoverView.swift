@@ -224,6 +224,10 @@ struct MCDiscoverView: View {
     }
 
     var body: some View {
+        midokuBody.font(.mdBody)
+    }
+
+    @ViewBuilder private var midokuBody: some View {
         let installed = installedSources
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
@@ -269,19 +273,19 @@ struct MCDiscoverView: View {
     private func extensionStrip(_ installed: [AidokuRunner.Source]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Extensions").font(.title3.bold())
+                Text("Extensions").font(.mdTitle3.bold())
                 Spacer()
                 Button(action: openExtensions) {
                     HStack(spacing: 6) {
                         if extensionUpdates > 0 {
                             Text("\(extensionUpdates)")
-                                .font(.caption2.bold()).monospacedDigit().foregroundStyle(.white)
-                                .padding(.horizontal, 6).padding(.vertical, 2).background(.red, in: Capsule())
+                                .font(.mdCaption2.bold()).monospacedDigit().foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 2).background(.red, in: Rectangle())
                         }
                         Text("Manage")
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        Image(systemName: "chevron.right").font(.mdCaption.weight(.semibold))
                     }
-                    .font(.subheadline.weight(.medium))
+                    .font(.mdSubheadline.weight(.medium))
                 }
                 .accessibilityLabel(extensionUpdates > 0 ? "Manage extensions, \(extensionUpdates) updates available" : "Manage extensions")
             }
@@ -294,7 +298,7 @@ struct MCDiscoverView: View {
                             VStack(spacing: 6) {
                                 SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 58)
                                     .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-                                Text(source.name).font(.caption).lineLimit(1).foregroundStyle(.primary)
+                                Text(source.name).font(.mdCaption).lineLimit(1).foregroundStyle(.primary)
                             }
                             .frame(width: 70)
                             .contentShape(Rectangle())
@@ -333,18 +337,18 @@ struct MCDiscoverView: View {
     private var artistPromptTile: some View {
         Button(action: editArtists) {
             HStack(spacing: 14) {
-                Image(systemName: "paintbrush.pointed.fill").font(.title2).foregroundStyle(Color.accentColor)
+                Image(systemName: "paintbrush.pointed.fill").font(.mdTitle2).foregroundStyle(Color.accentColor)
                     .frame(width: 44, height: 44).background(Color.accentColor.opacity(0.12), in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Follow artists").font(.headline).foregroundStyle(.primary)
-                    Text("See the newest releases from artists you pick, across your extensions.").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Follow artists").font(.mdHeadline).foregroundStyle(.primary)
+                    Text("See the newest releases from artists you pick, across your extensions.").font(.mdSubheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.mdSubheadline.weight(.semibold)).foregroundStyle(.tertiary)
             }
             .padding(16)
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
-            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 0))
+            .contentShape(RoundedRectangle(cornerRadius: 0))
         }
         .buttonStyle(.plain)
         .padding(.horizontal)
@@ -353,14 +357,14 @@ struct MCDiscoverView: View {
     private var addShelfTile: some View {
         Button(action: openShelves) {
             Label("Add or reorder shelves", systemImage: "plus")
-                .font(.subheadline.weight(.semibold))
+                .font(.mdSubheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 0)
                         .strokeBorder(Color.accentColor.opacity(0.45), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .contentShape(RoundedRectangle(cornerRadius: 0))
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color.accentColor)
@@ -375,17 +379,17 @@ struct MCDiscoverView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 8) {
                                 if feed.isSearch {
-                                    Image(systemName: "magnifyingglass").font(.subheadline.weight(.bold)).foregroundStyle(.secondary)
+                                    Image(systemName: "magnifyingglass").font(.mdSubheadline.weight(.bold)).foregroundStyle(.secondary)
                                 }
-                                Text(feed.listingName).font(.title3.bold()).foregroundStyle(.primary).lineLimit(1)
+                                Text(feed.listingName).font(.mdTitle3.bold()).foregroundStyle(.primary).lineLimit(1)
                                 if let count = model.newKeys[feed.id]?.count, count > 0 {
-                                    Text("\(count) new").font(.caption.bold()).foregroundStyle(.white)
-                                        .padding(.horizontal, 7).padding(.vertical, 2).background(Color.accentColor, in: Capsule())
+                                    Text("\(count) new").font(.mdCaption.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 7).padding(.vertical, 2).background(Color.accentColor, in: Rectangle())
                                 }
                             }
-                            Text(feed.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                            Text(feed.subtitle).font(.mdSubheadline).foregroundStyle(.secondary).lineLimit(1)
                         }
-                        Image(systemName: "chevron.right").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
+                        Image(systemName: "chevron.right").font(.mdSubheadline.weight(.semibold)).foregroundStyle(.tertiary)
                     }
                     .contentShape(Rectangle())
                 }
@@ -400,7 +404,7 @@ struct MCDiscoverView: View {
                     Button("Move down", systemImage: "arrow.down") { model.move(feed, by: 1) }.disabled(index == model.feeds.count - 1)
                     Button("Remove shelf", systemImage: "trash", role: .destructive) { model.remove(feed) }
                 } label: {
-                    Image(systemName: "ellipsis").font(.body.weight(.semibold)).foregroundStyle(.secondary)
+                    Image(systemName: "ellipsis").font(.mdBody.weight(.semibold)).foregroundStyle(.secondary)
                         .frame(width: 36, height: 36).background(Color(uiColor: .secondarySystemBackground), in: Circle())
                 }
                 .accessibilityLabel("Shelf options")
@@ -426,18 +430,18 @@ struct MCDiscoverView: View {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(error).font(.subheadline).foregroundStyle(.secondary)
-                        Button("Try again") { Task { await model.load(feed, force: true) } }.font(.subheadline.weight(.semibold))
+                        Text(error).font(.mdSubheadline).foregroundStyle(.secondary)
+                        Button("Try again") { Task { await model.load(feed, force: true) } }.font(.mdSubheadline.weight(.semibold))
                     }
                     Spacer(minLength: 0)
                 }
                 .padding()
-                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 0))
                 .padding(.horizontal)
             } else if model.loading.contains(feed.id) || model.entries[feed.id] == nil {
                 loadingRow(featured: featured)
             } else {
-                Text("Nothing in this tab yet.").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
+                Text("Nothing in this tab yet.").font(.mdSubheadline).foregroundStyle(.secondary).padding(.horizontal)
             }
         }
     }
@@ -447,11 +451,11 @@ struct MCDiscoverView: View {
             HStack(spacing: featured ? 14 : 12) {
                 ForEach(0..<4, id: \.self) { _ in
                     VStack(alignment: .leading, spacing: 8) {
-                        RoundedRectangle(cornerRadius: featured ? 18 : 12)
+                        RoundedRectangle(cornerRadius: 0)
                             .fill(Color(uiColor: .secondarySystemBackground))
                             .frame(width: featured ? 320 : 118, height: featured ? 250 : 177)
                         if !featured {
-                            RoundedRectangle(cornerRadius: 4).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 90, height: 12)
+                            RoundedRectangle(cornerRadius: 0).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 90, height: 12)
                         }
                     }
                 }
@@ -463,9 +467,9 @@ struct MCDiscoverView: View {
 
     private func coverCard(_ manga: AidokuRunner.Manga, isNew: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            cover(manga, width: 118, height: 177).clipShape(RoundedRectangle(cornerRadius: 12))
+            cover(manga, width: 118, height: 177).clipShape(RoundedRectangle(cornerRadius: 0))
                 .overlay(alignment: .topLeading) { if isNew { MCDiscoverNewBadge().padding(6) } }
-            Text(manga.title).font(.footnote.weight(.semibold)).lineLimit(3).frame(width: 118, alignment: .leading)
+            Text(manga.title).font(.mdFootnote.weight(.semibold)).lineLimit(3).frame(width: 118, alignment: .leading)
         }.frame(width: 118).accessibilityElement(children: .ignore).accessibilityLabel(isNew ? "New: \(manga.title)" : manga.title)
     }
 
@@ -476,11 +480,11 @@ struct MCDiscoverView: View {
 
     private func promptCard(symbol: String, title: String, message: String, button: String, action: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(Color.accentColor)
-            Text(title).font(.title2.bold())
-            Text(message).font(.subheadline).foregroundStyle(.secondary)
+            Image(systemName: symbol).font(.mdSystem(size: 34)).foregroundStyle(Color.accentColor)
+            Text(title).font(.mdTitle2.bold())
+            Text(message).font(.mdSubheadline).foregroundStyle(.secondary)
             Button(action: action) {
-                Text(button).font(.headline).frame(maxWidth: .infinity)
+                Text(button).font(.mdHeadline).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -488,16 +492,16 @@ struct MCDiscoverView: View {
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 24))
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 0))
         .padding(.horizontal)
     }
 }
 
 private struct MCDiscoverNewBadge: View {
     var body: some View {
-        Text("NEW").font(.caption2.weight(.heavy)).foregroundStyle(.white)
+        Text("NEW").font(.mdCaption2.weight(.heavy)).foregroundStyle(.white)
             .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(Color.accentColor, in: Capsule())
+            .background(Color.accentColor, in: Rectangle())
             .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
     }
 }
@@ -537,7 +541,7 @@ private struct MCDiscoverHero: View {
         let current = items.firstIndex { $0.key == position } ?? 0
         return HStack(spacing: 6) {
             ForEach(items.indices, id: \.self) { index in
-                Capsule()
+                Rectangle()
                     .fill(index == current ? Color.accentColor : Color.secondary.opacity(0.3))
                     .frame(width: index == current ? 18 : 6, height: 6)
             }
@@ -552,23 +556,23 @@ private struct MCDiscoverHero: View {
         return Group {
             HStack(alignment: .bottom, spacing: 16) {
                 image(manga, width: 128, height: 192)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.15), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
+                    .overlay(RoundedRectangle(cornerRadius: 0).strokeBorder(.white.opacity(0.15), lineWidth: 1))
                     .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
-                        Text("#\(rank)").font(.caption.weight(.heavy)).monospacedDigit()
-                        Text(label).font(.caption.weight(.semibold)).lineLimit(1).opacity(0.8)
+                        Text("#\(rank)").font(.mdCaption.weight(.heavy)).monospacedDigit()
+                        Text(label).font(.mdCaption.weight(.semibold)).lineLimit(1).opacity(0.8)
                         if newKeys.contains(manga.key) { MCDiscoverNewBadge() }
                     }
-                    Text(manga.title).font(.title3.bold()).lineLimit(4).minimumScaleFactor(0.85)
-                    if let author { Text(author).font(.subheadline).lineLimit(1).opacity(0.8) }
+                    Text(manga.title).font(.mdTitle3.bold()).lineLimit(4).minimumScaleFactor(0.85)
+                    if let author { Text(author).font(.mdSubheadline).lineLimit(1).opacity(0.8) }
                     if !tags.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(tags, id: \.self) { tag in
-                                Text(tag).font(.caption2.weight(.semibold)).lineLimit(1)
+                                Text(tag).font(.mdCaption2.weight(.semibold)).lineLimit(1)
                                     .padding(.horizontal, 7).padding(.vertical, 3)
-                                    .background(.white.opacity(0.18), in: Capsule())
+                                    .background(.white.opacity(0.18), in: Rectangle())
                             }
                         }
                         .padding(.top, 2)
@@ -588,8 +592,8 @@ private struct MCDiscoverHero: View {
                 .overlay(LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.75)], startPoint: .top, endPoint: .bottom))
         }
         .background(Color(uiColor: .secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .contentShape(RoundedRectangle(cornerRadius: 22))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
+        .contentShape(RoundedRectangle(cornerRadius: 0))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Number \(rank), \(manga.title)\(author.map { ", by \($0)" } ?? "")")
     }
@@ -645,8 +649,8 @@ struct MCDiscoverConfiguration: View {
                             Image(systemName: feed.isArtists ? "paintbrush.pointed" : feed.isSearch ? "magnifyingglass" : "rectangle.stack")
                                 .foregroundStyle(.secondary).frame(width: 22)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(feed.listingName).font(.headline)
-                                Text(feed.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                                Text(feed.listingName).font(.mdHeadline)
+                                Text(feed.subtitle).font(.mdSubheadline).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -677,7 +681,7 @@ struct MCDiscoverConfiguration: View {
                                 case .artists: EmptyView()
                             }
                         }
-                        if let error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                        if let error { Text(error).font(.mdFootnote).foregroundStyle(.secondary) }
                     }
                 } header: { Text("Add a shelf") } footer: {
                     if kind == .search {
@@ -700,7 +704,7 @@ struct MCDiscoverConfiguration: View {
 
     @ViewBuilder private var tabFields: some View {
         if listings.isEmpty {
-            Text("This extension does not provide discovery tabs. Try a search shelf.").font(.footnote).foregroundStyle(.secondary)
+            Text("This extension does not provide discovery tabs. Try a search shelf.").font(.mdFootnote).foregroundStyle(.secondary)
         } else {
             Picker("Tab", selection: $listingID) { ForEach(listings, id: \.id) { Text($0.name).tag($0.id) } }
             Button("Add shelf", systemImage: "plus.circle.fill") {
@@ -722,7 +726,7 @@ struct MCDiscoverConfiguration: View {
                     Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
                     Spacer()
                     Text(enabledFilters.isEmpty ? "None" : "\(enabledFilters.count) applied").foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right").font(.mdCaption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
             }
             .foregroundStyle(.primary)

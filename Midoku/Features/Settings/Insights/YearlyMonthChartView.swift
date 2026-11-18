@@ -73,7 +73,7 @@ struct YearlyMonthChartView: View {
                             0
                         }
                         Text(month.axisLabel)
-                            .font(.caption2.weight(.semibold))
+                            .font(.mdCaption2.weight(.semibold))
                             .offset(x: xOffset, y: 2)
                             .fixedSize()
                     }
@@ -88,7 +88,7 @@ struct YearlyMonthChartView: View {
                 AxisValueLabel {
                     if let intValue = value.as(Int.self) {
                         Text(intValue, format: .number)
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.mdSystem(size: 9, weight: .medium))
                     }
                 }
             }

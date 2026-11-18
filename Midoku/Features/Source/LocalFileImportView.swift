@@ -178,7 +178,7 @@ extension LocalFileImportView.ContentView {
         VStack(spacing: 26) {
             VStack(spacing: 8) {
                 Text(NSLocalizedString("LOCAL_FILE_IMPORT"))
-                    .font(.title2)
+                    .font(.mdTitle2)
                     .fontWeight(.semibold)
                 Text(NSLocalizedString("LOCAL_FILE_IMPORT_TEXT"))
                     .foregroundStyle(.secondary)
@@ -246,7 +246,7 @@ extension LocalFileImportView.ContentView {
                 }())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .font(.subheadline)
+                .font(.mdSubheadline)
             }
             .padding(.horizontal)
             .padding(.vertical, interItemSpacing)
@@ -370,9 +370,9 @@ extension LocalFileImportView.ContentView {
             .aspectRatio(contentMode: .fill)
             .frame(width: imageHeight * 2/3, height: imageHeight)
             .overlay { Color.black.opacity(overlayOpacity) }
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 0)
                     .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
             )
             .scaleEffect(scale)
@@ -381,7 +381,7 @@ extension LocalFileImportView.ContentView {
 
     func fieldTextView(_ text: String, error: Bool = false) -> some View {
         Text(text)
-            .font(.footnote)
+            .font(.mdFootnote)
             .foregroundStyle(error ? .red : Color.secondary)
             .padding(.top, 2)
             .padding(.horizontal, 6)
@@ -640,13 +640,13 @@ extension LocalFileImportView.ContentView {
                             height: 80
                         )
                     } else {
-                        RoundedRectangle(cornerRadius: 5)
+                        RoundedRectangle(cornerRadius: 0)
                             .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
                             .aspectRatio(2/3, contentMode: .fit)
                             .frame(height: 80)
                             .overlay {
                                 Image(systemName: "plus")
-                                    .font(.system(size: UIFont.labelFontSize, weight: .medium, design: .rounded))
+                                    .font(.mdSystem(size: UIFont.labelFontSize, weight: .medium, design: .rounded))
                                     .foregroundStyle(.secondary)
                             }
                             .foregroundStyle(.secondary)
@@ -665,9 +665,9 @@ extension LocalFileImportView.ContentView {
                     }
                 }
                 .padding()
-                .contentShape(RoundedRectangle(cornerRadius: 10))
+                .contentShape(RoundedRectangle(cornerRadius: 0))
             }
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(uiColor: .secondarySystemGroupedBackground)))
+            .background(RoundedRectangle(cornerRadius: 0).fill(Color(uiColor: .secondarySystemGroupedBackground)))
             .buttonStyle(HighlightButtonStyle())
             .foregroundStyle(.primary)
             .padding(.horizontal)
@@ -679,7 +679,7 @@ extension LocalFileImportView.ContentView {
             configuration.label
                 .background {
                     if configuration.isPressed {
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: 0)
                             .fill(Color(uiColor: .systemGray4))
                     }
                 }

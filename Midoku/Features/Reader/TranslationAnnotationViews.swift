@@ -9,7 +9,7 @@ final class TranslationAnnotationView: UIView {
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityTraits = .button
-        layer.cornerRadius = 10
+        layer.cornerRadius = 0
         layer.cornerCurve = .continuous
         layer.borderColor = UIColor.systemBlue.cgColor
         layer.shadowColor = UIColor.black.cgColor
@@ -19,7 +19,7 @@ final class TranslationAnnotationView: UIView {
         numberLabel.backgroundColor = .systemBlue
         numberLabel.font = .boldSystemFont(ofSize: 11)
         numberLabel.textAlignment = .center
-        numberLabel.layer.cornerRadius = 10
+        numberLabel.layer.cornerRadius = 0
         numberLabel.clipsToBounds = true
         translationLabel.textColor = .black
         // Bubbles grow to fit their translation, so text wraps by word and is never cut off.

@@ -41,7 +41,7 @@ struct TrackerView: View {
                 Image(uiImage: tracker.icon ?? UIImage(named: "MangaPlaceholder")!)
                     .resizable()
                     .frame(width: 44, height: 44, alignment: .leading)
-                    .cornerRadius(10)
+                    .cornerRadius(0)
                     .padding(.trailing, 2)
                 Text(item.title ?? "")
                     .lineLimit(1)

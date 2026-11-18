@@ -496,7 +496,7 @@ final class ReaderTranslationCoordinator: NSObject, ObservableObject {
             sessionHost = host
         }
         if accessory.superview == nil {
-            accessory.layer.cornerRadius = 18
+            accessory.layer.cornerRadius = 0
             accessory.clipsToBounds = true
             // Stepping through dialogue sits on the right.
             let buttons = [allButton, listButton, translateButton, optionsButton, retryButton, closeDialogueButton,

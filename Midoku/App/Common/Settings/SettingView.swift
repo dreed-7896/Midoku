@@ -566,7 +566,7 @@ extension SettingView {
                     .lineLimit(1)
                 if let subtitle = value.subtitle {
                     Text(NSLocalizedString(subtitle))
-                        .font(.footnote)
+                        .font(.mdFootnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }

@@ -47,7 +47,7 @@ class MangaListCell: UICollectionViewCell {
         imageView.image = UIImage(named: "MangaPlaceholder")
         imageView.clipsToBounds = true
         imageView.contentMode = .scaleAspectFill
-        imageView.layer.cornerRadius = 5
+        imageView.layer.cornerRadius = 0
         imageView.layer.borderWidth = 1
         imageView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
         return imageView
@@ -498,7 +498,7 @@ private class TagLabelView: UIView {
 
     func configure() {
         backgroundColor = .tertiarySystemFill
-        layer.cornerRadius = 6
+        layer.cornerRadius = 0
         layer.masksToBounds = true
 
         addSubview(label)

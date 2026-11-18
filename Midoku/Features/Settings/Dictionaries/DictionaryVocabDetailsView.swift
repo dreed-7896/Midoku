@@ -101,7 +101,7 @@ struct DictionaryVocabDetailsView: View {
                                         .lineLimit(2)
                                     if !sourceLoaded || sourceChapter != nil {
                                         Text(sourceChapter?.formattedTitle() ?? "Loading")
-                                            .font(.subheadline)
+                                            .font(.mdSubheadline)
                                             .foregroundStyle(.secondary)
                                     }
                                 }
@@ -417,7 +417,7 @@ private struct ClozeTextEditor: UIViewRepresentable {
             label.textColor = .label
             label.textAlignment = .center
             label.backgroundColor = .tertiarySystemFill
-            label.layer.cornerRadius = 3
+            label.layer.cornerRadius = 0
             label.clipsToBounds = true
             label.sizeToFit()
             label.frame = label.bounds.insetBy(dx: -3, dy: -1) // center the text better

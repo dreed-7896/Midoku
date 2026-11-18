@@ -30,6 +30,18 @@ class TabBarController: UITabBarController {
     private var hasAuthenticatedAppLock = false
     private var unlockingApp = false
 
+    private lazy var customTabBar = MDTabBar(items: [
+        .init(title: "Home", image: "MDTabHome"),
+        .init(title: NSLocalizedString("LIBRARY"), image: "MDTabLibrary"),
+        .init(title: "Search", image: "MDTabSearch"),
+        .init(title: "Sources", image: "MDTabSources"),
+        .init(title: NSLocalizedString("SETTINGS"), image: "MDTabSettings")
+    ])
+    private var customTabBarHeight: NSLayoutConstraint?
+    private var customTabBarHiddenBySystem = false
+    private let visibleReaders = NSHashTable<UIViewController>.weakObjects()
+    private static let sourcesTabIndex = 3
+
     private lazy var libraryProgressView = CircularProgressView(frame: CGRect(x: 0, y: 0, width: 20, height: 20))
 
     private lazy var libraryRefreshAccessory: UIView = {
@@ -44,23 +56,22 @@ class TabBarController: UITabBarController {
         libraryProgressView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(libraryProgressView)
 
-        if #unavailable(iOS 26) {
-            // add styling for older versions without the bottom accessory view
-            let backgroundView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
-            backgroundView.layer.cornerRadius = 48 / 2
-            backgroundView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
-            backgroundView.layer.borderWidth = 1
-            backgroundView.clipsToBounds = true
-            backgroundView.translatesAutoresizingMaskIntoConstraints = false
-            view.insertSubview(backgroundView, at: 0)
+        // Web banner style: square, raised surface with a hairline border.
+        let backgroundView = UIView()
+        backgroundView.backgroundColor = MDColor.s2
+        backgroundView.layer.borderColor = MDColor.line2.cgColor
+        backgroundView.layer.borderWidth = 1
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(backgroundView, at: 0)
+        label.font = MDFont.ui(14, .semibold) ?? .systemFont(ofSize: 14, weight: .semibold)
+        label.textColor = MDColor.text
 
-            NSLayoutConstraint.activate([
-                backgroundView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                backgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                backgroundView.topAnchor.constraint(equalTo: view.topAnchor),
-                backgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-            ])
-        }
+        NSLayoutConstraint.activate([
+            backgroundView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backgroundView.topAnchor.constraint(equalTo: view.topAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
 
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -82,7 +93,7 @@ class TabBarController: UITabBarController {
 
         delegate = self
 
-        let libraryViewController = UIHostingController(rootView: MCCollectionRootView())
+        let libraryViewController = UIHostingController(rootView: MCCollectionRootView().midokuStyle())
         collectionViewController = libraryViewController
         let browseViewController = NavigationController(rootViewController: DiscoverViewController())
         let searchViewController = NavigationController(rootViewController: searchController)
@@ -90,7 +101,8 @@ class TabBarController: UITabBarController {
 
         let historyPath = NavigationCoordinator(rootViewController: nil)
         let historyHostingController = UIHostingController(rootView: UpdatesHistoryView()
-            .environmentObject(historyPath))
+            .environmentObject(historyPath)
+            .midokuStyle())
         historyPath.rootViewController = historyHostingController
         let historyViewController = NavigationController(rootViewController: historyHostingController)
         historyNavigationController = historyViewController
@@ -102,105 +114,54 @@ class TabBarController: UITabBarController {
                 rootView: NavigationStack {
                     SettingsView()
                         .environmentObject(settingsPath)
+                        .midokuStyle()
                 }.introspect(.navigationStack, on: .iOS(.v26, .v27)) { entity in
                     settingsPath.rootViewController = entity
                 }
             )
         } else {
             // this breaks the zoom transitions from the toolbar buttons in the backups setting page on ios 18 / ipads
-            let hosting = UIHostingController(rootView: SettingsView().environmentObject(settingsPath))
+            let hosting = UIHostingController(rootView: SettingsView().environmentObject(settingsPath).midokuStyle())
             let entity = NavigationController(rootViewController: hosting)
-            entity.navigationBar.prefersLargeTitles = false
+            entity.navigationBar.prefersLargeTitles = true
             settingsPath.rootViewController = entity
             settingsViewController = entity
         }
         self.settingsPath = settingsPath
 
         // The collection hosts its native SwiftUI navigation stack.
-        browseViewController.navigationBar.prefersLargeTitles = false
-        historyViewController.navigationBar.prefersLargeTitles = false
-        searchViewController.navigationBar.prefersLargeTitles = false
+        // Root screens get the web's big display-face page titles.
+        browseViewController.navigationBar.prefersLargeTitles = true
+        historyViewController.navigationBar.prefersLargeTitles = true
+        searchViewController.navigationBar.prefersLargeTitles = true
 
-        if #available(iOS 26.0, *) {
-            let searchTab = UISearchTab { _ in
-                searchViewController
-            }
-            searchTab.automaticallyActivatesSearch = true
-            let fixedTabs = [
-                UITab(
-                    title: NSLocalizedString("BROWSE"),
-                    image: UIImage(systemName: "globe"),
-                    identifier: "1"
-                ) { _ in
-                    browseViewController
-                },
-                UITab(
-                    title: NSLocalizedString("LIBRARY"),
-                    image: UIImage(systemName: "books.vertical.fill"),
-                    identifier: "0"
-                ) { _ in
-                    libraryViewController
-                },
-                UITab(
-                    title: "Updates",
-                    image: UIImage(systemName: "bell.badge"),
-                    identifier: "2"
-                ) { _ in
-                    historyViewController
-                },
-                UITab(
-                    title: NSLocalizedString("SETTINGS"),
-                    image: UIImage(systemName: "gear"),
-                    identifier: "3"
-                ) { _ in
-                    settingsViewController
-                }
-            ]
-            fixedTabs.forEach {
-                $0.allowsHiding = false
-                $0.preferredPlacement = .fixed
-            }
-            tabs = fixedTabs + [searchTab]
-        } else {
-            libraryViewController.tabBarItem = UITabBarItem(
-                title: NSLocalizedString("LIBRARY"),
-                image: UIImage(systemName: "books.vertical.fill"),
-                tag: 0
-            )
-            browseViewController.tabBarItem = UITabBarItem(
-                title: NSLocalizedString("BROWSE"),
-                image: UIImage(systemName: "globe"),
-                tag: 1
-            )
-            historyViewController.tabBarItem = UITabBarItem(
-                title: "Updates", image: UIImage(systemName: "bell.badge"), tag: 2
-            )
-            searchViewController.tabBarItem = UITabBarItem(
-                tabBarSystemItem: .search,
-                tag: 3
-            )
-            settingsViewController.tabBarItem = UITabBarItem(
-                title: NSLocalizedString("SETTINGS"),
-                image: UIImage(systemName: "gear"),
-                tag: 4
-            )
-            viewControllers = [
-                browseViewController,
-                libraryViewController,
-                historyViewController,
-                searchViewController,
-                settingsViewController
-            ]
-        }
+        // Midoku Web order: Home (updates & history), Library, Search, Sources, Settings.
+        historyViewController.tabBarItem = UITabBarItem(title: "Home", image: UIImage(named: "MDTabHome"), tag: 0)
+        libraryViewController.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("LIBRARY"), image: UIImage(named: "MDTabLibrary"), tag: 1
+        )
+        searchViewController.tabBarItem = UITabBarItem(title: "Search", image: UIImage(named: "MDTabSearch"), tag: 2)
+        browseViewController.tabBarItem = UITabBarItem(title: "Sources", image: UIImage(named: "MDTabSources"), tag: 3)
+        settingsViewController.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("SETTINGS"), image: UIImage(named: "MDTabSettings"), tag: 4
+        )
+        viewControllers = [
+            historyViewController,
+            libraryViewController,
+            searchViewController,
+            browseViewController,
+            settingsViewController
+        ]
+        installCustomTabBar()
 
         applyOpeningTab()
 
         let updateCount = AppSettings.browse.updateCount.get()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--history-preview") { selectedIndex = 2 }
-        if ProcessInfo.processInfo.arguments.contains("--appearance-preview") { selectedIndex = 3 }
+        if ProcessInfo.processInfo.arguments.contains("--history-preview") { selectedIndex = 0 }
+        if ProcessInfo.processInfo.arguments.contains("--appearance-preview") { selectedIndex = 4 }
         #endif
-        browseViewController.tabBarItem.badgeValue = updateCount > 0 ? String(updateCount) : nil
+        setSourcesBadge(updateCount)
 
         NotificationCenter.default.publisher(for: .init(AppSettings.general.incognitoMode.key))
             .sink { [weak self] _ in
@@ -434,11 +395,7 @@ extension TabBarController {
             guard let self else { return }
             // Defer the tab change until the originating SwiftUI gesture has finished.
             await Task.yield()
-            if #available(iOS 26.0, *) {
-                self.selectedTab = self.tabs.last
-            } else {
-                self.selectedViewController = self.searchNavigationController
-            }
+            self.selectedViewController = self.searchNavigationController
             await Task.yield()
             self.searchNavigationController?.popToRootViewController(animated: false)
             self.searchController.search(for: query)
@@ -446,42 +403,23 @@ extension TabBarController {
     }
 
     private func applyOpeningTab() {
-        let openingTab = AppSettings.general.openingTab.get()
-        if #available(iOS 26.0, *) {
-            switch openingTab {
-            case .search:
-                selectedTab = tabs.last
-            case .library:
-                selectedTab = tabs.first { $0.identifier == "0" }
-            case .browse:
-                selectedTab = tabs.first { $0.identifier == "1" }
-            case .history:
-                selectedTab = tabs.first { $0.identifier == "2" }
-            case .settings:
-                selectedTab = tabs.first { $0.identifier == "3" }
-            }
-        } else {
-            selectedIndex = switch openingTab {
-            case .library: 1
-            case .browse: 0
-            case .history: 2
-            case .search: 3
-            case .settings: 4
-            }
+        selectedIndex = switch AppSettings.general.openingTab.get() {
+        case .history: 0
+        case .library: 1
+        case .search: 2
+        case .browse: 3
+        case .settings: 4
         }
     }
 
     func showLibraryRefreshView() {
         libraryProgressView.setProgress(value: 0, withAnimation: false)
 
-        if #available(iOS 26.0, *) {
-            setBottomAccessory(.init(contentView: libraryRefreshAccessory), animated: true)
-        } else {
-            libraryRefreshAccessory.layer.opacity = 0
-            view.insertSubview(libraryRefreshAccessory, belowSubview: tabBar)
-            UIView.animate(withDuration: 0.5) {
-                self.libraryRefreshAccessory.layer.opacity = 1
-            }
+        libraryRefreshAccessory.layer.opacity = 0
+        view.insertSubview(libraryRefreshAccessory, belowSubview: customTabBar)
+        view.setNeedsLayout()
+        UIView.animate(withDuration: 0.5) {
+            self.libraryRefreshAccessory.layer.opacity = 1
         }
     }
 
@@ -490,29 +428,24 @@ extension TabBarController {
     }
 
     func hideAccessoryView() {
-        if #available(iOS 26.0, *) {
-            setBottomAccessory(nil, animated: true)
-        } else {
-            UIView.animate(withDuration: 0.5) {
-                self.libraryRefreshAccessory.layer.opacity = 0
-            } completion: { _ in
-                self.libraryRefreshAccessory.removeFromSuperview()
-            }
+        UIView.animate(withDuration: 0.5) {
+            self.libraryRefreshAccessory.layer.opacity = 0
+        } completion: { _ in
+            self.libraryRefreshAccessory.removeFromSuperview()
         }
     }
 
     override func viewDidLayoutSubviews() {
-        if #unavailable(iOS 26.0) {
-            let height: CGFloat = 48
-            let padding: CGFloat = 16
-
-            libraryRefreshAccessory.frame = CGRect(
-                x: tabBar.frame.origin.x + view.safeAreaInsets.left + padding,
-                y: tabBar.frame.origin.y - height - padding / 2,
-                width: tabBar.frame.width - padding * 2 - view.safeAreaInsets.left - view.safeAreaInsets.right,
-                height: height
-            )
-        }
+        super.viewDidLayoutSubviews()
+        layoutCustomTabBar()
+        let height: CGFloat = 48
+        let padding: CGFloat = 16
+        libraryRefreshAccessory.frame = CGRect(
+            x: view.safeAreaInsets.left + padding,
+            y: customTabBar.frame.origin.y - height - padding / 2,
+            width: view.bounds.width - padding * 2 - view.safeAreaInsets.left - view.safeAreaInsets.right,
+            height: height
+        )
         updateFrame()
     }
 
@@ -586,12 +519,7 @@ extension TabBarController: UITabBarControllerDelegate {
     }
 
     private func checkForSettingsPop() {
-        let settingsIndex: Int
-        if #available(iOS 26.0, *) {
-            settingsIndex = 3
-        } else {
-            settingsIndex = 4
-        }
+        let settingsIndex = 4
         if selectedIndex == previousSelectedIndex && previousSelectedIndex == settingsIndex {
             settingsPath?.navigationController?.popToRootViewController(animated: true)
         }
@@ -621,8 +549,122 @@ extension TabBarController {
             let newIndex = Int(input),
             newIndex >= 1 && newIndex <= (tabBar.items?.count ?? 0)
         else { return }
-        selectedIndex = newIndex - 1
+        selectTab(at: newIndex - 1)
     }
 
     override var canBecomeFirstResponder: Bool { true }
+}
+
+// MARK: - Midoku Web tab bar
+extension TabBarController {
+    private var safeBottom: CGFloat {
+        view.window?.safeAreaInsets.bottom ?? (view.safeAreaInsets.bottom - additionalSafeAreaInsets.bottom)
+    }
+
+    private var customTabBarVisible: Bool {
+        !customTabBarHiddenBySystem && visibleReaders.allObjects.isEmpty
+    }
+
+    fileprivate func installCustomTabBar() {
+        super.setTabBarHidden(true, animated: false)
+        customTabBar.translatesAutoresizingMaskIntoConstraints = false
+        customTabBar.onSelect = { [weak self] index in self?.selectTab(at: index) }
+        view.addSubview(customTabBar)
+        let height = customTabBar.heightAnchor.constraint(equalToConstant: MDTabBar.barHeight)
+        customTabBarHeight = height
+        NSLayoutConstraint.activate([
+            customTabBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            customTabBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            customTabBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            height
+        ])
+        customTabBar.selectedIndex = selectedIndex
+    }
+
+    fileprivate func layoutCustomTabBar() {
+        let height = MDTabBar.height(safeBottom: safeBottom)
+        if customTabBarHeight?.constant != height { customTabBarHeight?.constant = height }
+        view.bringSubviewToFront(customTabBar)
+        let visible = customTabBarVisible
+        customTabBar.transform = visible ? .identity : CGAffineTransform(translationX: 0, y: height)
+        customTabBar.alpha = visible ? 1 : 0
+        let inset = visible ? max(0, height - safeBottom) : 0
+        if additionalSafeAreaInsets.bottom != inset {
+            additionalSafeAreaInsets.bottom = inset
+        }
+        customTabBar.selectedIndex = selectedIndex
+    }
+
+    private func refreshCustomTabBar(animated: Bool) {
+        guard isViewLoaded else { return }
+        if animated {
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+                self.view.setNeedsLayout()
+                self.view.layoutIfNeeded()
+            }
+        } else {
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+        }
+    }
+
+    func selectTab(at index: Int) {
+        guard let controllers = viewControllers, controllers.indices.contains(index) else { return }
+        let controller = controllers[index]
+        if index == selectedIndex {
+            guard tabBarController(self, shouldSelect: controller) else { return }
+            if let navigation = controller as? UINavigationController, navigation.viewControllers.count > 1 {
+                navigation.popToRootViewController(animated: true)
+            } else if let scrollView = controller.view.firstScrollView(), !scrollView.isScrolledToTop {
+                scrollView.setContentOffset(
+                    CGPoint(x: scrollView.contentOffset.x, y: -scrollView.adjustedContentInset.top),
+                    animated: true
+                )
+            }
+            checkForSettingsPop()
+            return
+        }
+        guard tabBarController(self, shouldSelect: controller) else { return }
+        selectedIndex = index
+        checkForSettingsPop()
+    }
+
+    override var selectedIndex: Int {
+        didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
+    }
+
+    override var selectedViewController: UIViewController? {
+        didSet { if isViewLoaded { customTabBar.selectedIndex = selectedIndex } }
+    }
+
+    // The system bar always stays hidden; requests to hide or show it move the web bar instead.
+    override var isTabBarHidden: Bool {
+        get { customTabBarHiddenBySystem }
+        set { setTabBarHidden(newValue, animated: false) }
+    }
+
+    override func setTabBarHidden(_ hidden: Bool, animated: Bool) {
+        customTabBarHiddenBySystem = hidden
+        super.setTabBarHidden(true, animated: false)
+        refreshCustomTabBar(animated: animated)
+    }
+
+    /// Readers cover the whole screen; the bar hides while one is showing inside a tab.
+    func readerWillAppear(_ reader: UIViewController) {
+        visibleReaders.add(reader)
+        refreshCustomTabBar(animated: false)
+    }
+
+    func readerDidDisappear(_ reader: UIViewController) {
+        visibleReaders.remove(reader)
+        refreshCustomTabBar(animated: false)
+    }
+
+    func setSourcesBadge(_ count: Int) {
+        let value = count > 0 ? String(count) : nil
+        if let controllers = viewControllers, controllers.indices.contains(Self.sourcesTabIndex) {
+            controllers[Self.sourcesTabIndex].tabBarItem.badgeValue = value
+        }
+        customTabBar.setBadge(value, at: Self.sourcesTabIndex)
+    }
 }

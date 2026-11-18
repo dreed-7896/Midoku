@@ -12,7 +12,7 @@ import NukeUI
 struct MangaUpdateItemView: View {
     private let coverWidth: CGFloat = 56
     private let coverHeight: CGFloat = 56
-    private let cornerRadius: CGFloat = 5
+    private let cornerRadius: CGFloat = 0
     private let chaptersLimit = 5
 
     var updates: [MangaUpdatesView.UpdateInfo]
@@ -46,14 +46,14 @@ struct MangaUpdateItemView: View {
                 ForEach(updates.prefix(chaptersLimit)) { item in
                     if let chapterTitle = item.chapter?.makeTitle() {
                         Text(chapterTitle)
-                            .font(.footnote)
+                            .font(.mdFootnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
                 if count > chaptersLimit {
                     Text(String(format: NSLocalizedString("%lld_PLUS_MORE"), count - chaptersLimit))
-                        .font(.footnote)
+                        .font(.mdFootnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

@@ -249,10 +249,7 @@ extension BrowseViewController {
     func checkUpdateCount() {
         let updateCount = viewModel.updatesSources.count
         AppSettings.browse.updateCount.set(updateCount)
-        let tabBarItem = tabBarController?.tabBar.items?.first(
-            where: { $0.title == NSLocalizedString("BROWSE") }
-        )
-        tabBarItem?.badgeValue = updateCount > 0 ? String(updateCount) : nil
+        (tabBarController as? TabBarController)?.setSourcesBadge(updateCount)
     }
 
     func showLegacySourceListNotice() {

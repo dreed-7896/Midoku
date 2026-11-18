@@ -100,7 +100,7 @@ class GetButtonView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        backgroundView.layer.cornerRadius = frame.height / 2
+        backgroundView.layer.cornerRadius = 0
     }
 
     func calculatePadding() {

@@ -44,16 +44,16 @@ struct MangaGridItem: View {
                 bookmarkView,
                 alignment: .topTrailing
             )
-            .contentShape(RoundedRectangle(cornerRadius: 5))
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .contentShape(RoundedRectangle(cornerRadius: 0))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 0)
                     .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
             )
             .overlay(
                 Text(title)
                     .foregroundStyle(.white)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.mdSystem(size: 13, weight: .semibold))
                     .multilineTextAlignment(.leading)
                     .lineLimit(5)
                     .shadow(color: .black.opacity(0.6), radius: 2)
@@ -86,9 +86,9 @@ struct MangaGridItem: View {
         Rectangle()
             .fill(Color(uiColor: .secondarySystemFill))
             .aspectRatio(2/3, contentMode: .fill)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 0)
                     .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
             )
     }

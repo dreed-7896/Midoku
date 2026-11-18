@@ -61,7 +61,7 @@ struct DictionaryVocabListView: View {
                                         .matchedTransitionSource(id: entry, in: zoomNamespace)
                                 }
                                 .foregroundStyle(.primary)
-                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
                                 .contextMenu {
                                     contextMenu(for: entry)
                                 }
@@ -223,14 +223,14 @@ private struct VocabItemView<MenuContent: View>: View {
                         .minute()
                 )
                 Text(dateText)
-                    .font(.caption)
+                    .font(.mdCaption)
                     .fontWeight(.medium)
                 Spacer()
                 Menu {
                     menuContent
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.title3.weight(.medium))
+                        .font(.mdTitle3.weight(.medium))
                         .padding(12) // increase button tap area
                     // bug: image becomes invisible while menu is presented / dismisses
                 }
@@ -243,7 +243,7 @@ private struct VocabItemView<MenuContent: View>: View {
         .background(
             Color(uiColor: colorScheme == .dark ? .tertiarySystemFill : .systemBackground)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
         .shadow(color: .black.opacity(0.02), radius: 6, y: 6)
     }
 }

@@ -59,6 +59,10 @@ struct MangaView: View {
     }
 
     var body: some View {
+        midokuBody.font(.mdBody)
+    }
+
+    @ViewBuilder private var midokuBody: some View {
         let list = ScrollViewReader { proxy in
             List(selection: $selectedChapters) {
                 headerView
@@ -91,7 +95,7 @@ struct MangaView: View {
                     VStack {
                         HStack {
                             Text(NSLocalizedString("DOWNLOADED_CHAPTERS"))
-                                .font(.headline)
+                                .font(.mdHeadline)
                             Spacer()
                         }
                         .padding(.horizontal, 20)

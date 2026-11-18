@@ -12,7 +12,7 @@ class SwiftUINavigationViewController<Content: View>: UINavigationController {
 
     init(rootView: Content, addDismissButton: Bool = true) {
         let view = ModelWrapper(rootView: rootView, path: path, addDismissButton: addDismissButton)
-        super.init(rootViewController: UIHostingController(rootView: view))
+        super.init(rootViewController: UIHostingController(rootView: view.midokuStyle()))
         path.rootViewController = self
     }
 

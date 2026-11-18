@@ -502,7 +502,7 @@ struct MCCollectionRootView: View {
             regularLibraryPage
             .background(Color(uiColor: .systemBackground))
             .navigationTitle("Library")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 if selecting {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -816,10 +816,10 @@ struct MCCollectionRootView: View {
             } label: {
                 Label(saved != nil ? "Unpin “\(trimmedQuery)”" : hasActiveFilters ? "Pin search and filters as a tab" : "Pin “\(trimmedQuery)” as a tab",
                       systemImage: saved != nil ? "pin.slash" : "pin")
-                    .font(.subheadline.weight(.medium)).lineLimit(1)
+                    .font(.mdSubheadline.weight(.medium)).lineLimit(1)
             }
             .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
+            .buttonBorderShape(.roundedRectangle(radius: 0))
             Spacer(minLength: 0)
         }
         .padding(.horizontal).padding(.vertical, 8)
@@ -845,7 +845,7 @@ struct MCCollectionRootView: View {
     private var shuffleButton: some View {
         let isReading = activeGroupPage == Self.readingPageID
         return Button { openRandomEntry(from: activeEntries) } label: {
-            Image(systemName: "shuffle").font(.title3.weight(.semibold))
+            Image(systemName: "shuffle").font(.mdTitle3.weight(.semibold))
                 .frame(width: 38, height: 38)
         }
         .buttonStyle(.glass)
@@ -875,10 +875,10 @@ struct MCCollectionRootView: View {
                 if selected.isSuperset(of: visibleIDs) { selected.subtract(visibleIDs) }
                 else { selected.formUnion(visibleIDs) }
             }
-            .font(.headline)
+            .font(.mdHeadline)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            .background(.regularMaterial, in: Capsule())
+            .background(.regularMaterial, in: Rectangle())
             Spacer()
             Menu {
                 Button("Add to Reading", systemImage: "book") {
@@ -904,10 +904,10 @@ struct MCCollectionRootView: View {
                 }
             } label: {
                 Label("Actions (\(selected.count))", systemImage: "ellipsis.circle")
-                    .font(.headline)
+                    .font(.mdHeadline)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
-                    .background(.regularMaterial, in: Capsule())
+                    .background(.regularMaterial, in: Rectangle())
             }
             .disabled(selected.isEmpty)
         }
@@ -975,10 +975,10 @@ struct MCCollectionRootView: View {
     private func subgroupHeader(_ section: MCLibrarySubgroup, collapsed: Bool, toggle: @escaping () -> Void) -> some View {
         Button(action: toggle) {
             HStack(spacing: 8) {
-                Text(section.title).font(.headline).foregroundStyle(.primary)
-                Text("\(section.entries.count)").font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                Text(section.title).font(.mdHeadline).foregroundStyle(.primary)
+                Text("\(section.entries.count)").font(.mdSubheadline).foregroundStyle(.secondary).monospacedDigit()
                 Spacer()
-                Image(systemName: "chevron.down").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.down").font(.mdFootnote.weight(.semibold)).foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(collapsed ? -90 : 0))
             }
             .padding(.vertical, 10)
@@ -1008,21 +1008,21 @@ struct MCCollectionRootView: View {
             VStack(alignment: .leading, spacing: 4) {
                 entryLabel(entry)
                 if showsPath, let parentPath = store.library.parentPath(of: entry) {
-                    Text(parentPath).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    Text(parentPath).font(.mdCaption2).foregroundStyle(.secondary).lineLimit(2)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).clipped()
                 .contentShape(Rectangle())
                 .overlay(alignment: .topTrailing) {
                 if selecting {
                     Image(systemName: selected.contains(entry.id) ? "checkmark.circle.fill" : "circle")
-                        .font(.title2).symbolRenderingMode(.palette)
+                        .font(.mdTitle2).symbolRenderingMode(.palette)
                         .foregroundStyle(.white, Color.accentColor)
                         .background(Circle().fill(Color.accentColor)).padding(8)
                 }
             }
         }.buttonStyle(.plain)
         .accessibilityLabel("\(store.library.title(entry)), \(store.chapterCount(entryID: entry.id)) chapters, \(store.unreadCount(entryID: entry.id)) unread, \(entry.status.title)")
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 0))
         .contextMenu {
             if store.chapterCount(entryID: entry.id) > 0 {
                 Button(entry.lastReadAt == nil ? "Start reading" : "Continue reading", systemImage: "book.pages") { continueReading(entry) }
@@ -1129,7 +1129,7 @@ struct MCCollectionRootView: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 if hasActiveFilters {
-                    Text("\(activeFilterCount)").font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+                    Text("\(activeFilterCount)").font(.mdSystem(size: 8, weight: .bold)).foregroundStyle(.white)
                         .frame(minWidth: 13, minHeight: 13).background(Color.accentColor, in: Circle()).offset(x: 5, y: -5)
                 }
             }
@@ -1147,8 +1147,8 @@ struct MCCollectionRootView: View {
                     .overlay(alignment: .bottomLeading) {
                         if gridStyle == .compact {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(store.library.title(entry)).font(.caption.weight(.semibold)).lineLimit(2)
-                                Text("\(store.chapterCount(entryID: entry.id)) chapters").font(.caption2).opacity(0.85).lineLimit(1)
+                                Text(store.library.title(entry)).font(.mdCaption.weight(.semibold)).lineLimit(2)
+                                Text("\(store.chapterCount(entryID: entry.id)) chapters").font(.mdCaption2).opacity(0.85).lineLimit(1)
                             }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 8)
@@ -1158,20 +1158,20 @@ struct MCCollectionRootView: View {
                             .background(LinearGradient(colors: [.clear, .black.opacity(0.88)], startPoint: .top, endPoint: .bottom))
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: gridStyle == .clean ? 6 : 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
                 if gridStyle == .standard {
-                    Text(store.library.title(entry)).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true).frame(maxWidth: .infinity, alignment: .leading)
-                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.status.title)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(store.library.title(entry)).font(.mdSubheadline.weight(.semibold)).lineLimit(2, reservesSpace: true).frame(maxWidth: .infinity, alignment: .leading)
+                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.status.title)").font(.mdCaption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         } else {
             HStack(spacing: 14) {
-                MCEntryCover(entry: entry).frame(width: 66, height: 99).clipShape(RoundedRectangle(cornerRadius: 8))
+                MCEntryCover(entry: entry).frame(width: 66, height: 99).clipShape(RoundedRectangle(cornerRadius: 0))
                     .overlay(alignment: .topTrailing) { unreadBadge(entry).padding(4) }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(store.library.title(entry)).font(.headline).lineLimit(2)
-                    Text(entry.status.title).font(.subheadline).foregroundStyle(.secondary)
-                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.links.count) sources").font(.caption).foregroundStyle(.secondary)
+                    Text(store.library.title(entry)).font(.mdHeadline).lineLimit(2)
+                    Text(entry.status.title).font(.mdSubheadline).foregroundStyle(.secondary)
+                    Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.links.count) sources").font(.mdCaption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -1181,7 +1181,7 @@ struct MCCollectionRootView: View {
     @ViewBuilder private func newBadge(_ entry: MCPersonalEntry) -> some View {
         if !selecting, let count = store.newChapterCounts[entry.id] {
             Image(systemName: "sparkles")
-                .font(.caption2.weight(.bold)).foregroundStyle(.white)
+                .font(.mdCaption2.weight(.bold)).foregroundStyle(.white)
                 .padding(4)
                 .background(Color.orange, in: Circle())
                 .accessibilityLabel("\(count) new chapters")
@@ -1191,9 +1191,9 @@ struct MCCollectionRootView: View {
     @ViewBuilder private func unreadBadge(_ entry: MCPersonalEntry) -> some View {
         let unread = store.unreadCount(entryID: entry.id)
         if unread > 0 && !selecting {
-            Text("\(unread)").font(.caption2.bold()).foregroundStyle(.white)
+            Text("\(unread)").font(.mdCaption2.bold()).foregroundStyle(.white)
                 .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Color.accentColor, in: Capsule())
+                .background(Color.accentColor, in: Rectangle())
                 .accessibilityLabel("\(unread) unread chapters")
         }
     }
@@ -1211,23 +1211,23 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
         Button { swipePosition.requestedID = page.id } label: {
             HStack(spacing: 6) {
                 switch page.kind {
-                case .reading: Image(systemName: "book").font(.caption.weight(.semibold))
+                case .reading: Image(systemName: "book").font(.mdCaption.weight(.semibold))
                 case .smart(let tab): Image(systemName: tab.filter.queryOnly ? "pin.fill" : "line.3.horizontal.decrease")
-                    .font(.caption2.weight(.semibold))
+                    .font(.mdCaption2.weight(.semibold))
                 case .group, .all: EmptyView()
                 }
-                Text(page.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                Text(page.title).font(.mdSubheadline.weight(.medium)).lineLimit(1)
                 Text("\(page.entryIDs.count)")
-                    .font(.caption2.weight(.semibold))
+                    .font(.mdCaption2.weight(.semibold))
                     .foregroundStyle(active ? Color.accentColor : .secondary)
                     .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Capsule())
+                    .background(Color(uiColor: active ? .tertiarySystemFill : .secondarySystemFill), in: Rectangle())
                 if let new = newCounts[page.id], new > 0 {
                     Text("\(new) new")
-                        .font(.caption2.weight(.bold))
+                        .font(.mdCaption2.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(Color.accentColor, in: Capsule())
+                        .background(Color.accentColor, in: Rectangle())
                         .accessibilityLabel("\(new) titles with new chapters")
                 }
             }
@@ -1265,7 +1265,7 @@ private struct MCLibraryGroupTabs<TabMenu: View>: View {
                                 let fraction = progress - CGFloat(index)
                                 let width = start.width + (end.width - start.width) * fraction
                                 let x = start.minX + (end.minX - start.minX) * fraction
-                                Capsule().fill(Color.accentColor)
+                                Rectangle().fill(Color.accentColor)
                                     .frame(width: width, height: 3)
                                     .position(x: x + width / 2, y: geometry.size.height - 1.5)
                             }
@@ -1319,7 +1319,7 @@ private struct MCReadingAddSheet: View {
                     Stepper(value: $randomCount, in: 1...max(1, available.count)) {
                         Label("Random entries", systemImage: "shuffle")
                         Text("\(min(randomCount, available.count)) of \(available.count) available")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.mdCaption).foregroundStyle(.secondary)
                     }
                     .disabled(available.isEmpty)
                     Button("Add Random Entries") {
@@ -1339,19 +1339,19 @@ private struct MCReadingAddSheet: View {
                             HStack(spacing: 12) {
                                 MCEntryCover(entry: entry)
                                     .frame(width: 40, height: 60)
-                                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    .clipShape(RoundedRectangle(cornerRadius: 0))
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(store.library.title(entry)).font(.body.weight(.medium))
+                                    Text(store.library.title(entry)).font(.mdBody.weight(.medium))
                                         .foregroundStyle(.primary).lineLimit(2)
                                     if let path = store.library.parentPath(of: entry) {
-                                        Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                        Text(path).font(.mdCaption2).foregroundStyle(.secondary).lineLimit(2)
                                     }
                                     Text("\(store.chapterCount(entryID: entry.id)) chapters")
-                                        .font(.caption).foregroundStyle(.secondary)
+                                        .font(.mdCaption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Image(systemName: selected.contains(entry.id) ? "checkmark.circle.fill" : "circle")
-                                    .font(.title3).foregroundStyle(Color.accentColor)
+                                    .font(.mdTitle3).foregroundStyle(Color.accentColor)
                             }
                             .contentShape(Rectangle())
                         }

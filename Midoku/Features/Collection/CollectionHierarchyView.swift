@@ -52,7 +52,7 @@ struct MCEntryPlacementView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(store.library.title(entry)).foregroundStyle(.primary)
                                 if let path = store.library.parentPath(of: entry) {
-                                    Text(path).font(.caption).foregroundStyle(.secondary)
+                                    Text(path).font(.mdCaption).foregroundStyle(.secondary)
                                 }
                             }
                         }

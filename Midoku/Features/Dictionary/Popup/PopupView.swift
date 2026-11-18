@@ -269,7 +269,7 @@ struct PopupView: View {
                     Image(systemName: "xmark")
                 }
             }
-            .font(.body)
+            .font(.mdBody)
             .foregroundStyle(.secondary)
             .padding(.vertical, 8)
             .padding(.horizontal, 16)
@@ -315,7 +315,7 @@ struct PopupView: View {
 //                    Image(systemName: "forward.frame")
 //                }
 //            }
-//            .font(.body)
+//            .font(.mdBody)
 //            .foregroundStyle(.secondary)
 //            .padding(.vertical, 8)
 //            .frame(maxWidth: .infinity)
@@ -393,7 +393,7 @@ struct PopupView: View {
                 GlassEffectContainer {
                     if let selectionData, let layout, !content.isEmpty {
                         popupContent(selectionData: selectionData, layout: layout)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 8))
+                            .glassEffect(.regular, in: .rect(cornerRadius: 0))
                             .position(layout.position)
                     }
                 }
@@ -403,9 +403,9 @@ struct PopupView: View {
                         popupContent(selectionData: selectionData, layout: layout)
                             .background(
                                 userConfig.popupDisableTransparency ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.ultraThinMaterial),
-                                in: RoundedRectangle(cornerRadius: 8)
+                                in: RoundedRectangle(cornerRadius: 0)
                             )
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.2), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.primary.opacity(0.2), lineWidth: 1))
                             .position(layout.position)
                     }
                 }

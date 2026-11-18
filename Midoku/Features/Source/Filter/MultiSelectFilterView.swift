@@ -260,14 +260,14 @@ struct MultiSelectFilterGroupView: View {
                             } else {
                                 .normal
                             }
-                            RoundedRectangle(cornerRadius: 5)
+                            RoundedRectangle(cornerRadius: 0)
                                 .fill(state == .normal ? Color(uiColor: .secondarySystemFill) : Color.accentColor)
                                 .aspectRatio(1, contentMode: .fill)
                                 .frame(width: 24)
                             if state != .normal {
                                 Image(systemName: state == .included ? "checkmark" : "xmark")
                                     .foregroundStyle(.white)
-                                    .font(.system(size: 14).weight(.semibold))
+                                    .font(.mdSystem(size: 14).weight(.semibold))
                             }
                         }
                         Text(option.title)
@@ -321,11 +321,11 @@ private struct GenreButtonStyle: ButtonStyle {
                 Color.red
         }
         return configuration.label
-            .font(.callout)
+            .font(.mdCallout)
             .padding(.vertical, 5)
             .padding(.horizontal, 12)
             .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.7 : 1))
             .background(backgroundColor)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
     }
 }

@@ -33,7 +33,7 @@ class SourceInfoHeaderView: UIView {
 
     func configure() {
         contentView.backgroundColor = .secondarySystemGroupedBackground
-        contentView.layer.cornerRadius = 16
+        contentView.layer.cornerRadius = 0
         contentView.layer.cornerCurve = .continuous
         contentView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentView)
@@ -48,7 +48,7 @@ class SourceInfoHeaderView: UIView {
         iconView.image = UIImage(contentsOfFile: path)
         iconView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
         iconView.layer.borderWidth = 1
-        iconView.layer.cornerRadius = iconSize * 0.225
+        iconView.layer.cornerRadius = 0
         iconView.layer.cornerCurve = .continuous
         iconView.clipsToBounds = true
         iconView.translatesAutoresizingMaskIntoConstraints = false
@@ -70,7 +70,7 @@ class SourceInfoHeaderView: UIView {
 //        uninstallButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
 //        uninstallButton.setTitle("UNINSTALL", for: .normal)
 //        uninstallButton.setTitleColor(.white, for: .normal)
-//        uninstallButton.layer.cornerRadius = 14
+//        uninstallButton.layer.cornerRadius = 0
 //        uninstallButton.backgroundColor = tintColor
         uninstallButton.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(uninstallButton)

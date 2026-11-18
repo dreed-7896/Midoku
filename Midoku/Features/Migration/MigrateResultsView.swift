@@ -267,7 +267,7 @@ extension MigrateResultsView {
                     .buttonStyle(.borderless)
 
                     Text(fromSource ?? NSLocalizedString("UNKNOWN"))
-                        .font(.footnote)
+                        .font(.mdFootnote)
                 }
 
                 Image(systemName: "arrow.right")
@@ -304,7 +304,7 @@ extension MigrateResultsView {
                         " "
                     }
                     Text(subtext)
-                        .font(.footnote)
+                        .font(.mdFootnote)
                 }
 
                 Spacer()

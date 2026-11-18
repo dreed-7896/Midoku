@@ -298,7 +298,7 @@ struct PlaceholderMangaHomeList: View {
         VStack(alignment: .leading) {
             if showTitle {
                 Text("Loading")
-                    .font(.title3)
+                    .font(.mdTitle3)
                     .fontWeight(.semibold)
                     .padding(.horizontal)
             }
@@ -317,7 +317,7 @@ struct PlaceholderMangaHomeList: View {
                     Rectangle()
                         .fill(Color(.secondarySystemFill))
                         .frame(width: 100 * 2/3, height: 100)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Loading Title")

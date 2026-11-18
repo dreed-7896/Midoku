@@ -12,7 +12,7 @@ struct MangaGridButtonStyle: ButtonStyle {
         configuration.label
             .overlay(
                 (configuration.isPressed ? Color.black.opacity(0.5) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
             )
     }
 }

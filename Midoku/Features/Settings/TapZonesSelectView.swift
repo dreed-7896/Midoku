@@ -96,23 +96,23 @@ private struct TapZoneCard<Content: View>: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    static var outerCornerRadius: CGFloat { 10 }
-    static var innerCornerRadius: CGFloat { 20 }
+    static var outerCornerRadius: CGFloat { 0 }
+    static var innerCornerRadius: CGFloat { 0 }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 10) {
                 ZStack {
                     content
-                        .mask(RoundedRectangle(cornerRadius: Self.innerCornerRadius - 12))
+                        .mask(RoundedRectangle(cornerRadius: 0))
                         .padding(12)
 
-                    RoundedRectangle(cornerRadius: Self.innerCornerRadius)
+                    RoundedRectangle(cornerRadius: 0)
                         .strokeBorder(Color(uiColor: .secondarySystemFill))
                         .aspectRatio(9/16, contentMode: .fill)
                 }
                 .background(Color.white)
-                .mask(RoundedRectangle(cornerRadius: Self.innerCornerRadius))
+                .mask(RoundedRectangle(cornerRadius: 0))
                 .padding(.horizontal, 15)
 
                 Text(title)
@@ -129,17 +129,17 @@ private struct TapZoneCard<Content: View>: View {
         }
         .background {
             ZStack {
-                RoundedRectangle(cornerRadius: Self.outerCornerRadius)
+                RoundedRectangle(cornerRadius: 0)
                     .fill(
                         selected
                             ? .accentColor.opacity(colorScheme == .dark ? 0.1 : 0.05)
                             : Color(uiColor: .quaternarySystemFill)
                     )
                 if selected {
-                    RoundedRectangle(cornerRadius: Self.outerCornerRadius)
+                    RoundedRectangle(cornerRadius: 0)
                         .fill(Color(uiColor: .quaternarySystemFill).opacity(0.3))
                 }
-                RoundedRectangle(cornerRadius: Self.outerCornerRadius)
+                RoundedRectangle(cornerRadius: 0)
                     .strokeBorder(selected ? .accentColor : Color(uiColor: .secondarySystemFill))
             }
         }
@@ -153,7 +153,7 @@ private struct CardButtonStyle: ButtonStyle {
         configuration.label
             .overlay {
                 if configuration.isPressed {
-                    RoundedRectangle(cornerRadius: TapZoneCard<EmptyView>.outerCornerRadius)
+                    RoundedRectangle(cornerRadius: 0)
                         .fill(Color.black)
                         .opacity(colorScheme == .dark ? 0.5 : 0.3)
                 }

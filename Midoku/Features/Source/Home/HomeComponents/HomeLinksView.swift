@@ -79,7 +79,7 @@ struct PlaceholderHomeLinksView: View {
         VStack(alignment: .leading, spacing: 2) {
             if showTitle {
                 Text("Loading")
-                    .font(.title3)
+                    .font(.mdTitle3)
                     .fontWeight(.semibold)
                     .padding(.horizontal)
             }

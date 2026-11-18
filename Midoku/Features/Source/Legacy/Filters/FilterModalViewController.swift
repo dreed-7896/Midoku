@@ -69,7 +69,7 @@ class FilterModalViewController: MiniModalViewController {
         doneButton.setTitleColor(.white, for: .normal)
         doneButton.addTarget(self, action: #selector(animateDismissView), for: .touchUpInside)
         doneButton.backgroundColor = view.tintColor
-        doneButton.layer.cornerRadius = 8
+        doneButton.layer.cornerRadius = 0
         doneButton.layer.cornerCurve = .continuous
         doneButton.translatesAutoresizingMaskIntoConstraints = false
         toolbarView.addSubview(doneButton)

@@ -64,6 +64,10 @@ struct SourceHomeContentView: View {
     }
 
     var body: some View {
+        midokuBody.font(.mdBody)
+    }
+
+    @ViewBuilder private var midokuBody: some View {
         ScrollViewReader { reader in
             ScrollView {
                 VStack {}.id(0) // indicator to scroll to the top

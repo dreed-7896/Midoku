@@ -25,7 +25,7 @@ struct BetterBorderedButtonStyle: ButtonStyle {
         .padding(EdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12))
         .foregroundStyle(foregroundColor)
         .background(Color(uiColor: .tertiarySystemFill).opacity(backgroundOpacity))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
     }
 }
 

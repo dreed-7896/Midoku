@@ -401,7 +401,7 @@ struct MCEntryView: View {
         VStack(spacing: 8) {
             if let entry { readingActions(entry) }
             HStack {
-                Text(selecting ? "\(selected.count) selected" : "\(store.chapterCount(entryID: entryID)) chapters").font(.headline)
+                Text(selecting ? "\(selected.count) selected" : "\(store.chapterCount(entryID: entryID)) chapters").font(.mdHeadline)
                 Spacer()
                 if store.isRefreshing { ProgressView() }
             }
@@ -419,7 +419,7 @@ struct MCEntryView: View {
                         }
                         Button("Remove chapters", systemImage: "trash", role: .destructive) { confirmRemoveChapters = true }
                     } label: { Label("Actions", systemImage: "ellipsis.circle") }.disabled(selected.isEmpty)
-                }.font(.subheadline)
+                }.font(.mdSubheadline)
             }
         }.padding(.horizontal).padding(.vertical, 8).background(Color(uiColor: .systemBackground))
     }
@@ -439,29 +439,29 @@ struct MCEntryView: View {
             HStack(alignment: .top, spacing: 16) {
                 Button { showCover = true } label: {
                     MCEntryCover(entry: entry).frame(width: headerCoverWidth, height: headerCoverWidth * 1.5)
-                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                        .clipShape(RoundedRectangle(cornerRadius: 0))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("View cover fullscreen")
                 VStack(alignment: .leading, spacing: 8) {
                     let title = store.library.title(entry)
                     // The full title always shows, wrapping over as many lines as it needs.
                     Text(title)
-                        .font(.title3.bold())
+                        .font(.mdTitle3.bold())
                         .fixedSize(horizontal: false, vertical: true)
                         .contentShape(Rectangle())
                         .gesture(copyOrSearchGesture(for: title))
                     let artist = mainCreator(entry)
                     if !artist.isEmpty {
                         Text(artist)
-                            .font(.subheadline)
+                            .font(.mdSubheadline)
                             .foregroundStyle(.secondary)
                             .contentShape(Rectangle())
                             .gesture(copyOrSearchGesture(for: artist))
                     }
-                    Text(([publishingStatus(entry)].compactMap { $0 } + ["\(entry.links.count) sources"]).joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                    Text(([publishingStatus(entry)].compactMap { $0 } + ["\(entry.links.count) sources"]).joined(separator: " · ")).font(.mdCaption).foregroundStyle(.secondary)
                     if let sourceName = mainSourceName(entry) {
                         Label("Main source: \(sourceName)", systemImage: "globe")
-                            .font(.caption)
+                            .font(.mdCaption)
                             .foregroundStyle(.secondary)
                     }
                     coverActions(entry)
@@ -469,7 +469,7 @@ struct MCEntryView: View {
             }
             if !store.library.description(entry).isEmpty {
                 MCExpandableText(text: store.library.description(entry))
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.mdSubheadline).foregroundStyle(.secondary)
             }
             let tags = entryTags(entry)
             if !tags.isEmpty {
@@ -477,11 +477,11 @@ struct MCEntryView: View {
                     HStack(spacing: 8) {
                         ForEach(tags, id: \.self) { tag in
                             Text(tag)
-                                .font(.subheadline)
+                                .font(.mdSubheadline)
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
-                                .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+                                .background(Color(uiColor: .secondarySystemFill), in: Rectangle())
                         }
                     }
                 }
@@ -499,11 +499,11 @@ struct MCEntryView: View {
                 }
             } label: {
                 Label(entry.lastReadAt != nil || store.unreadCount(entryID: entryID) < store.chapterCount(entryID: entryID) ? "Resume" : "Read",
-                    systemImage: "book.pages").font(.subheadline.weight(.semibold))
+                    systemImage: "book.pages").font(.mdSubheadline.weight(.semibold))
                     .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(.white)
                     .frame(height: 44).padding(.horizontal, 12)
-                    .background(Color.accentColor, in: Capsule())
+                    .background(Color.accentColor, in: Rectangle())
             }
             .buttonStyle(.plain)
             .opacity(store.chapterCount(entryID: entryID) == 0 ? 0.5 : 1)
@@ -534,13 +534,13 @@ struct MCEntryView: View {
                     .accessibilityLabel("Sort chapters")
             }
             .buttonStyle(.plain)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .background(Color(uiColor: .secondarySystemBackground), in: Rectangle())
         }
     }
 
     private func entryActionIcon(_ symbol: String, selected: Bool = false) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: 17, weight: .medium))
+            .font(.mdSystem(size: 17, weight: .medium))
             .foregroundStyle(selected ? Color.accentColor : Color.primary)
             .frame(width: 40, height: 44)
             .contentShape(Rectangle())
@@ -566,10 +566,10 @@ struct MCEntryView: View {
     }
 
     private func coverActionIcon(_ symbol: String) -> some View {
-        Image(systemName: symbol).font(.system(size: 17, weight: .semibold))
+        Image(systemName: symbol).font(.mdSystem(size: 17, weight: .semibold))
             .foregroundStyle(Color.accentColor)
             .frame(width: 36, height: 32)
-            .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 9))
+            .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 0))
             .frame(width: 44, height: 44).contentShape(Rectangle())
     }
 
@@ -646,25 +646,25 @@ struct MCEntryView: View {
         if grid {
             VStack(alignment: .leading, spacing: 6) {
                 MCEntryCover(entry: child).aspectRatio(2/3, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
                     .overlay(alignment: .topTrailing) {
-                        Image(systemName: "books.vertical.fill").font(.caption).foregroundStyle(.white)
+                        Image(systemName: "books.vertical.fill").font(.mdCaption).foregroundStyle(.white)
                             .padding(7).background(.black.opacity(0.65), in: Circle()).padding(6)
                     }
-                Label(store.library.title(child), systemImage: "books.vertical").font(.caption.weight(.semibold)).lineLimit(2)
+                Label(store.library.title(child), systemImage: "books.vertical").font(.mdCaption.weight(.semibold)).lineLimit(2)
                 Text("\(store.chapterCount(entryID: child.id)) chapters · \(store.unreadCount(entryID: child.id)) unread")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.mdCaption2).foregroundStyle(.secondary)
             }
         } else {
             HStack(spacing: 12) {
-                MCEntryCover(entry: child).frame(width: 48, height: 72).clipShape(RoundedRectangle(cornerRadius: 6))
+                MCEntryCover(entry: child).frame(width: 48, height: 72).clipShape(RoundedRectangle(cornerRadius: 0))
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(store.library.title(child), systemImage: "books.vertical").font(.subheadline.weight(.medium)).lineLimit(2)
+                    Label(store.library.title(child), systemImage: "books.vertical").font(.mdSubheadline.weight(.medium)).lineLimit(2)
                     Text("\(store.chapterCount(entryID: child.id)) chapters · \(store.unreadCount(entryID: child.id)) unread")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.mdCaption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "chevron.right").font(.mdCaption).foregroundStyle(.secondary)
             }
         }
     }
@@ -677,7 +677,7 @@ struct MCEntryView: View {
             chapterLabel(slot, grid: grid).frame(maxWidth: .infinity, alignment: .leading).clipped()
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 0))
         .contextMenu {
 
                 Button("Read chapter", systemImage: "book") { open(slot) }
@@ -734,14 +734,14 @@ struct MCEntryView: View {
                     .id("\(slot.preferredID.uuidString)-\(thumbnailRevision)")
                     .overlay(alignment: .bottomLeading) {
                         if gridStyle == .compact, let variant = slot.preferred {
-                            Text(store.library.chapterDisplayTitle(variant)).font(.caption.weight(.semibold)).lineLimit(1)
+                            Text(store.library.chapterDisplayTitle(variant)).font(.mdCaption.weight(.semibold)).lineLimit(1)
                                 .foregroundStyle(.white).padding(.horizontal, 8).padding(.top, 24).padding(.bottom, 8)
                                 .padding(.leading, store.library.isRead(slot) && !selecting ? 20 : 0)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom))
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
                     .overlay(alignment: .bottomLeading) {
                         if store.library.isRead(slot) && !selecting { readMark.padding(6) }
                     }
@@ -760,30 +760,30 @@ struct MCEntryView: View {
                 if let entry {
                     MCChapterListArtwork(entry: entry, variant: slot.preferred)
                         .frame(width: 48, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .clipShape(RoundedRectangle(cornerRadius: 0))
                         .id("\(slot.preferredID.uuidString)-\(thumbnailRevision)")
                 }
                 chapterText(slot, compact: false)
                 Spacer(minLength: 0)
                 if bookmarkedSlotIDs.contains(slot.id) {
-                    Image(systemName: "bookmark.fill").font(.subheadline).foregroundStyle(Color.accentColor)
+                    Image(systemName: "bookmark.fill").font(.mdSubheadline).foregroundStyle(Color.accentColor)
                         .accessibilityLabel("Bookmarked chapter")
                 }
                 if selecting { selectionMark(slot) }
-                else if store.library.isRead(slot) { Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.secondary) }
+                else if store.library.isRead(slot) { Image(systemName: "checkmark.circle.fill").font(.mdCaption).foregroundStyle(.secondary) }
             }.opacity(store.library.isRead(slot) && !selecting ? 0.65 : 1)
         }
     }
 
     private func selectionMark(_ slot: MCChapterSlot) -> some View {
         Image(systemName: selected.contains(slot.id) ? "checkmark.circle.fill" : "circle")
-            .font(.title3).symbolRenderingMode(.palette).foregroundStyle(.white, Color.accentColor)
+            .font(.mdTitle3).symbolRenderingMode(.palette).foregroundStyle(.white, Color.accentColor)
             .background(Circle().fill(Color.accentColor)).accessibilityLabel(selected.contains(slot.id) ? "Selected" : "Not selected")
     }
 
     private var readMark: some View {
         Image(systemName: "checkmark")
-            .font(.system(size: 9, weight: .bold))
+            .font(.mdSystem(size: 9, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 18, height: 18)
             .background(.black.opacity(0.58), in: Circle())
@@ -793,10 +793,10 @@ struct MCEntryView: View {
 
     private var bookmarkMark: some View {
         Image(systemName: "bookmark.fill")
-            .font(.system(size: 12, weight: .semibold))
+            .font(.mdSystem(size: 12, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 26, height: 30)
-            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 0))
             .accessibilityLabel("Bookmarked chapter")
     }
 
@@ -806,15 +806,15 @@ struct MCEntryView: View {
                 Text(store.library.chapterDisplayTitle(variant)).font(compact ? .caption.weight(.semibold) : .subheadline.weight(.medium)).lineLimit(1)
                 let subtitle = variant.edits.title == nil && chapter.record.title != store.library.chapterDisplayTitle(variant) ? chapter.record.title : ""
                 if compact || !subtitle.isEmpty {
-                    Text(subtitle.isEmpty ? " " : subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(subtitle.isEmpty ? " " : subtitle).font(.mdCaption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Text(store.sourceName(chapter.identity.listing.connectionID) + (slot.variants.count > 1 ? " · \(slot.variants.count) alternatives" : ""))
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.mdCaption2).foregroundStyle(.secondary).lineLimit(1)
                 if !compact, let date = store.chapterReleaseDate(chapter.id) {
                     Label {
                         Text(date, format: .dateTime.day().month(.abbreviated).year())
                     } icon: { Image(systemName: "calendar") }
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.mdCaption2).foregroundStyle(.secondary)
                     .accessibilityLabel("Released \(date.formatted(date: .abbreviated, time: .omitted))")
                 }
             }
@@ -932,7 +932,7 @@ struct MCExpandableText: View {
                 Button(expanded ? "Less" : "More") {
                     withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                 }
-                .font(.subheadline.weight(.semibold))
+                .font(.mdSubheadline.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
                 .accessibilityLabel(expanded ? "Show less description" : "Show full description")
             }

@@ -408,7 +408,7 @@ struct MCArtistShelfView: View {
             content
             if let skipped = model.artistSkipped[feed.id] {
                 Label("No response from \(skipped.joined(separator: ", ")); skipped.", systemImage: "clock.badge.exclamationmark")
-                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                    .font(.mdCaption).foregroundStyle(.secondary).padding(.horizontal)
             }
         }
     }
@@ -429,19 +429,19 @@ struct MCArtistShelfView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 8) {
-                            Image(systemName: "paintbrush.pointed.fill").font(.subheadline.weight(.bold)).foregroundStyle(Color.accentColor)
-                            Text(feed.listingName).font(.title2.bold()).foregroundStyle(.primary).lineLimit(1)
+                            Image(systemName: "paintbrush.pointed.fill").font(.mdSubheadline.weight(.bold)).foregroundStyle(Color.accentColor)
+                            Text(feed.listingName).font(.mdTitle2.bold()).foregroundStyle(.primary).lineLimit(1)
                             if let count = model.newKeys[feed.id]?.count, count > 0 {
-                                Text("\(count) new").font(.caption.bold()).foregroundStyle(.white)
-                                    .padding(.horizontal, 7).padding(.vertical, 2).background(Color.accentColor, in: Capsule())
+                                Text("\(count) new").font(.mdCaption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 7).padding(.vertical, 2).background(Color.accentColor, in: Rectangle())
                             }
                         }
                         HStack(spacing: 6) {
                             if model.artistProgress[feed.id] != nil { ProgressView().controlSize(.mini) }
-                            Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).monospacedDigit()
+                            Text(subtitle).font(.mdSubheadline).foregroundStyle(.secondary).lineLimit(1).monospacedDigit()
                         }
                     }
-                    Image(systemName: "chevron.right").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right").font(.mdSubheadline.weight(.semibold)).foregroundStyle(.tertiary)
                 }
                 .contentShape(Rectangle())
             }
@@ -457,7 +457,7 @@ struct MCArtistShelfView: View {
                 Button("Move down", systemImage: "arrow.down") { model.move(feed, by: 1) }.disabled(index == model.feeds.count - 1)
                 Button("Remove shelf", systemImage: "trash", role: .destructive) { model.remove(feed) }
             } label: {
-                Image(systemName: "ellipsis").font(.body.weight(.semibold)).foregroundStyle(.secondary)
+                Image(systemName: "ellipsis").font(.mdBody.weight(.semibold)).foregroundStyle(.secondary)
                     .frame(width: 36, height: 36).background(Color(uiColor: .secondarySystemBackground), in: Circle())
             }
             .accessibilityLabel("Shelf options")
@@ -487,16 +487,16 @@ struct MCArtistShelfView: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(error).font(.subheadline).foregroundStyle(.secondary)
+                    Text(error).font(.mdSubheadline).foregroundStyle(.secondary)
                     HStack(spacing: 16) {
                         Button("Try again") { Task { await model.load(feed, force: true) } }
                         Button("Edit shelf", action: edit)
-                    }.font(.subheadline.weight(.semibold))
+                    }.font(.mdSubheadline.weight(.semibold))
                 }
                 Spacer(minLength: 0)
             }
             .padding()
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 0))
             .padding(.horizontal)
         } else if model.loading.contains(feed.id) || model.releases[feed.id] == nil {
             VStack(spacing: 12) {
@@ -506,7 +506,7 @@ struct MCArtistShelfView: View {
             .accessibilityLabel("Loading")
         } else {
             Text(artist == nil ? "No releases found for these artists in the chosen extensions." : "No releases found for \(artist ?? "").")
-                .font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
+                .font(.mdSubheadline).foregroundStyle(.secondary).padding(.horizontal)
         }
     }
 }
@@ -529,10 +529,10 @@ struct MCArtistChips: View {
 
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+            Text(title).font(.mdSubheadline.weight(.semibold)).lineLimit(1)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .foregroundStyle(selected ? Color.white : Color.primary)
-                .background(selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground), in: Capsule())
+                .background(selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground), in: Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -550,13 +550,13 @@ struct MCArtistReleaseRow: View {
             SourceImageView(source: sources.source(for: release.sourceKey), imageUrl: release.cover ?? "", width: 64, height: 96,
                             placeholder: "MidokuCoverPlaceholder")
                 .frame(width: 64, height: 96).clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 0))
+                .overlay(RoundedRectangle(cornerRadius: 0).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
                 .overlay(alignment: .topLeading) { if isNew { MCArtistNewBadge().padding(4) } }
             VStack(alignment: .leading, spacing: 4) {
-                Text(release.title).font(.subheadline.weight(.semibold)).lineLimit(3).foregroundStyle(.primary)
-                Text(release.matched.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Text(sources.source(for: release.sourceKey)?.name ?? "").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                Text(release.title).font(.mdSubheadline.weight(.semibold)).lineLimit(3).foregroundStyle(.primary)
+                Text(release.matched.joined(separator: ", ")).font(.mdCaption).foregroundStyle(.secondary).lineLimit(1)
+                Text(sources.source(for: release.sourceKey)?.name ?? "").font(.mdCaption2).foregroundStyle(.tertiary).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -568,10 +568,10 @@ struct MCArtistReleaseRow: View {
 
     static var placeholder: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 8).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 64, height: 96)
+            RoundedRectangle(cornerRadius: 0).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 64, height: 96)
             VStack(alignment: .leading, spacing: 8) {
-                RoundedRectangle(cornerRadius: 4).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 180, height: 14)
-                RoundedRectangle(cornerRadius: 4).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 110, height: 10)
+                RoundedRectangle(cornerRadius: 0).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 180, height: 14)
+                RoundedRectangle(cornerRadius: 0).fill(Color(uiColor: .secondarySystemBackground)).frame(width: 110, height: 10)
             }
             Spacer()
         }
@@ -581,9 +581,9 @@ struct MCArtistReleaseRow: View {
 
 private struct MCArtistNewBadge: View {
     var body: some View {
-        Text("NEW").font(.caption2.weight(.heavy)).foregroundStyle(.white)
+        Text("NEW").font(.mdCaption2.weight(.heavy)).foregroundStyle(.white)
             .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(Color.accentColor, in: Capsule())
+            .background(Color.accentColor, in: Rectangle())
     }
 }
 
@@ -616,7 +616,7 @@ struct MCArtistReleasesView: View {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text("Searching \(progress.done) of \(progress.total)…")
-                            .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.mdFootnote).foregroundStyle(.secondary).monospacedDigit()
                     }
                     .padding(.horizontal)
                 }
@@ -719,12 +719,12 @@ struct MCArtistPicker: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.name).foregroundStyle(.primary)
-                                    Text("\(entry.count) title\(entry.count == 1 ? "" : "s") in library").font(.caption).foregroundStyle(.secondary)
+                                    Text("\(entry.count) title\(entry.count == 1 ? "" : "s") in library").font(.mdCaption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
-                                    .font(.title3)
+                                    .font(.mdTitle3)
                             }
                             .contentShape(Rectangle())
                         }
@@ -793,7 +793,7 @@ struct MCSourceMultiPicker: View {
                             selected.append(source.key)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "plus.circle.fill").foregroundStyle(.green).font(.title3)
+                                Image(systemName: "plus.circle.fill").foregroundStyle(.green).font(.mdTitle3)
                                 SourceIconView(sourceId: source.key, imageUrl: source.imageUrl, iconSize: 32)
                                 Text(source.name).foregroundStyle(.primary)
                                 Spacer()

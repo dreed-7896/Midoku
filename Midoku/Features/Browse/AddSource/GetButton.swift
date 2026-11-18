@@ -38,11 +38,11 @@ struct GetButton: View {
             }
         }
         .buttonStyle(.borderless)
-        .font(.system(size: 15).weight(.bold))
+        .font(.mdSystem(size: 15).weight(.bold))
         .padding(.vertical, 4)
         .padding(.horizontal, buttonState == .loading ? 4 : 14)
         .background(Color(uiColor: .tertiarySystemFill))
-        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
 //        .animation(.default, value: buttonState)
     }
 }

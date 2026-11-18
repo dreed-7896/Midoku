@@ -30,9 +30,9 @@ struct SourceIconView: View {
             Image(imageName)
                 .resizable()
                 .frame(width: iconSize, height: iconSize)
-                .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.225))
+                .clipShape(RoundedRectangle(cornerRadius: 0))
                 .overlay(
-                    RoundedRectangle(cornerRadius: iconSize * 0.225)
+                    RoundedRectangle(cornerRadius: 0)
                         .strokeBorder(Color(uiColor: UIColor.quaternarySystemFill), lineWidth: 1)
                 )
         }
@@ -49,9 +49,9 @@ private struct IconView: View {
             width: iconSize,
             height: iconSize
         )
-        .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.225))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
         .overlay(
-            RoundedRectangle(cornerRadius: iconSize * 0.225)
+            RoundedRectangle(cornerRadius: 0)
                 .strokeBorder(Color(uiColor: UIColor.quaternarySystemFill), lineWidth: 1)
         )
     }

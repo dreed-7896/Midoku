@@ -25,6 +25,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             #endif
             window.rootViewController = TabBarController()
             window.tintColor = MidokuAccent.uiColor(AppSettings.appearance.accent.get())
+            window.backgroundColor = MDColor.bg
 
             if AppSettings.appearance.useSystemAppearance.get() {
                 window.overrideUserInterfaceStyle = .unspecified

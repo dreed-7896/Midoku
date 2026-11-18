@@ -79,7 +79,7 @@ struct HomeBigScrollerView: View {
 
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(entry.title)
-                                        .font(.title3)
+                                        .font(.mdTitle3)
                                         .fontWeight(.semibold)
                                         .lineLimit(3)
                                         .multilineTextAlignment(.leading)
@@ -91,7 +91,7 @@ struct HomeBigScrollerView: View {
                                     if let description = entry.description {
                                         Text(description)
                                             .foregroundStyle(.secondary)
-                                            .font(.callout)
+                                            .font(.mdCallout)
                                             .lineLimit(3)
                                             .multilineTextAlignment(.leading)
                                     }
@@ -202,7 +202,7 @@ struct PlaceholderMangaHomeBigScroller: View {
     var body: some View {
         VStack(alignment: .leading) {
             Text("Loading")
-                .font(.title3)
+                .font(.mdTitle3)
                 .fontWeight(.semibold)
                 .lineLimit(1)
                 .padding(.horizontal)
@@ -216,7 +216,7 @@ struct PlaceholderMangaHomeBigScroller: View {
     static var mainView: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: 0, style: .continuous)
                     .fill(Color(.secondarySystemFill))
                     .frame(
                         width: HomeBigScrollerView.coverHeight * 2/3,
@@ -225,7 +225,7 @@ struct PlaceholderMangaHomeBigScroller: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Loading Title")
-                        .font(.title3)
+                        .font(.mdTitle3)
                         .fontWeight(.semibold)
                         .multilineTextAlignment(.leading)
 
@@ -235,7 +235,7 @@ struct PlaceholderMangaHomeBigScroller: View {
                     // fake redacted text lines, to avoid layout issues with multiline redacted text
                     VStack(alignment: .leading, spacing: 29/3) {
                         ForEach(0..<3) { _ in
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: 0)
                                 .fill(Color(uiColor: .secondaryLabel).opacity(0.25))
                                 .frame(maxWidth: .infinity, minHeight: 34/3, maxHeight: 34/3)
                         }

@@ -80,7 +80,7 @@ struct ChapterListHeaderView: View {
                 NSLocalizedString("LOADING_ELLIPSIS")
             }
             Text(text)
-                .font(.headline)
+                .font(.mdHeadline)
                 .transition(.scale) // for some reason this makes it animate correctly
                 .id("chapters")
 
@@ -203,7 +203,7 @@ struct ChapterListHeaderView: View {
             }
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
-                .font(.system(size: 21, weight: .regular))
+                .font(.mdSystem(size: 21, weight: .regular))
         }
         .foregroundStyle(.tint)
     }

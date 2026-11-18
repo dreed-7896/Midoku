@@ -65,15 +65,15 @@ struct ReaderTranslationListView: View {
                         dismiss()
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            Text("\(item.region.id + 1)").font(.caption.bold())
+                            Text("\(item.region.id + 1)").font(.mdCaption.bold())
                                 .foregroundStyle(.white)
                                 .frame(width: 28, height: 28)
                                 .background(Color.accentColor, in: Circle())
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(item.pageLabel).font(.caption.bold()).foregroundStyle(.secondary)
+                                Text(item.pageLabel).font(.mdCaption.bold()).foregroundStyle(.secondary)
                                 Text(item.translation).foregroundStyle(.primary)
-                                Text(item.region.sourceText).font(.caption).foregroundStyle(.secondary)
-                                Text("Show on page").font(.caption).foregroundStyle(Color.accentColor)
+                                Text(item.region.sourceText).font(.mdCaption).foregroundStyle(.secondary)
+                                Text("Show on page").font(.mdCaption).foregroundStyle(Color.accentColor)
                             }
                             Spacer(minLength: 0)
                             if item.id == selected { Image(systemName: "checkmark.circle.fill") }
@@ -116,7 +116,7 @@ struct ReaderTranslationOptionsView: View {
 
                 Section("Appearance") {
                     Slider(value: $fontSize, in: 10...24, step: 1).accessibilityLabel("Translation text size")
-                    Text("Translation preview").font(.system(size: fontSize))
+                    Text("Translation preview").font(.mdSystem(size: fontSize))
                     Slider(value: $opacity, in: 0.5...1).accessibilityLabel("Translation background opacity")
                 }
             }

@@ -73,7 +73,7 @@ struct HeatmapView: View {
                     let startIndex = calendar.firstWeekday - 1
                     ForEach(daysOfWeek.indices, id: \.self) { index in
                         Text(daysOfWeek[(index + startIndex) % daysOfWeek.count])
-                            .font(.system(.caption2, design: .rounded).weight(.medium))
+                            .font(.mdSystem(.caption2, design: .rounded).weight(.medium))
                             .foregroundColor(.primary)
                             .offset(y: topPadding + CGFloat(index) * (cellSize + cellSpacing))
                             .frame(height: cellSize)
@@ -82,7 +82,7 @@ struct HeatmapView: View {
                     // month headers
                     ForEach(monthHeaders, id: \.index) { header in
                         Text(header.label)
-                            .font(.system(.caption2, design: .rounded).weight(.medium))
+                            .font(.mdSystem(.caption2, design: .rounded).weight(.medium))
                             .foregroundColor(.primary)
                             .fixedSize(horizontal: true, vertical: false)
                             .frame(height: headerHeight, alignment: .leading)
@@ -101,9 +101,9 @@ struct HeatmapView: View {
                                         Rectangle()
                                             .fill(colorForValue(value))
                                             .frame(width: cellSize, height: cellSize)
-                                            .cornerRadius(3)
+                                            .cornerRadius(0)
                                             .overlay(
-                                                RoundedRectangle(cornerRadius: 3)
+                                                RoundedRectangle(cornerRadius: 0)
                                                     .stroke(Color.gray.opacity(0.1), lineWidth: 0.5)
                                             )
                                             .accessibilityLabel(Text("\(date): \(value)"))

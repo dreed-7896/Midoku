@@ -18,8 +18,8 @@
         "color-space": "srgb",
         "components": {
           "red": "1.000000",
-          "green": "0.603922",
-          "blue": "0.552941",
+          "green": "0.419608",
+          "blue": "0.368627",
           "alpha": "1.000000"
         }
       },

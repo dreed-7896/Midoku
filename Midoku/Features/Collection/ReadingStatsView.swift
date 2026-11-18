@@ -37,11 +37,11 @@ struct MCReadingStatsView: View {
                         ForEach(stats.topTitles) { item in
                             HStack(spacing: 12) {
                                 if let id = item.entryID, let entry = store.library.entry(id) {
-                                    MCEntryCover(entry: entry).frame(width: 32, height: 48).clipShape(RoundedRectangle(cornerRadius: 4))
+                                    MCEntryCover(entry: entry).frame(width: 32, height: 48).clipShape(RoundedRectangle(cornerRadius: 0))
                                     Text(store.library.title(entry)).lineLimit(2)
                                 }
                                 Spacer()
-                                Text("\(item.chapters) ch").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                                Text("\(item.chapters) ch").font(.mdSubheadline.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -69,8 +69,8 @@ struct MCReadingStatsView: View {
 
     private func tile(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.title2.bold().monospacedDigit())
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.mdTitle2.bold().monospacedDigit())
+            Text(label).font(.mdCaption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)

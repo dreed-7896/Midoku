@@ -43,10 +43,10 @@ struct MCAddChapterToEntryView: View {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(store.library.title(entry)).foregroundStyle(.primary).lineLimit(2)
                                         if let path = store.library.parentPath(of: entry) {
-                                            Text(path).font(.caption2).foregroundStyle(.secondary)
+                                            Text(path).font(.mdCaption2).foregroundStyle(.secondary)
                                         }
                                         Text("\(store.chapterCount(entryID: entry.id)) chapters · \(entry.status.title)")
-                                            .font(.caption)
+                                            .font(.mdCaption)
                                             .foregroundStyle(.secondary)
                                     }
                                     Spacer()
@@ -69,7 +69,7 @@ struct MCAddChapterToEntryView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button("Add chapter", systemImage: "plus") { add() }
-                    .font(.headline)
+                    .font(.mdHeadline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .buttonStyle(.borderedProminent)
@@ -130,7 +130,7 @@ struct MCRemovedChaptersView: View {
                                         Text(chapter.record.number.map { "Chapter \($0)" } ?? chapter.record.title)
                                             .foregroundStyle(.primary)
                                         Text(store.sourceName(chapter.identity.listing.connectionID))
-                                            .font(.caption)
+                                            .font(.mdCaption)
                                             .foregroundStyle(.secondary)
                                     }
                                     Spacer()

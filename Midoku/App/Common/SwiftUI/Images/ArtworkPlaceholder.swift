@@ -11,11 +11,11 @@ struct MCArtworkPlaceholder: View {
             ZStack {
                 Color(uiColor: .secondarySystemBackground)
                 accentColor.opacity(0.09)
-                RoundedRectangle(cornerRadius: max(3, width * 0.04))
+                RoundedRectangle(cornerRadius: 0)
                     .stroke(accentColor.opacity(0.18), lineWidth: 1)
                     .padding(inset)
                 Image(systemName: "book.pages")
-                    .font(.system(size: max(14, min(width, geometry.size.height) * 0.35), weight: .light))
+                    .font(.mdSystem(size: max(14, min(width, geometry.size.height) * 0.35), weight: .light))
                     .foregroundStyle(accentColor.opacity(0.7))
             }
         }.accessibilityHidden(true)

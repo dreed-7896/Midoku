@@ -127,14 +127,14 @@ struct CheckFilterGroupView: View {
         } label: {
             HStack {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 5)
+                    RoundedRectangle(cornerRadius: 0)
                         .fill(state == 0 ? Color(uiColor: .secondarySystemFill) : Color.accentColor)
                         .aspectRatio(1, contentMode: .fill)
                         .frame(width: 24)
                     if state == 1 || state == 2 {
                         Image(systemName: state == 1 ? "checkmark" : "xmark")
                             .foregroundStyle(.white)
-                            .font(.system(size: 14).weight(.semibold))
+                            .font(.mdSystem(size: 14).weight(.semibold))
                     }
                 }
                 Text(name ?? filter.title ?? "")

@@ -20,7 +20,7 @@ struct ErrorView: View {
     var body: some View {
         VStack(alignment: .center, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.title.weight(.semibold))
+                .font(.mdTitle.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             Group {
@@ -75,7 +75,7 @@ struct ErrorView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.body.weight(.medium))
+                            .font(.mdBody.weight(.medium))
                         Text(title)
                     }
                 }

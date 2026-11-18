@@ -42,7 +42,7 @@ struct SettingHeaderView: View {
                 .padding(.bottom, 11)
 
             Text(title)
-                .font(.title2.weight(.bold))
+                .font(.mdTitle2.weight(.bold))
             Text(subtitle)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
@@ -77,7 +77,7 @@ struct SettingHeaderView: View {
                     .padding(CGFloat(inset) / 29 * size)
                     .frame(width: size, height: size)
                     .background(color.toColor())
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.26))
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
             case let .url(string):
                 SourceImageView(
                     source: source,
@@ -86,13 +86,13 @@ struct SettingHeaderView: View {
                     height: size,
                     downsampleWidth: size * 2
                 )
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.26))
+                .clipShape(RoundedRectangle(cornerRadius: 0))
             case let .raw(image):
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.26))
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
         }
     }
 }

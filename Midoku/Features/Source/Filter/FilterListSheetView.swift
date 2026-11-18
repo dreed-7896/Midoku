@@ -121,7 +121,7 @@ struct FilterListSheetView: View {
             Button(NSLocalizedString("APPLY")) {
                 dismiss()
             }
-            .font(.body.weight(.medium))
+            .font(.mdBody.weight(.medium))
         }
     }
 
@@ -451,7 +451,7 @@ private struct FilterListView: View {
     private func titleView(_ title: String?, searchId: String? = nil) -> some View {
         HStack {
             Text(title ?? "")
-                .font(.title3.weight(.semibold))
+                .font(.mdTitle3.weight(.semibold))
             Spacer()
             if let searchId {
                 let isSearching = search[searchId] != nil
@@ -497,7 +497,7 @@ private struct FilterListView: View {
         }
         .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 0, style: .continuous)
                 .fill(Color(uiColor: .tertiarySystemFill))
         )
     }

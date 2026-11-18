@@ -21,7 +21,7 @@ struct TitleView: View {
                     titleView
                     Spacer()
                     Image(systemName: "chevron.forward")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.mdSubheadline.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
                 .contentShape(Rectangle())
@@ -42,15 +42,15 @@ struct TitleView: View {
         if let subtitle {
             VStack(alignment: .leading) {
                 Text(title)
-                    .font(.title3)
+                    .font(.mdTitle3)
                     .fontWeight(.semibold)
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.mdSubheadline)
                     .foregroundStyle(.secondary)
             }
         } else {
             Text(title)
-                .font(.title3)
+                .font(.mdTitle3)
                 .fontWeight(.semibold)
         }
     }

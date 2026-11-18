@@ -188,14 +188,14 @@ struct SelectFilterGroupView: View {
                     HStack {
                         ZStack {
                             let selected = selectedOption == option.value
-                            RoundedRectangle(cornerRadius: 5)
+                            RoundedRectangle(cornerRadius: 0)
                                 .fill(selected ? Color.accentColor : Color(uiColor: .secondarySystemFill))
                                 .aspectRatio(1, contentMode: .fill)
                                 .frame(width: 24)
                             if selected {
                                 Image(systemName: "checkmark")
                                     .foregroundStyle(.white)
-                                    .font(.system(size: 14).weight(.semibold))
+                                    .font(.mdSystem(size: 14).weight(.semibold))
                             }
                         }
                         Text(option.title)
@@ -221,16 +221,16 @@ private struct SelectButtonStyle: ButtonStyle {
         let backgroundColor = selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground)
         return // HStack(spacing: 5) {
             configuration.label
-                .font(.callout)
+                .font(.mdCallout)
 //            if selected {
 //                Image(systemName: "checkmark")
-//                    .font(.callout.weight(.medium))
+//                    .font(.mdCallout.weight(.medium))
 //            }
 //        }
         .padding(.vertical, 5)
         .padding(.horizontal, 12)
         .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.7 : 1))
         .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
     }
 }

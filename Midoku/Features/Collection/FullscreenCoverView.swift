@@ -22,7 +22,7 @@ struct MCFullscreenCoverView: View {
         .background(.black)
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.headline).foregroundStyle(.white)
+                Image(systemName: "xmark").font(.mdHeadline).foregroundStyle(.white)
                     .frame(width: 44, height: 44).background(.black.opacity(0.65), in: Circle())
             }.padding().accessibilityLabel("Close cover")
         }

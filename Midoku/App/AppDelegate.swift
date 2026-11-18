@@ -105,6 +105,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        MidokuTheme.install()
+        // One-time switch to the Midoku Web look (dark); the appearance setting still works afterwards.
+        if !UserDefaults.standard.bool(forKey: "Midoku.webDesignApplied") {
+            UserDefaults.standard.set(true, forKey: "Midoku.webDesignApplied")
+            UserDefaults.standard.set(false, forKey: "General.useSystemAppearance")
+            UserDefaults.standard.set(1, forKey: "General.appearance")
+        }
         UserDefaults.standard.register(
             defaults: [
                 "Reader.readingMode": "auto",

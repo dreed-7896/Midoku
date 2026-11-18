@@ -24,16 +24,16 @@ struct UnavailableView: View {
         } else {
             VStack(spacing: 16) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 48))
+                    .font(.mdSystem(size: 48))
                     .foregroundStyle(.secondary)
 
                 VStack(spacing: 4) {
                     Text(title)
-                        .font(.title2.weight(.bold))
+                        .font(.mdTitle2.weight(.bold))
 
                     if let description {
                         description
-                            .font(.callout)
+                            .font(.mdCallout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }

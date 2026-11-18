@@ -35,11 +35,11 @@ struct ExternalSourceTableCell: View {
 
                         Text(text)
                             .foregroundStyle(.secondary)
-                            .font(.system(size: 10))
+                            .font(.mdSystem(size: 10))
                             .padding(.vertical, 3)
                             .padding(.horizontal, 5)
                             .background(background)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
                             .padding(.leading, 3)
                     }
                 }
@@ -54,7 +54,7 @@ struct ExternalSourceTableCell: View {
                     .foregroundStyle(.secondary)
                 }
             }
-            .font(.system(size: 16))
+            .font(.mdSystem(size: 16))
 
             Spacer(minLength: 0)
 

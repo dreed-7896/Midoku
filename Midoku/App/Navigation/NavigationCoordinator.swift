@@ -24,7 +24,7 @@ class NavigationCoordinator: ObservableObject {
     }
 
     func push<V: View>(_ view: V, animated: Bool = true, title: String? = nil) {
-        let vc = UIHostingController(rootView: view.environmentObject(self))
+        let vc = UIHostingController(rootView: view.environmentObject(self).midokuStyle())
         vc.title = title
         navigationController?.pushViewController(vc, animated: animated)
     }
@@ -34,7 +34,7 @@ class NavigationCoordinator: ObservableObject {
     }
 
 //    func present<V: View>(_ view: V, animated: Bool = true) {
-//        let vc = UIHostingController(rootView: view.environmentObject(self))
+//        let vc = UIHostingController(rootView: view.environmentObject(self).midokuStyle())
 //        rootViewController?.present(vc, animated: animated)
 //    }
 

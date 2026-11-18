@@ -28,14 +28,14 @@ struct ReaderChapterListView: View {
                             VStack(alignment: .leading) {
                                 Text(displayString(for: chapter))
                                     .foregroundColor(.primary)
-                                    .font(.subheadline)
+                                    .font(.mdSubheadline)
                                 if let route = collectionSequence?.route(chapter) {
-                                    Text(route.source?.name ?? route.manga.sourceKey).font(.caption).foregroundStyle(.secondary)
+                                    Text(route.source?.name ?? route.manga.sourceKey).font(.mdCaption).foregroundStyle(.secondary)
                                 }
                                 if let title = chapter.title, chapter.chapterNumber != nil || chapter.volumeNumber != nil {
                                     Text(title)
                                         .foregroundColor(.secondary)
-                                        .font(.subheadline)
+                                        .font(.mdSubheadline)
                                 }
                             }
                             Spacer()

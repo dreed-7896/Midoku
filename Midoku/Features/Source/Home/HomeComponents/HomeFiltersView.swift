@@ -79,7 +79,7 @@ struct HomeFiltersView: View {
                                     } label: {
                                         HStack(spacing: 6) {
                                             Image(systemName: "ellipsis.circle")
-                                                .font(.system(size: 15))
+                                                .font(.mdSystem(size: 15))
                                             Text(NSLocalizedString("SEE_ALL"))
                                         }
                                         .padding(2)
@@ -123,7 +123,7 @@ struct PlaceholderHomeFiltersView: View {
         VStack(alignment: .leading, spacing: 6) {
             if showTitle {
                 Text("Loading")
-                    .font(.title3)
+                    .font(.mdTitle3)
                     .fontWeight(.semibold)
                     .padding(.horizontal)
             }

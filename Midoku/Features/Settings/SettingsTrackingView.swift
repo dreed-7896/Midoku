@@ -24,7 +24,7 @@ struct SettingsTrackingView: View {
     @State private var showLogoutAlert = false
 
     private let iconSize: CGFloat = 42
-    private let iconCornerRadius: CGFloat = 42 * 0.225
+    private let iconCornerRadius: CGFloat = 0 * 0.225
 
     // empty view controller to support login view presentation
     private static var loginShimController = LoginShimViewController()
@@ -74,9 +74,9 @@ struct SettingsTrackingView: View {
                                 Image(uiImage: icon)
                                     .resizable()
                                     .frame(width: iconSize, height: iconSize)
-                                    .clipShape(RoundedRectangle(cornerRadius: iconCornerRadius))
+                                    .clipShape(RoundedRectangle(cornerRadius: 0))
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: iconCornerRadius)
+                                        RoundedRectangle(cornerRadius: 0)
                                             .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
                                     )
                             }
@@ -127,9 +127,9 @@ struct SettingsTrackingView: View {
                                         Image(uiImage: icon)
                                             .resizable()
                                             .frame(width: iconSize, height: iconSize)
-                                            .clipShape(RoundedRectangle(cornerRadius: iconCornerRadius))
+                                            .clipShape(RoundedRectangle(cornerRadius: 0))
                                             .overlay(
-                                                RoundedRectangle(cornerRadius: iconCornerRadius)
+                                                RoundedRectangle(cornerRadius: 0)
                                                     .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
                                             )
                                     }

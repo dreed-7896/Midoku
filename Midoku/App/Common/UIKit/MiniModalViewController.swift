@@ -17,7 +17,7 @@ class MiniModalViewController: UIViewController {
     var containerView: UIView = {
         let view = UIView()
         view.backgroundColor = .secondarySystemGroupedBackground
-        view.layer.cornerRadius = 16
+        view.layer.cornerRadius = 0
         view.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         return view
     }()

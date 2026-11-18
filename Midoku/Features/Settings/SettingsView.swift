@@ -62,7 +62,7 @@ extension SettingsView {
                                                         }
                                                     }
                                                 }
-                                                .font(.footnote)
+                                                .font(.mdFootnote)
                                                 .foregroundColor(.secondary)
                                                 .frame(maxWidth: .infinity, alignment: .leading)
                                             }
@@ -87,7 +87,7 @@ extension SettingsView {
                                                         .padding(CGFloat(inset))
                                                         .frame(width: iconSize, height: iconSize)
                                                         .background(color.toColor())
-                                                        .clipShape(RoundedRectangle(cornerRadius: 6.5))
+                                                        .clipShape(RoundedRectangle(cornerRadius: 0))
                                                 case .url(let string):
                                                     SourceImageView(
                                                         imageUrl: string,
@@ -95,7 +95,7 @@ extension SettingsView {
                                                         height: iconSize,
                                                         downsampleWidth: iconSize * 2
                                                     )
-                                                    .clipShape(RoundedRectangle(cornerRadius: 6.5))
+                                                    .clipShape(RoundedRectangle(cornerRadius: 0))
                                             }
                                         }
                                         .scaleEffect(0.75)
@@ -120,7 +120,7 @@ extension SettingsView {
         }
         .searchable(text: $searchText)
         .navigationTitle(NSLocalizedString("SETTINGS"))
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .midokuAccent()
         .navigationDestination(isPresented: $showAppearancePreview) {
             SettingPageDestination(setting: .init(title: "Appearance", value: .page(.init(items: Settings.appearanceSettings))),

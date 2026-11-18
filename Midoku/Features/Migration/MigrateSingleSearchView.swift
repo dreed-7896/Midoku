@@ -98,7 +98,7 @@ struct MigrateSingleSearchView: View {
                             // todo
 //                            Button(NSLocalizedString("VIEW_MORE")) {}
                         }
-                        .font(.body)
+                        .font(.mdBody)
                         .textCase(nil)
                     }
                 }

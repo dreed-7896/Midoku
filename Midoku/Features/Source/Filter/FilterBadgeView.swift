@@ -21,7 +21,7 @@ struct FilterBadgeView: View {
             .frame(height: Self.size)
             .foregroundColor(colorScheme == .light ? .white : .accentColor)
             .background {
-                RoundedRectangle(cornerRadius: Self.size / 2)
+                RoundedRectangle(cornerRadius: 0)
                     .foregroundColor(colorScheme == .light ? .accentColor : .white)
             }
     }

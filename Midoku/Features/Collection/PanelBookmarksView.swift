@@ -66,9 +66,9 @@ struct MCPanelBookmarksView: View {
                                 HStack(spacing: 12) {
                                     if bookmark.isChapter {
                                         Image(systemName: "book.closed.fill")
-                                            .font(.title2).foregroundStyle(Color.accentColor)
+                                            .font(.mdTitle2).foregroundStyle(Color.accentColor)
                                             .frame(width: 64, height: 88)
-                                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                                            .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 0))
                                     } else if let data = bookmark.preview, let image = UIImage(data: data) {
                                         Image(uiImage: image).resizable().scaledToFit()
                                             .frame(width: 64, height: 88).clipped()
@@ -77,18 +77,18 @@ struct MCPanelBookmarksView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(bookmark.chapterTitle).font(.headline).lineLimit(2)
+                                        Text(bookmark.chapterTitle).font(.mdHeadline).lineLimit(2)
                                         if bookmark.isChapter {
                                             Label("Chapter bookmark", systemImage: "bookmark.fill")
-                                                .font(.caption).foregroundStyle(Color.accentColor)
+                                                .font(.mdCaption).foregroundStyle(Color.accentColor)
                                         } else {
                                             Text(bookmark.chapterNumber.map { "Chapter \($0.formatted()) · Panel \(bookmark.page)" }
                                                  ?? "Panel \(bookmark.page)")
-                                                .font(.subheadline).foregroundStyle(.secondary)
+                                                .font(.mdSubheadline).foregroundStyle(.secondary)
                                         }
                                     }
                                     Spacer(minLength: 0)
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                                    Image(systemName: "chevron.right").font(.mdCaption).foregroundStyle(.tertiary)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }.buttonStyle(.plain)
                             .contextMenu {

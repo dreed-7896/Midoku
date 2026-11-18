@@ -22,7 +22,7 @@ struct TrackerUnavailableItemView: View {
                     Image(uiImage: tracker.icon ?? UIImage(named: "MangaPlaceholder")!)
                         .resizable()
                         .frame(width: 44, height: 44, alignment: .leading)
-                        .cornerRadius(10)
+                        .cornerRadius(0)
                         .padding(.trailing, 2)
                     Spacer()
                     Text(item.title ?? "")

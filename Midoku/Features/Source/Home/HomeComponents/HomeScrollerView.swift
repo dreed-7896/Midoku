@@ -90,12 +90,12 @@ struct HomeScrollerView: View {
                                     if let subtitle = entry.subtitle {
                                         Text(subtitle)
                                             .foregroundStyle(.secondary)
-                                            .font(.footnote)
+                                            .font(.mdFootnote)
                                             .lineLimit(1)
                                             .padding(.top, 2)
                                     } else if hasSubtitles {
                                         Text("empty")
-                                            .font(.footnote)
+                                            .font(.mdFootnote)
                                             .lineLimit(1)
                                             .opacity(0)
                                     }
@@ -241,7 +241,7 @@ struct PlaceholderMangaScroller: View {
         VStack(alignment: .leading) {
             if showTitle {
                 Text("Loading")
-                    .font(.title3)
+                    .font(.mdTitle3)
                     .fontWeight(.semibold)
                     .padding(.horizontal)
             }

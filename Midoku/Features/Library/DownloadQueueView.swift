@@ -69,7 +69,7 @@ struct DownloadQueueView: View {
                                         .lineLimit(3)
                                     Text(download.chapter.formattedTitle())
                                         .foregroundStyle(.secondary)
-                                        .font(.callout)
+                                        .font(.mdCallout)
                                         .lineLimit(1)
                                     let progress = self.progress[download.chapterIdentifier]
                                     let value: Float = if let progress {
@@ -82,7 +82,7 @@ struct DownloadQueueView: View {
                                     if let progress {
                                         Text(String(format: NSLocalizedString("%i_OF_%i"), progress.progress, progress.total))
                                             .foregroundStyle(.secondary)
-                                            .font(.footnote)
+                                            .font(.mdFootnote)
                                     }
                                 }
                             }

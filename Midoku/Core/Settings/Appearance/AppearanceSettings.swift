@@ -27,8 +27,8 @@ struct AppearanceSettings: Sendable {
         ]
     }
 
-    let useSystemAppearance = SettingsKey<Bool>("General.useSystemAppearance", default: true)
-    let appearance = SettingsKey<Int>("General.appearance", default: 0)
+    let useSystemAppearance = SettingsKey<Bool>("General.useSystemAppearance", default: false)
+    let appearance = SettingsKey<Int>("General.appearance", default: 1)
     let accent = SettingsKey<String>("Appearance.accent", default: MidokuAccent.defaultHex)
     let libraryGrid = SettingsKey<Bool>("Midoku.collectionGrid", default: true)
     let libraryGridStyle = SettingsKey<ChapterGridStyle>("Appearance.libraryGridStyle", default: .standard)

@@ -129,7 +129,7 @@ struct HomeChapterListView: View {
                     if let date = entry.chapter.dateUploaded {
                         Label(relativeTimeString(for: date), systemImage: "clock")
                             .foregroundStyle(.secondary)
-                            .font(.subheadline)
+                            .font(.mdSubheadline)
                     }
                 }
                 Spacer()

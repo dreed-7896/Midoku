@@ -35,7 +35,7 @@ struct UpdatesHistoryView: View {
             }
         }
         .navigationTitle("Updates")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
     }
 
     /// This screen is hosted in a UIKit navigation controller, where a SwiftUI sheet

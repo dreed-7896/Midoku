@@ -79,7 +79,7 @@ struct MCEntryEditor: View {
                             }
                         }.disabled(loadingCoverURL)
                         if let inheritedTitle {
-                            Text("Copied from \(inheritedTitle)").font(.caption).foregroundStyle(.secondary)
+                            Text("Copied from \(inheritedTitle)").font(.mdCaption).foregroundStyle(.secondary)
                         }
                     } header: {
                         Text("Group \(groupingEntryIDs.count) titles")
@@ -117,12 +117,12 @@ struct MCEntryEditor: View {
                     MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                         Task { await useCoverURL() }
                     }
-                    Text("URL covers are cached and fetched again after clearing the image cache.").font(.caption).foregroundStyle(.secondary)
+                    Text("URL covers are cached and fetched again after clearing the image cache.").font(.mdCaption).foregroundStyle(.secondary)
                     Toggle("Hide cover", isOn: $clearCover)
                     Button(entryID == nil ? "Clear cover" : "Reset entry cover", systemImage: "arrow.counterclockwise") {
                         cover = nil; coverURL = ""; clearCover = false; restoreCover = true
                     }.disabled(loadingCoverURL)
-                    if restoreCover && entryID != nil { Text("The original source cover will be restored when you save.").font(.caption).foregroundStyle(.secondary) }
+                    if restoreCover && entryID != nil { Text("The original source cover will be restored when you save.").font(.mdCaption).foregroundStyle(.secondary) }
                 }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { item in
@@ -429,7 +429,7 @@ struct MCAddSourceView: View {
                     MCRemoteCoverField(value: $coverURL, loading: loadingCoverURL) {
                         Task { await useCoverURL() }
                     }
-                    Text("Use an image URL so the cover can reload after clearing the cache.").font(.caption).foregroundStyle(.secondary)
+                    Text("Use an image URL so the cover can reload after clearing the cache.").font(.mdCaption).foregroundStyle(.secondary)
                 }
                 Section("Categories") {
                     ForEach(store.snapshot.categories) { item in
@@ -536,7 +536,7 @@ struct MCBatchChapterEditor: View {
                         let results = store.library.batchResults(entryID: entryID, slotIDs: Array(slotIDs.prefix(60)), edit: edit)
                         ForEach(results, id: \.slotID) { result in
                             HStack {
-                                Text(result.number.map { "#\($0)" } ?? "–").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                Text(result.number.map { "#\($0)" } ?? "–").font(.mdCaption.monospacedDigit()).foregroundStyle(.secondary)
                                     .frame(width: 56, alignment: .leading)
                                 Text(previewTitle(result)).lineLimit(1)
                             }

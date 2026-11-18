@@ -153,12 +153,12 @@ struct DownloadedMangaView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewModel.manga.displayTitle)
-                    .font(.callout)
+                    .font(.mdCallout)
                     .lineLimit(2)
 
                 // Format like chapter subtitles: Date • Size
                 Text(formatMangaSubtitle())
-                    .font(.footnote)
+                    .font(.mdFootnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
@@ -167,7 +167,7 @@ struct DownloadedMangaView: View {
                         Image(systemName: "books.vertical.fill")
                             .imageScale(.small)
                         Text(NSLocalizedString("IN_LIBRARY"))
-                            .font(.footnote)
+                            .font(.mdFootnote)
                     }
                     .foregroundStyle(.tint)
                 }
@@ -248,14 +248,14 @@ private struct ChapterRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(chapter.displayTitle)
-                    .font(.callout)
+                    .font(.mdCallout)
                     .lineLimit(1)
                     .foregroundStyle(isRead ? .secondary : .primary)
 
                 // Format like chapter subtitles: Date • Size
                 if let subtitle = formatChapterSubtitle() {
                     Text(subtitle)
-                        .font(.footnote)
+                        .font(.mdFootnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

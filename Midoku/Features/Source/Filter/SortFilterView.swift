@@ -204,10 +204,10 @@ struct SortButtonStyle: ButtonStyle {
         }
         return HStack(spacing: 5) {
             configuration.label
-                .font(.callout)
+                .font(.mdCallout)
             if state != .normal {
                 Image(systemName: state == .descending ? "chevron.down" : "chevron.up")
-                    .font(.callout.weight(.medium))
+                    .font(.mdCallout.weight(.medium))
                     .padding(state == .descending ? .top : .bottom, 1)
             }
         }
@@ -215,6 +215,6 @@ struct SortButtonStyle: ButtonStyle {
         .padding(.horizontal, 12)
         .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.7 : 1))
         .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 0))
     }
 }

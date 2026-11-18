@@ -145,7 +145,7 @@ struct PlaceholderHomeImageScrollerView: View {
         VStack(alignment: .leading) {
             if showTitle {
                 Text("Loading")
-                    .font(.title3)
+                    .font(.mdTitle3)
                     .fontWeight(.semibold)
                     .lineLimit(1)
                     .padding(.horizontal)
@@ -164,7 +164,7 @@ struct PlaceholderHomeImageScrollerView: View {
                     Rectangle()
                         .fill(Color(.secondarySystemFill))
                         .frame(width: 140 * 3/2, height: 140)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
                 }
             }
             .padding(.horizontal)

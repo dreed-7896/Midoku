@@ -21,7 +21,7 @@ class SourceTableViewCell: UITableViewCell {
 
     private var iconSize: CGFloat = 48 {
         didSet {
-            iconView.layer.cornerRadius = iconSize * 0.225
+            iconView.layer.cornerRadius = 0
         }
     }
 
@@ -66,7 +66,7 @@ class SourceTableViewCell: UITableViewCell {
 
         iconView.image = UIImage(named: "MangaPlaceholder")
         iconView.clipsToBounds = true
-        iconView.layer.cornerRadius = iconSize * 0.225
+        iconView.layer.cornerRadius = 0
         iconView.layer.cornerCurve = .continuous
         iconView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
         iconView.layer.borderWidth = 1
@@ -93,7 +93,7 @@ class SourceTableViewCell: UITableViewCell {
         titleStack.addArrangedSubview(versionLabel)
 
         badgeView.backgroundColor = .systemRed.withAlphaComponent(0.3)
-        badgeView.layer.cornerRadius = 6
+        badgeView.layer.cornerRadius = 0
         badgeView.layer.cornerCurve = .continuous
 
         badgeLabel.text = "18+"

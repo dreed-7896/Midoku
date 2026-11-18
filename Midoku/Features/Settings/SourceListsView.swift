@@ -105,7 +105,7 @@ struct SourceListsView: View {
                 }
                 Text(url.absoluteString)
                     .lineLimit(1)
-                    .font(.subheadline)
+                    .font(.mdSubheadline)
                     .foregroundStyle(name == nil ? .primary : .secondary)
             }
             if loading {

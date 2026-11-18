@@ -21,7 +21,7 @@ struct ListingsHeaderView: View {
             if let error {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.headline)
+                        .font(.mdHeadline)
                         .foregroundStyle(.secondary)
 
                     Group {
@@ -82,7 +82,7 @@ struct ListingsHeaderView: View {
                         let label = Text(option)
                             .padding(.horizontal, 13)
                             .padding(.vertical, 8)
-                            .font(.footnote.weight(.medium))
+                            .font(.mdFootnote.weight(.medium))
                             .foregroundStyle(active ? Color.white : Color.primary)
 
                         if #available(iOS 26.0, *) {
@@ -91,7 +91,7 @@ struct ListingsHeaderView: View {
                         } else {
                             label
                                 .background(
-                                    RoundedRectangle(cornerRadius: 100)
+                                    RoundedRectangle(cornerRadius: 0)
                                         .fill(
                                             Color(
                                                 uiColor: active
@@ -117,13 +117,13 @@ struct ListingsHeaderView: View {
                 Text("Loading")
                     .padding(.horizontal, 13)
                     .padding(.vertical, 8)
-                    .font(.footnote.weight(.medium))
+                    .font(.mdFootnote.weight(.medium))
                     .background(
-                        RoundedRectangle(cornerRadius: 100)
+                        RoundedRectangle(cornerRadius: 0)
                             .foregroundColor(.init(uiColor: .secondarySystemFill))
                     )
                     .overlay {
-                        RoundedRectangle(cornerRadius: 100)
+                        RoundedRectangle(cornerRadius: 0)
                             .stroke(
                                 Color(uiColor: .tertiarySystemFill),
                                 style: .init(lineWidth: 1)

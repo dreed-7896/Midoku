@@ -24,7 +24,7 @@ struct InsightsView: View {
                 VStack(spacing: 18) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(NSLocalizedString("STREAKS"))
-                            .font(.system(size: 15).weight(.semibold))
+                            .font(.mdSystem(size: 15).weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 4)
 
@@ -35,21 +35,21 @@ struct InsightsView: View {
                                         if data.currentStreak > 1 {
                                             VStack(spacing: 0) {
                                                 Text(NSLocalizedString("CURRENT_STREAK"))
-                                                    .font(.system(size: 14))
+                                                    .font(.mdSystem(size: 14))
                                                 VStack(spacing: -5) {
                                                     Text(data.currentStreak, format: .number.notation(.compactName))
-                                                        .font(.system(size: 38).weight(.bold))
+                                                        .font(.mdSystem(size: 38).weight(.bold))
                                                     Text(NSLocalizedString("DAYS"))
-                                                        .font(.body.weight(.semibold))
+                                                        .font(.mdBody.weight(.semibold))
                                                         .multilineTextAlignment(.center)
                                                 }
                                             }
                                         } else {
                                             VStack(spacing: 4) {
                                                 Text(NSLocalizedString("NO_CURRENT_STREAK"))
-                                                    .font(.headline)
+                                                    .font(.mdHeadline)
                                                 Text(NSLocalizedString("NO_CURRENT_STREAK_TEXT"))
-                                                    .font(.subheadline)
+                                                    .font(.mdSubheadline)
                                                     .multilineTextAlignment(.center)
                                             }
                                         }
@@ -63,12 +63,12 @@ struct InsightsView: View {
                                     InsightPlatterView {
                                         VStack(spacing: 0) {
                                             Text(NSLocalizedString("LONGEST_STREAK"))
-                                                .font(.system(size: 14))
+                                                .font(.mdSystem(size: 14))
                                             VStack(spacing: -5) {
                                                 Text(data.longestStreak, format: .number.notation(.compactName))
-                                                    .font(.system(size: 38).weight(.bold))
+                                                    .font(.mdSystem(size: 38).weight(.bold))
                                                 Text(NSLocalizedString("DAYS"))
-                                                    .font(.body.weight(.semibold))
+                                                    .font(.mdBody.weight(.semibold))
                                                     .multilineTextAlignment(.center)
                                             }
                                         }
@@ -119,7 +119,7 @@ struct InsightsView: View {
 
                     VStack(alignment: .leading, spacing: 5) {
                         Text(NSLocalizedString("STATS"))
-                            .font(.system(size: 15).weight(.semibold))
+                            .font(.mdSystem(size: 15).weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 4)
 

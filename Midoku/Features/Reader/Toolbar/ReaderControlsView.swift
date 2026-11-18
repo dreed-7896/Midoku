@@ -17,7 +17,7 @@ final class ReaderControlsView: UIVisualEffectView {
 
     init() {
         super.init(effect: UIBlurEffect(style: .systemThinMaterial))
-        layer.cornerRadius = 24
+        layer.cornerRadius = 0
         layer.cornerCurve = .continuous
         clipsToBounds = true
         for (button, symbol, title, label) in [
@@ -88,7 +88,7 @@ final class ReaderTopBarView: UIVisualEffectView {
 
     init() {
         super.init(effect: UIBlurEffect(style: .systemThinMaterial))
-        layer.cornerRadius = 24
+        layer.cornerRadius = 0
         layer.cornerCurve = .continuous
         clipsToBounds = true
 

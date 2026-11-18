@@ -81,7 +81,7 @@ struct TrackerSettingOptionView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .foregroundColor(Color(.secondaryLabel))
-                .font(.system(size: 14))
+                .font(.mdSystem(size: 14))
             HStack {
                 if type == .counter {
                     Button {
@@ -93,7 +93,7 @@ struct TrackerSettingOptionView: View {
                             " / " +
                             "\(total == nil || total == 0 ? "-" : String(format: numberType == .int ? "%.0f" : "%.1f", total!))"
                         )
-                            .font(.system(size: 14))
+                            .font(.mdSystem(size: 14))
                             .foregroundColor(Color(.label))
                     }
                 }
@@ -117,7 +117,7 @@ struct TrackerSettingOptionView: View {
                             Spacer()
                             if let date = date {
                                 Text(date, formatter: dateFormatter)
-                                    .font(.system(size: 14))
+                                    .font(.mdSystem(size: 14))
                                     .lineLimit(1)
                                 Spacer()
                             }
@@ -143,7 +143,7 @@ struct TrackerSettingOptionView: View {
                         }
                     } label: {
                         Text(options[selectedOption ?? 0])
-                            .font(.system(size: 14))
+                            .font(.mdSystem(size: 14))
                             .lineLimit(1)
                             .foregroundColor(Color(.label))
                             .minimumScaleFactor(0.5)
@@ -157,7 +157,7 @@ struct TrackerSettingOptionView: View {
             .padding([.leading, .trailing], 8)
             .frame(width: 104, height: 38)
             .background(backgroundColor)
-            .cornerRadius(8)
+            .cornerRadius(0)
         }
     }
 

@@ -129,7 +129,7 @@ struct HistoryView: View {
 
     func headerView(daysAgo: Int) -> some View {
         Text(Date.makeRelativeDate(days: daysAgo))
-            .font(.body.weight(.medium))
+            .font(.mdBody.weight(.medium))
             .foregroundStyle(.primary)
             .foregroundColor(.primary) // for ios 15
             .textCase(.none)
@@ -308,12 +308,12 @@ private struct HistoryEntryCell: View, @MainActor Equatable {
                         .foregroundStyle(.primary)
                     Text(makeSubtitle())
                         .foregroundStyle(.secondary)
-                        .font(.subheadline)
+                        .font(.mdSubheadline)
                         .lineLimit(1)
                     if let additionalEntryCount = entry.additionalEntryCount, additionalEntryCount > 0 {
                         let text = Text(String(format: NSLocalizedString("%lld_PLUS_MORE"), additionalEntryCount))
                             .foregroundStyle(.secondary)
-                            .font(.footnote)
+                            .font(.mdFootnote)
                             .lineLimit(1)
                         if #available(iOS 16.0, *) {
                             text.contentTransition(.numericText())

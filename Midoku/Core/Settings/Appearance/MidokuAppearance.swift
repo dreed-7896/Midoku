@@ -8,7 +8,7 @@ enum ChapterGridStyle: String, SettingsValue, CaseIterable {
 }
 
 enum MidokuAccent {
-    static let defaultHex = "#376A50"
+    static let defaultHex = "#FF6B5E"
 
     static func uiColor(_ storedValue: String) -> UIColor {
         let value = migratedHex(storedValue)
@@ -36,7 +36,7 @@ enum MidokuAccent {
 
     private static func migratedHex(_ value: String) -> String {
         switch value.lowercased() {
-        case "forest": defaultHex
+        case "forest", "#376a50": defaultHex
         case "slate": "#456178"
         case "ochre": "#7D572B"
         case "blue": "#007AFF"

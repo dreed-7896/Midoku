@@ -124,7 +124,7 @@ extension View {
         Text("SwiftUI Shimmer").preferredColorScheme(.light)
         Text("SwiftUI Shimmer").preferredColorScheme(.dark)
         VStack(alignment: .leading) {
-            Text("Loading...").font(.title)
+            Text("Loading...").font(.mdTitle)
             Text(String(repeating: "Shimmer", count: 12))
                 .redacted(reason: .placeholder)
         }.frame(maxWidth: 200)
@@ -134,10 +134,10 @@ extension View {
 
     VStack(alignment: .leading) {
         Text("مرحبًا")
-        Text("← Right-to-left layout direction").font(.body)
+        Text("← Right-to-left layout direction").font(.mdBody)
         Text("שלום")
     }
-    .font(.largeTitle)
+    .font(.mdLargeTitle)
     .shimmering()
     .environment(\.layoutDirection, .rightToLeft)
 }

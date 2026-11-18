@@ -209,13 +209,13 @@ private struct TrackerSearchItemCell: View {
                     .lineLimit(2)
                 if item.type != .unknown, let type = item.type?.toString() {
                     Text(String(format: NSLocalizedString("TYPE_COLON_%@"), type))
-                        .font(.subheadline)
+                        .font(.mdSubheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 if item.status != .unknown, let status = item.status?.toString() {
                     Text(String(format: NSLocalizedString("STATUS_COLON_%@"), status))
-                        .font(.subheadline)
+                        .font(.mdSubheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -228,7 +228,7 @@ private struct TrackerSearchItemCell: View {
             }
             if selected {
                 Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
+                    .font(.mdBody.weight(.semibold))
                     .foregroundColor(.accentColor)
             }
         }

@@ -195,7 +195,7 @@ struct BackupsView: View {
                 if let size = backup.size {
                     Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
                         .foregroundStyle(.secondary)
-                        .font(.footnote)
+                        .font(.mdFootnote)
                 }
             }
         }
@@ -237,11 +237,11 @@ struct BackupsView: View {
         Text(NSLocalizedString("AUTO"))
             .lineLimit(1)
             .foregroundStyle(.primary)
-            .font(.caption)
+            .font(.mdCaption)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(.blue.opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: 0))
     }
 
     func onDelete(at offsets: IndexSet) {
