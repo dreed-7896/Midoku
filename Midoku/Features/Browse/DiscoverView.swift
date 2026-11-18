@@ -168,14 +168,15 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
         rootView.openListing = { [weak self] feed in
             guard let self else { return }
             guard let source = SourceStore.shared.source(for: feed.sourceKey) else { return }
+            // Opens the extension's own page: on the shelf's tab, or searching with the shelf's term and filters.
             if feed.isSearch {
-                let controller = NewSourceViewController(source: source, onlySearch: true, searchQuery: feed.query, initialFilters: feed.filters ?? [])
+                let controller = NewSourceViewController(source: source, searchQuery: feed.query, initialFilters: feed.filters ?? [])
                 navigationController?.pushViewController(controller, animated: true)
                 return
             }
             Task { @MainActor in
-                guard let listing = try? await source.getListings().first(where: { $0.id == feed.listingID }) else { return }
-                self.navigationController?.pushViewController(SourceListingViewController(source: source, listing: listing), animated: true)
+                let index = (try? await source.getListings())?.firstIndex { $0.id == feed.listingID }
+                self.navigationController?.pushViewController(NewSourceViewController(source: source, initialListingIndex: index), animated: true)
             }
         }
         rootView.openShelves = { [weak self] in self?.showShelves() }
@@ -664,13 +665,24 @@ private struct MCDiscoverShelf: View {
             .buttonStyle(.plain)
             .accessibilityLabel("\(feed.listingName) from \(feed.sourceName), see all")
             Spacer(minLength: 0)
+            Button { openListing(feed) } label: {
+                HStack(spacing: 4) {
+                    Text(feed.isSearch ? "Search" : "Open")
+                    Image(systemName: "arrow.right").font(.system(size: 11, weight: .bold))
+                }
+                .font(.mdSystem(size: 13, weight: .semibold))
+                .foregroundStyle(Color.mdAccent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(feed.isSearch ? "Open this search in \(feed.sourceName)" : "Open \(feed.listingName) in \(feed.sourceName)")
             MDIconButton(systemImage: "ellipsis", label: "Shelf options") { showOptions = true }
         }
     }
 
     private func optionRows() -> [MDActionRow] {
         var rows: [MDActionRow] = [
-            MDActionRow(systemImage: "square.grid.2x2", title: "See all", detail: "Open the full list") { openListing(feed) },
+            MDActionRow(systemImage: "puzzlepiece.extension", title: feed.isSearch ? "Open search in \(feed.sourceName)" : "Open tab in \(feed.sourceName)",
+                        detail: feed.isSearch ? "Same term and filters" : feed.listingName) { openListing(feed) },
             MDActionRow(systemImage: "arrow.clockwise", title: "Refresh") { Task { await model.load(feed, force: true) } }
         ]
         for option in MCShelfLayout.allCases {
