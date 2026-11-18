@@ -27,6 +27,17 @@ struct SettingsView: View {
 extension SettingsView {
     var body: some View {
         List {
+            Section {
+                VStack(spacing: 16) {
+                    MDPageHeader(title: NSLocalizedString("SETTINGS"))
+                    MDSearchField(text: $searchText, prompt: "Search settings", autofocus: false)
+                        .padding(.horizontal, 16)
+                }
+                .padding(.bottom, 4)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
             if searchText.isEmpty {
                 ForEach(Self.settings.indices, id: \.self) { offset in
                     let setting = Self.settings[offset]
@@ -118,9 +129,11 @@ extension SettingsView {
                 UnavailableView.search(text: searchText)
             }
         }
-        .searchable(text: $searchText)
+        .listSectionSpacing(.compact)
+        .scrollContentBackground(.hidden)
+        .background(Color.mdBg)
         .navigationTitle(NSLocalizedString("SETTINGS"))
-        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.hidden, for: .navigationBar)
         .midokuAccent()
         .navigationDestination(isPresented: $showAppearancePreview) {
             SettingPageDestination(setting: .init(title: "Appearance", value: .page(.init(items: Settings.appearanceSettings))),
