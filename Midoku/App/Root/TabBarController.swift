@@ -553,7 +553,7 @@ extension TabBarController {
         tabBar.items?.enumerated().map { index, item in
             UIKeyCommand(
                 title: item.title ?? "Tab \(index + 1)",
-                action: #selector(selectTab),
+                action: #selector(selectTab(sender:)),
                 input: "\(index + 1)",
                 modifierFlags: .shiftOrCommand,
                 alternates: [],
