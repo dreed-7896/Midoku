@@ -7,7 +7,10 @@
 				"type": "segment",
 				"key": "isListView",
 				"title": "Home Detail View",
-				"options": ["Grid", "List"]
+				"options": [
+					"Grid",
+					"List"
+				]
 			}
 		]
 	},
@@ -19,9 +22,25 @@
 				"type": "select",
 				"key": "titlePreference",
 				"title": "Preferred Title Language",
-				"values": ["english", "japanese"],
-				"titles": ["English", "Japanese"],
+				"values": [
+					"english",
+					"japanese"
+				],
+				"titles": [
+					"English",
+					"Japanese"
+				],
 				"default": "english"
+			},
+			{
+				"type": "toggle",
+				"key": "cleanTitles",
+				"title": "Hide Artist & Tags in Titles",
+				"subtitle": "Shows \"[Circle (Artist)] Title [English]\" as \"Title\"",
+				"default": false,
+				"refreshes": [
+					"content"
+				]
 			}
 		]
 	},
@@ -36,8 +55,12 @@
 				"lineLimit": 1,
 				"inline": true,
 				"placeholder": "Tag to block",
-				"default": ["example"],
-				"refreshes": ["content"]
+				"default": [
+					"example"
+				],
+				"refreshes": [
+					"content"
+				]
 			}
 		]
 	}

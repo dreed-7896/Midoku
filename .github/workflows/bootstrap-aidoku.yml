@@ -3,7 +3,7 @@ name: Bootstrap Aidoku extensions
 on:
   push:
     branches:
-      - aidoku-extensions
+      - main
     paths:
       - aidoku-source.zip
       - .github/workflows/bootstrap-aidoku.yml

@@ -12,7 +12,7 @@ This branch contains Aidoku source conversions for:
 
 Add this URL in Aidoku under Settings → Source Lists:
 
-`https://raw.githubusercontent.com/dreed-7896/extensions/aidoku-extensions/aidoku/public/index.min.json`
+`https://raw.githubusercontent.com/dreed-7896/extensions/main/aidoku/public/index.min.json`
 
 The generated `.aix` packages and index are stored in `aidoku/public`. Source code is in
 `aidoku/sources`, with shared parsing code in `aidoku/templates`.

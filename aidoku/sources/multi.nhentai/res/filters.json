@@ -1,15 +1,45 @@
 [
 	{
+		"type": "note",
+		"text": "Artist matches the artist tag only. Use | to search several artists, e.g. hyji|jirou."
+	},
+	{
 		"type": "text",
 		"id": "author",
 		"title": "Artist",
-		"placeholder": "Artist name"
+		"placeholder": "Artist name (separate several with |)"
 	},
 	{
 		"type": "text",
 		"id": "groups",
 		"title": "Group",
 		"placeholder": "Group name"
+	},
+	{
+		"type": "select",
+		"id": "language",
+		"title": "Language",
+		"options": [
+			"Default (settings)",
+			"Any",
+			"English",
+			"Japanese",
+			"Chinese"
+		],
+		"ids": [
+			"default",
+			"any",
+			"english",
+			"japanese",
+			"chinese"
+		],
+		"default": "default"
+	},
+	{
+		"type": "check",
+		"id": "clean_titles",
+		"title": "Hide artist & tags in titles",
+		"default": false
 	},
 	{
 		"type": "sort",

@@ -1,12 +1,8 @@
-use crate::{API_URL, NHentai, USER_AGENT, api::decode_response, models::NHentaiSearchResponse, settings};
+use crate::{NHentai, settings};
 use aidoku::{
 	Home, HomeComponent, HomeLayout, HomePartialResult, Listing, ListingKind, Manga, Result,
 	alloc::{Vec, vec},
-	helpers::uri::encode_uri_component,
-	imports::{
-		net::{Request, RequestError, Response},
-		std::send_partial_result,
-	},
+	imports::std::send_partial_result,
 	prelude::*,
 };
 
@@ -53,116 +49,97 @@ impl Home for NHentai {
 				query_parts.push(format!("-tag:\"{blocked}\""));
 			}
 		}
+		let query = query_parts.join(" ");
 
-		let query = encode_uri_component(if query_parts.is_empty() {
-			" ".into()
-		} else {
-			query_parts.join(" ")
-		});
+		// Fetched one at a time (through the rate limiter, retry and cache) instead of four
+		// parallel requests, and each shelf is sent as soon as it arrives.
+		let fetch = |sort: &str| -> Result<Vec<Manga>> {
+			Ok(self
+				.search(&query, 1, sort)?
+				.result
+				.into_iter()
+				.map(|gallery| gallery.into())
+				.collect::<Vec<Manga>>())
+		};
+		let listing_kind = || {
+			if settings::get_list_viewer() {
+				ListingKind::List
+			} else {
+				ListingKind::Default
+			}
+		};
+		let mut first_error = None;
 
-		let responses: [core::result::Result<Response, RequestError>; 4] = Request::send_all([
-			// popular today
-			Request::get(format!(
-				"{API_URL}/search?query={query}&page=1&sort=popular-today"
-			))?.header("User-Agent", USER_AGENT),
-			// popular week
-			Request::get(format!(
-				"{API_URL}/search?query={query}&page=1&sort=popular-week"
-			))?.header("User-Agent", USER_AGENT),
-			// popular all
-			Request::get(format!(
-				"{API_URL}/search?query={query}&page=1&sort=popular"
-			))?.header("User-Agent", USER_AGENT),
-			// latest
-			Request::get(format!("{API_URL}/search?query={query}&page=1&sort=date"))?.header("User-Agent", USER_AGENT),
-		])
-		.try_into()
-		.expect("requests vec length should be 4");
-		let results: [Result<Vec<Manga>>; 4] = responses
-			.map(|res| decode_response::<NHentaiSearchResponse>(res?))
-			.map(|res| {
-				Ok(res?
-					.result
-					.into_iter()
-					.map(|gallery| gallery.into())
-					.collect::<Vec<Manga>>())
-			});
-		let [popular_today, popular_week, popular_all, recent] = results;
-		let popular_today = popular_today?;
-		let popular_week = popular_week?;
-		let popular_all = popular_all?;
-		let recent = recent?;
-
-		if !popular_today.is_empty() {
-			send_component(HomeComponent {
+		match fetch("popular-today") {
+			Ok(entries) if !entries.is_empty() => send_component(HomeComponent {
 				title: Some("Popular Today".into()),
 				subtitle: None,
 				value: aidoku::HomeComponentValue::BigScroller {
-					entries: popular_today,
+					entries,
 					auto_scroll_interval: Some(8.0),
 				},
-			});
+			}),
+			Ok(_) => {}
+			Err(error) => first_error = first_error.or(Some(error)),
 		}
 
-		if !popular_week.is_empty() {
-			send_component(HomeComponent {
+		match fetch("popular-week") {
+			Ok(entries) if !entries.is_empty() => send_component(HomeComponent {
 				title: Some("Popular This Week".into()),
 				subtitle: None,
 				value: aidoku::HomeComponentValue::MangaList {
 					ranking: true,
 					page_size: Some(3),
-					entries: popular_week.into_iter().map(|item| item.into()).collect(),
+					entries: entries.into_iter().map(|item| item.into()).collect(),
 					listing: Some(Listing {
 						id: "popular-week".into(),
 						name: "Popular This Week".into(),
-						kind: if settings::get_list_viewer() {
-							ListingKind::List
-						} else {
-							ListingKind::Default
-						},
+						kind: listing_kind(),
 					}),
 				},
-			});
+			}),
+			Ok(_) => {}
+			Err(error) => first_error = first_error.or(Some(error)),
 		}
 
-		if !popular_all.is_empty() {
-			send_component(HomeComponent {
+		match fetch("popular") {
+			Ok(entries) if !entries.is_empty() => send_component(HomeComponent {
 				title: Some("Popular All Time".into()),
 				subtitle: None,
 				value: aidoku::HomeComponentValue::MangaList {
 					ranking: true,
 					page_size: Some(3),
-					entries: popular_all.into_iter().map(|item| item.into()).collect(),
+					entries: entries.into_iter().map(|item| item.into()).collect(),
 					listing: Some(Listing {
 						id: "popular".into(),
 						name: "Popular All Time".into(),
-						kind: if settings::get_list_viewer() {
-							ListingKind::List
-						} else {
-							ListingKind::Default
-						},
+						kind: listing_kind(),
 					}),
 				},
-			});
+			}),
+			Ok(_) => {}
+			Err(error) => first_error = first_error.or(Some(error)),
 		}
 
-		if !recent.is_empty() {
-			send_component(HomeComponent {
+		match fetch("date") {
+			Ok(entries) if !entries.is_empty() => send_component(HomeComponent {
 				title: Some("Latest".into()),
 				subtitle: None,
 				value: aidoku::HomeComponentValue::Scroller {
-					entries: recent.into_iter().map(|item| item.into()).collect(),
+					entries: entries.into_iter().map(|item| item.into()).collect(),
 					listing: Some(Listing {
 						id: "latest".into(),
 						name: "Latest".into(),
-						kind: if settings::get_list_viewer() {
-							ListingKind::List
-						} else {
-							ListingKind::Default
-						},
+						kind: listing_kind(),
 					}),
 				},
-			});
+			}),
+			Ok(_) => {}
+			Err(error) => first_error = first_error.or(Some(error)),
+		}
+
+		if let Some(error) = first_error {
+			return Err(error);
 		}
 
 		Ok(HomeLayout::default())

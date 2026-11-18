@@ -4,7 +4,11 @@ use aidoku::{
 	MangaPageResult, Page, PageContent, Result, Source,
 	alloc::{String, Vec, string::ToString, vec},
 	helpers::uri::encode_uri_component,
-	imports::error::AidokuError,
+	imports::{
+		error::AidokuError,
+		net::{TimeUnit, set_rate_limit},
+		std::current_date,
+	},
 	prelude::*,
 };
 
@@ -25,8 +29,16 @@ const USER_AGENT: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X)
 						  AppleWebKit/605.1.15 (KHTML, like Gecko) GSA/300.0.598994205 \
 						  Mobile/15E148 Safari/604";
 
+/// Requests allowed per period, and the period length in seconds.
+const RATE_LIMIT_PERMITS: i32 = 2;
+const RATE_LIMIT_PERIOD: i32 = 1;
+/// How long, in seconds, a search page stays cached.
+const SEARCH_CACHE_TTL: i64 = 300;
+const SEARCH_CACHE_SIZE: usize = 30;
+
 struct NHentai {
 	cache: RefCell<Option<(String, NHentaiGallery)>>,
+	search_cache: RefCell<Vec<(String, i64, NHentaiSearchResponse)>>,
 }
 
 impl NHentai {
@@ -47,10 +59,17 @@ impl NHentai {
 			});
 		}
 
-		let mut query_parts = Vec::new();
+		let mut query_parts: Vec<String> = Vec::new();
+		// multi_search has already split `a | b` artist fields, so this is a single name.
+		let mut artist: Option<String> = None;
+		let mut language_override: Option<Option<String>> = None;
+		let mut clean_titles = settings::get_clean_titles();
 
 		if let Some(q) = query {
-			query_parts.push(q);
+			let q = q.trim();
+			if !q.is_empty() {
+				query_parts.push(q.into());
+			}
 		}
 
 		let mut sort = "date";
@@ -59,14 +78,19 @@ impl NHentai {
 		for filter in filters {
 			match filter {
 				FilterValue::Text { id, value } => match id.as_str() {
-					"author" => {
-						query_parts.push(value);
-					}
-					"artist" => {
-						query_parts.push(format!("artist:{value}"));
+					// "author" is the id of the Artist field in filters.json. It used to be sent as
+					// plain text, which nhentai matches against titles; match the artist tag instead.
+					"author" | "artist" => {
+						let name = value.trim().trim_matches('"').trim().to_lowercase();
+						if !name.is_empty() {
+							artist = Some(name);
+						}
 					}
 					"groups" => {
-						query_parts.push(format!("group:{value}"));
+						let name = value.trim().trim_matches('"').trim();
+						if !name.is_empty() {
+							query_parts.push(format!("group:\"{name}\""));
+						}
 					}
 					_ => continue,
 				},
@@ -94,16 +118,28 @@ impl NHentai {
 						}
 					}
 				}
-				FilterValue::Select { id, value } => {
-					if id == "genre" {
-						query_parts.push(format!("tag:\"{value}\""));
+				FilterValue::Select { id, value } => match id.as_str() {
+					"genre" => query_parts.push(format!("tag:\"{value}\"")),
+					"language" => {
+						language_override = match value.as_str() {
+							"" | "default" => None,
+							"any" => Some(None),
+							lang => Some(Some(lang.into())),
+						};
+					}
+					_ => continue,
+				},
+				FilterValue::Check { id, value } => {
+					if id == "clean_titles" && value > 0 {
+						clean_titles = true;
 					}
 				}
 				_ => continue,
 			}
 		}
 
-		if let Some(language) = settings::get_language() {
+		let language = language_override.unwrap_or_else(settings::get_language);
+		if let Some(language) = language {
 			query_parts.push(format!("language:{language}"));
 		}
 
@@ -113,29 +149,67 @@ impl NHentai {
 			}
 		}
 
-		let combined_query = if query_parts.is_empty() {
-			" ".into()
-		} else {
-			query_parts.join(" ")
+		let response = match &artist {
+			Some(name) => {
+				let with = |namespace: &str| {
+					let mut parts = query_parts.clone();
+					parts.push(format!("{namespace}:\"{name}\""));
+					parts.join(" ")
+				};
+				let response = self.search(&with("artist"), page, sort)?;
+				// Names that are circles rather than artists (e.g. "ringoya") have no artist tag;
+				// retry those as a group before giving up.
+				if response.num_pages == 0 {
+					self.search(&with("group"), page, sort)?
+				} else {
+					response
+				}
+			}
+			None => self.search(&query_parts.join(" "), page, sort)?,
 		};
 
-		let url = format!(
-			"{API_URL}/search?query={}&page={page}&sort={sort}",
-			encode_uri_component(combined_query),
-		);
-		let response: NHentaiSearchResponse = request_json(&url)?;
-
+		let has_next_page = page < response.num_pages;
 		let entries = response
 			.result
 			.into_iter()
-			.map(|item| item.into())
+			.map(|item| {
+				let mut manga: Manga = item.into();
+				if clean_titles {
+					manga.title = clean_title(&manga.title);
+				}
+				manga
+			})
 			.collect::<Vec<Manga>>();
-		let has_next_page = page < response.num_pages;
 
 		Ok(MangaPageResult {
 			entries,
 			has_next_page,
 		})
+	}
+
+	/// Run one search request, served from a short-lived cache when possible so paging
+	/// back, reopening Home and re-running a search don't hit the API again.
+	pub(crate) fn search(&self, query: &str, page: i32, sort: &str) -> Result<NHentaiSearchResponse> {
+		let query = if query.trim().is_empty() { " " } else { query };
+		let url = format!(
+			"{API_URL}/search?query={}&page={page}&sort={sort}",
+			encode_uri_component(query),
+		);
+		let now = current_date();
+		{
+			let mut cache = self.search_cache.borrow_mut();
+			cache.retain(|(_, time, _)| now - *time < SEARCH_CACHE_TTL);
+			if let Some((_, _, response)) = cache.iter().find(|(key, _, _)| key == &url) {
+				return Ok(response.clone());
+			}
+		}
+		let response: NHentaiSearchResponse = request_json(&url)?;
+		let mut cache = self.search_cache.borrow_mut();
+		if cache.len() >= SEARCH_CACHE_SIZE {
+			cache.remove(0);
+		}
+		cache.push((url, now, response.clone()));
+		Ok(response)
 	}
 
 	fn fetch_gallery(&self, key: &str, url: Option<&str>) -> Result<NHentaiGallery> {
@@ -150,8 +224,12 @@ impl NHentai {
 
 impl Source for NHentai {
 	fn new() -> Self {
+		// nhentai's API sits behind Cloudflare and answers bursts with HTTP 429.
+		// Queue requests in the runner instead of firing them all at once.
+		set_rate_limit(RATE_LIMIT_PERMITS, RATE_LIMIT_PERIOD, TimeUnit::Seconds);
 		Self {
 			cache: RefCell::new(None),
+			search_cache: RefCell::new(Vec::new()),
 		}
 	}
 

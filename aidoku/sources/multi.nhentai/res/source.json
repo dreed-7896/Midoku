@@ -2,7 +2,7 @@
 	"info": {
 		"id": "multi.nhentai",
 		"name": "nhentai",
-		"version": 21,
+		"version": 22,
 		"url": "https://nhentai.net",
 		"contentRating": 2,
 		"languages": [

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - aidoku-extensions
+      - main
     paths:
       - "aidoku/sources/**/src/**"
       - "aidoku/sources/**/res/**"

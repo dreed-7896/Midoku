@@ -1,4 +1,4 @@
-use crate::settings::{TitlePreference, get_title_preference};
+use crate::settings::{TitlePreference, get_clean_titles, get_title_preference};
 use aidoku::{
 	ContentRating, Manga, MangaStatus, UpdateStrategy, Viewer,
 	alloc::{
@@ -102,6 +102,84 @@ pub fn make_image_url(path: &str, is_cover: bool) -> String {
 	}
 }
 
+/// Remove the bracketed parts around a gallery title, e.g.
+/// `(C99) [Circle (Artist)] Title [English] [Translator]` becomes `Title`.
+/// Returns the original title if nothing would be left.
+pub fn clean_title(title: &str) -> String {
+	fn closing(open: char) -> Option<char> {
+		match open {
+			'[' => Some(']'),
+			'(' => Some(')'),
+			'{' => Some('}'),
+			'\u{3010}' => Some('\u{3011}'), // 【】
+			_ => None,
+		}
+	}
+	fn opening(close: char) -> Option<char> {
+		match close {
+			']' => Some('['),
+			')' => Some('('),
+			'}' => Some('{'),
+			'\u{3011}' => Some('\u{3010}'),
+			_ => None,
+		}
+	}
+
+	let mut rest = title.trim();
+
+	// leading groups
+	while let Some(open) = rest.chars().next()
+		&& let Some(close) = closing(open)
+	{
+		let mut depth = 0;
+		let mut end = None;
+		for (index, c) in rest.char_indices() {
+			if c == open {
+				depth += 1;
+			} else if c == close {
+				depth -= 1;
+				if depth == 0 {
+					end = Some(index + c.len_utf8());
+					break;
+				}
+			}
+		}
+		match end {
+			Some(end) => rest = rest[end..].trim_start(),
+			None => break,
+		}
+	}
+
+	// trailing groups
+	while let Some(close) = rest.chars().next_back()
+		&& let Some(open) = opening(close)
+	{
+		let mut depth = 0;
+		let mut start = None;
+		for (index, c) in rest.char_indices().rev() {
+			if c == close {
+				depth += 1;
+			} else if c == open {
+				depth -= 1;
+				if depth == 0 {
+					start = Some(index);
+					break;
+				}
+			}
+		}
+		match start {
+			Some(start) => rest = rest[..start].trim_end(),
+			None => break,
+		}
+	}
+
+	if rest.is_empty() {
+		title.trim().to_string()
+	} else {
+		rest.to_string()
+	}
+}
+
 impl From<NHentaiGalleryListItem> for Manga {
 	fn from(value: NHentaiGalleryListItem) -> Self {
 		let title_preference = get_title_preference();
@@ -119,6 +197,12 @@ impl From<NHentaiGalleryListItem> for Manga {
 					format!("#{}", value.id)
 				}
 			}
+		};
+
+		let title = if get_clean_titles() {
+			clean_title(&title)
+		} else {
+			title
 		};
 
 		Manga {
@@ -207,6 +291,11 @@ impl From<NHentaiGallery> for Manga {
 				.unwrap_or(&value.title.english)
 				.clone(),
 			TitlePreference::English => value.title.english.clone(),
+		};
+		let title = if get_clean_titles() {
+			clean_title(&title)
+		} else {
+			title
 		};
 
 		let viewer = if tags.iter().any(|t| t == "webtoon") {
