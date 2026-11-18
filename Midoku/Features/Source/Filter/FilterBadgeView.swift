@@ -12,17 +12,13 @@ struct FilterBadgeView: View {
 
     static let size: CGFloat = 18
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         Text(String(count))
-            .padding(.horizontal, 5)
+            .font(.mdMono(11, weight: .bold))
+            .padding(.horizontal, 4)
             .frame(minWidth: Self.size)
             .frame(height: Self.size)
-            .foregroundColor(colorScheme == .light ? .white : .accentColor)
-            .background {
-                RoundedRectangle(cornerRadius: 0)
-                    .foregroundColor(colorScheme == .light ? .accentColor : .white)
-            }
+            .foregroundStyle(Color(uiColor: MDColor.onAccent))
+            .background(Color.mdAccent)
     }
 }

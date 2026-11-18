@@ -857,11 +857,9 @@ struct MCCollectionRootView: View {
     private var shuffleButton: some View {
         let isReading = activeGroupPage == Self.readingPageID
         return Button { openRandomEntry(from: activeEntries) } label: {
-            Image(systemName: "shuffle").font(.mdTitle3.weight(.semibold))
-                .frame(width: 38, height: 38)
+            MDIconBox(systemImage: "shuffle")
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.plain)
         .accessibilityLabel(isReading ? "Open random Reading entry; hold for entire library" : "Open random entry from this tab; hold for entire library")
         .disabled(store.library.entries.isEmpty)
         .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
@@ -890,7 +888,8 @@ struct MCCollectionRootView: View {
             .font(.mdHeadline)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            .background(.regularMaterial, in: Rectangle())
+            .background(Color.mdS2)
+                    .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
             Spacer()
             Menu {
                 Button("Add to Reading", systemImage: "book") {
@@ -919,7 +918,8 @@ struct MCCollectionRootView: View {
                     .font(.mdHeadline)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
-                    .background(.regularMaterial, in: Rectangle())
+                    .background(Color.mdS2)
+                    .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
             }
             .disabled(selected.isEmpty)
         }

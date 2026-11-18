@@ -40,15 +40,12 @@ struct MangaGridItem: View {
                     endPoint: .bottom
                 )
             )
-            .overlay(
-                bookmarkView,
-                alignment: .topTrailing
-            )
+            .overlay(alignment: .topLeading) { bookmarkView }
             .contentShape(RoundedRectangle(cornerRadius: 0))
             .clipShape(RoundedRectangle(cornerRadius: 0))
             .overlay(
                 RoundedRectangle(cornerRadius: 0)
-                    .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
+                    .strokeBorder(Color.mdLine, lineWidth: 1)
             )
             .overlay(
                 Text(title)
@@ -71,25 +68,13 @@ struct MangaGridItem: View {
     @ViewBuilder
     var bookmarkView: some View {
         if bookmarked {
-            Image("bookmark")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(.tint)
-                .frame(width: 17, height: 27, alignment: .topTrailing)
-                .padding(.trailing, 8)
-        } else {
-            EmptyView()
+            MangaCoverView.savedBadge
         }
     }
 
     static var placeholder: some View {
         Rectangle()
-            .fill(Color(uiColor: .secondarySystemFill))
+            .fill(Color.mdS2)
             .aspectRatio(2/3, contentMode: .fill)
-            .clipShape(RoundedRectangle(cornerRadius: 0))
-            .overlay(
-                RoundedRectangle(cornerRadius: 0)
-                    .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
-            )
     }
 }

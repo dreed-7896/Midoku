@@ -43,10 +43,10 @@ struct SearchContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MDPageHeader(kicker: "\(viewModel.sources.count) sources", title: NSLocalizedString("SEARCH"))
+            MDPageHeader(kicker: "\(viewModel.sources.count) source\(viewModel.sources.count == 1 ? "" : "s") · every language", title: NSLocalizedString("SEARCH"))
             MDSearchField(text: $searchText, prompt: "Search titles everywhere", autofocus: false, onSubmit: {
                 searchCommitToggle.toggle()
-            })
+            }, large: true)
             .padding(.horizontal, 16)
             .padding(.top, 16)
             if let filterHeader {
@@ -86,6 +86,17 @@ struct SearchContentView: View {
                         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !term.isEmpty {
                             pinCurrentSearchRow(term)
+                        }
+                        if viewModel.isLoading {
+                            let found = viewModel.results.reduce(0) { $0 + $1.result.entries.count }
+                            MDBanner(tone: .busy) {
+                                Text("Searching… \(found) found so far")
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(.zero)
                         }
                         searchResults
                     }

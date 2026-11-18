@@ -57,42 +57,32 @@ struct ListingsHeaderView: View {
         }
     }
 
+    /// `.underline-tabs`: Home (when the source has one) and each listing.
     var headerScrollView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                let options = if source.features.providesHome {
-                    [NSLocalizedString("HOME")] + listings.map { $0.name }
-                } else {
-                    listings.map { $0.name }
-                }
-                ForEach(options.indices, id: \.self) { offset in
-                    let option = options[offset]
-                    let active = selectedListing == offset
-                    Button {
-                        selectedListing = offset
-                    } label: {
-                        MDChip(title: option, active: active, large: false)
-                    }
-                    .buttonStyle(.plain)
+        let options = if source.features.providesHome {
+            [NSLocalizedString("HOME")] + listings.map { $0.name }
+        } else {
+            listings.map { $0.name }
+        }
+        return MDUnderlineTabs {
+            ForEach(options.indices, id: \.self) { offset in
+                MDUnderlineTab(title: options[offset], on: selectedListing == offset) {
+                    selectedListing = offset
                 }
             }
-            .padding(.horizontal)
         }
-        .scrollClipDisabledPlease()
-        .padding(.top, -11)
     }
 
     static var placeholder: some View {
-        // skeleton loading
-        HStack(spacing: 8) {
+        HStack(spacing: 24) {
             ForEach(0..<3) { _ in
-                MDSkeleton().frame(width: 84, height: 34)
+                MDSkeleton().frame(width: 64, height: 14)
             }
             Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal)
-        .padding(.top, -11)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 13)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.mdLine).frame(height: 1) }
         .transition(.opacity)
     }
 }

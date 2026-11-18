@@ -47,7 +47,7 @@ class MangaGridCell: UICollectionViewCell {
 
     private lazy var badgeView = DoubleBadgeView()
 
-    private let bookmarkView = UIImageView()
+    private let bookmarkView = UIView()
     private let highlightView = UIView()
 
     private var url: String?
@@ -82,7 +82,7 @@ class MangaGridCell: UICollectionViewCell {
         contentView.clipsToBounds = true
         contentView.layer.cornerRadius = 0
         contentView.layer.borderWidth = 1
-        contentView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
+        contentView.layer.borderColor = MDColor.line.cgColor
 
         imageView.image = UIImage(named: "MangaPlaceholder")
         imageView.contentMode = .scaleAspectFill
@@ -115,9 +115,27 @@ class MangaGridCell: UICollectionViewCell {
 
         contentView.addSubview(badgeView)
 
+        // `.badge--tl.badge--glass`: "✓ SAVED" in the top-left corner.
         bookmarkView.isHidden = true
-        bookmarkView.image = UIImage(named: "bookmark")
-        bookmarkView.contentMode = .scaleAspectFit
+        bookmarkView.backgroundColor = UIColor(white: 0, alpha: 0.62)
+        let savedLabel = UILabel()
+        let saved = NSMutableAttributedString(attachment: NSTextAttachment(
+            image: UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .heavy))?
+                .withTintColor(MDColor.text, renderingMode: .alwaysOriginal) ?? UIImage()
+        ))
+        saved.append(NSAttributedString(string: " SAVED", attributes: [
+            .font: MDFont.mono(11, .bold) ?? .monospacedSystemFont(ofSize: 11, weight: .bold),
+            .foregroundColor: MDColor.text,
+            .kern: 0.3
+        ]))
+        savedLabel.attributedText = saved
+        savedLabel.translatesAutoresizingMaskIntoConstraints = false
+        bookmarkView.addSubview(savedLabel)
+        NSLayoutConstraint.activate([
+            savedLabel.leadingAnchor.constraint(equalTo: bookmarkView.leadingAnchor, constant: 6),
+            savedLabel.trailingAnchor.constraint(equalTo: bookmarkView.trailingAnchor, constant: -6),
+            savedLabel.centerYAnchor.constraint(equalTo: bookmarkView.centerYAnchor)
+        ])
         contentView.addSubview(bookmarkView)
 
         highlightView.alpha = 0
@@ -160,10 +178,9 @@ class MangaGridCell: UICollectionViewCell {
             badgeView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
             badgeView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
 
-            bookmarkView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            bookmarkView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             bookmarkView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            bookmarkView.widthAnchor.constraint(equalToConstant: 17),
-            bookmarkView.heightAnchor.constraint(equalToConstant: 27),
+            bookmarkView.heightAnchor.constraint(equalToConstant: 22),
 
             highlightView.topAnchor.constraint(equalTo: contentView.topAnchor),
             highlightView.leftAnchor.constraint(equalTo: contentView.leftAnchor),

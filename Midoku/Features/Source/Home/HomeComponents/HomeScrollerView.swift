@@ -19,7 +19,7 @@ struct HomeScrollerView: View {
     private let listing: AidokuRunner.Listing?
     private let hasSubtitles: Bool
 
-    static let coverHeight: CGFloat = 180
+    static let coverHeight: CGFloat = 156
 
     @State private var bookmarkedItems: Set<String> = .init()
     @State private var loadedBookmarks = false
@@ -65,7 +65,7 @@ struct HomeScrollerView: View {
                     .shimmering()
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 16) {
+                    LazyHStack(alignment: .top, spacing: 10) {
                         ForEach(entries.indices, id: \.self) { offset in
                             let entry = entries[offset]
                             let label = VStack(alignment: .leading) {
@@ -84,18 +84,20 @@ struct HomeScrollerView: View {
 
                                 VStack(alignment: .leading, spacing: 0) {
                                     Text(entry.title)
+                                        .font(.mdSystem(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.mdText)
                                         .lineLimit(2)
                                         .multilineTextAlignment(.leading)
 
                                     if let subtitle = entry.subtitle {
                                         Text(subtitle)
-                                            .foregroundStyle(.secondary)
-                                            .font(.mdFootnote)
+                                            .foregroundStyle(Color.mdText3)
+                                            .font(.mdSystem(size: 11.5))
                                             .lineLimit(1)
                                             .padding(.top, 2)
                                     } else if hasSubtitles {
                                         Text("empty")
-                                            .font(.mdFootnote)
+                                            .font(.mdSystem(size: 11.5))
                                             .lineLimit(1)
                                             .opacity(0)
                                     }
@@ -103,6 +105,7 @@ struct HomeScrollerView: View {
                                     // Add empty line only when title shows 1 line
                                     if shouldAddEmptyLine(for: entry.title) {
                                         Text("empty")
+                                            .font(.mdSystem(size: 13, weight: .semibold))
                                             .lineLimit(1)
                                             .opacity(0)
 
@@ -114,7 +117,7 @@ struct HomeScrollerView: View {
                                         }
                                     }
                                 }
-                                .padding(.horizontal, 4)
+                                .padding(.top, 2)
                                 .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(width: Self.coverHeight * 2/3)
@@ -227,8 +230,8 @@ struct HomeScrollerView: View {
 
     private func shouldAddEmptyLine(for title: String) -> Bool {
         // Calculate if title fits in one line based on current font size
-        let font = UIFont.preferredFont(forTextStyle: .body)
-        let maxWidth = Self.coverHeight * 2/3 - 8 // subtract padding
+        let font = MDFont.ui(13, .semibold) ?? .systemFont(ofSize: 13, weight: .semibold)
+        let maxWidth = Self.coverHeight * 2/3
         let titleWidth = title.size(withAttributes: [.font: font]).width
         return titleWidth <= maxWidth && !title.contains("\n")
     }
@@ -254,7 +257,7 @@ struct PlaceholderMangaScroller: View {
 
     static var mainView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: 16) {
+            LazyHStack(alignment: .top, spacing: 10) {
                 ForEach(0..<20) { _ in
                     VStack(alignment: .leading) {
                         MangaGridItem.placeholder

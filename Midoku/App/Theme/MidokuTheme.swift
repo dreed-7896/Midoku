@@ -266,6 +266,7 @@ enum MidokuTheme {
         overrideSystemColors()
         if MDFont.available { overrideSystemFonts() }
         squareBackgroundConfigurations()
+        removeLiquidGlass()
         applyAppearance()
     }
 
@@ -368,6 +369,23 @@ enum MidokuTheme {
         guard let method = class_getInstanceMethod(cls, selector) else { return }
         let block: @convention(block) (AnyObject) -> CGFloat = { _ in 0 }
         method_setImplementation(method, imp_implementationWithBlock(block))
+    }
+
+    /// Midoku Web is flat and boxy: bar buttons lose their glass capsules, scroll views lose the
+    /// blurred edge under the bars, and sheets get square corners.
+    nonisolated private static func removeLiquidGlass() {
+        func method(_ className: String, _ name: String) -> Method? {
+            guard let cls = NSClassFromString(className) else { return nil }
+            return class_getInstanceMethod(cls, NSSelectorFromString(name))
+        }
+        let yes: @convention(block) (AnyObject) -> Bool = { _ in true }
+        for (className, name) in [("UIBarButtonItem", "hidesSharedBackground"), ("UIScrollEdgeEffect", "isHidden")] {
+            if let m = method(className, name) { method_setImplementation(m, imp_implementationWithBlock(yes)) }
+        }
+        let zero: @convention(block) (AnyObject) -> CGFloat = { _ in 0 }
+        if let m = method("UISheetPresentationController", "preferredCornerRadius") {
+            method_setImplementation(m, imp_implementationWithBlock(zero))
+        }
     }
 
     private static func applyAppearance() {

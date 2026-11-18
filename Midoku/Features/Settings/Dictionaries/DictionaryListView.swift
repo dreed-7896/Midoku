@@ -109,7 +109,8 @@ struct DictionaryListView: View {
             if dictionaryManager.isImporting {
                 ProgressView(NSLocalizedString("IMPORTING_DICTIONARY"))
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 0))
+                    .background(Color.mdS2)
+                    .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
             }
         }
         .sheet(isPresented: $importing) {

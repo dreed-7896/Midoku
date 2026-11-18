@@ -14,8 +14,6 @@ struct FilterLabelView: View {
     var chevron = true
     var icon: String?
 
-    @Environment(\.colorScheme) private var colorScheme
-
     private var highlighted: Bool {
         active || badgeCount ?? 0 > 0
     }
@@ -26,52 +24,25 @@ struct FilterLabelView: View {
     }
 
     var body: some View {
-        let label = HStack(spacing: 4) {
+        // `.chip`: square, hairline border; filled white while a value is picked.
+        HStack(spacing: 5) {
             if let badgeCount, hasBadge {
                 FilterBadgeView(count: badgeCount)
             }
-
             Text(name)
-                .opacity(highlighted ? 1 : 0.6)
-                .foregroundColor(highlighted && colorScheme == .light ? .accentColor : .primary)
-
-            Group {
-                if let icon {
-                    Image(systemName: icon)
-                } else if chevron {
-                    Image(systemName: "chevron.down")
-                }
+            if let icon {
+                Image(systemName: icon).font(.system(size: 10, weight: .bold))
+            } else if chevron {
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).opacity(0.7)
             }
-            .foregroundColor(
-                highlighted
-                    ? (colorScheme == .light ? .accentColor : .primary)
-                    : .init(uiColor: .tertiaryLabel)
-            )
         }
         .lineLimit(1)
-        .padding(.horizontal, 9)
-        .padding(.vertical, hasBadge ? 6 : 8)
-        .font(.mdCaption.weight(.medium))
-
-        if #available(iOS 26.0, *) {
-            label
-                .glassEffect(
-                    highlighted ? .regular.tint(.accentColor.opacity(highlighted && colorScheme == .light ? 0.1 : 1)) : .regular,
-                    in: .rect
-                )
-        } else {
-            label
-                .background(
-                    RoundedRectangle(cornerRadius: 0) // enough to make it fully rounded
-                        .foregroundColor(
-                            highlighted ? .accentColor : .init(uiColor: .secondarySystemFill)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 0)
-                                .stroke(Color(uiColor: .tertiarySystemFill), style: .init(lineWidth: 1))
-                        )
-                        .opacity(highlighted && colorScheme == .light ? 0.1 : 1)
-                )
-        }
+        .font(.mdSystem(size: 13, weight: highlighted ? .semibold : .medium))
+        .foregroundStyle(highlighted ? Color(uiColor: MDColor.onAccent) : Color.mdText2)
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(highlighted ? Color.mdText : Color.clear)
+        .overlay(Rectangle().strokeBorder(highlighted ? Color.mdText : Color.mdLine2, lineWidth: 1))
+        .contentShape(Rectangle())
     }
 }

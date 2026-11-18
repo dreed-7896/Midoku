@@ -93,11 +93,11 @@ struct FilterHeaderView: View {
                 }
             }
             .padding(.horizontal)
+            .padding(.vertical, 6)
             .animation(.easeInOut, value: enabledFilters)
         }
         .scrollClipDisabledPlease()
         .animation(.default, value: sortedFilters)
-        .padding(.top, -11)
         .sheet(isPresented: $showingSheet, onDismiss: onFilterSheetDismiss) {
             FilterListSheetView(
                 sourceKey: sourceKey,
@@ -116,51 +116,14 @@ struct FilterHeaderView: View {
                 showingSheet = true
             }
         } label: {
-            let label = HStack(spacing: 4) {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .opacity(0.6)
-                    .foregroundColor(.primary)
-                    .font(.mdFootnote.weight(.medium))
-
-                if !enabledFilters.isEmpty {
-                    FilterBadgeView(count: filterCount)
-                }
-            }
-            .frame(height: 18)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .font(.mdCaption.weight(.medium))
-
-            if #available(iOS 26.0, *) {
-                if enabledFilters.isEmpty {
-                    label.glassEffect(.regular, in: .circle)
-                } else {
-                    label.glassEffect(.regular, in: .rect)
-                }
-            } else {
-                label
-                    .background(
-                        Group {
-                            if enabledFilters.isEmpty {
-                                Circle()
-                            } else {
-                                // allow space for the badge
-                                RoundedRectangle(cornerRadius: 0)
-                            }
-                        }
-                            .foregroundColor(.init(uiColor: .secondarySystemFill))
-                    )
-                    .overlay {
-                        if enabledFilters.isEmpty {
-                            Circle()
-                                .stroke(Color(uiColor: .tertiarySystemFill), style: .init(lineWidth: 1))
-                        } else {
-                            RoundedRectangle(cornerRadius: 0)
-                                .stroke(Color(uiColor: .tertiarySystemFill), style: .init(lineWidth: 1))
-                        }
+            MDChip(title: "", count: nil, active: !enabledFilters.isEmpty, systemImage: "slider.horizontal.3", large: false)
+                .overlay(alignment: .topTrailing) {
+                    if !enabledFilters.isEmpty {
+                        FilterBadgeView(count: filterCount).offset(x: 6, y: -6)
                     }
-            }
+                }
         }
+        .buttonStyle(.plain)
     }
 }
 

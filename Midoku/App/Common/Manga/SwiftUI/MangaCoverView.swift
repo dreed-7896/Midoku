@@ -31,28 +31,25 @@ struct MangaCoverView: View {
             contentMode: contentMode,
             placeholder: placeholder
         )
-        .overlay(
-            bookmarkView,
-            alignment: .topTrailing
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 0))
-        .overlay(
-            RoundedRectangle(cornerRadius: 0)
-                .strokeBorder(Color(UIColor.quaternarySystemFill), lineWidth: 1)
-        )
+        .overlay(alignment: .topLeading) { bookmarkView }
+        .clipShape(Rectangle())
+        .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
     }
 
+    /// `.badge--tl.badge--glass`: "✓ Saved" on titles already in the library.
     @ViewBuilder
     var bookmarkView: some View {
-        if bookmarked {
-            Image("bookmark")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(.tint)
-                .frame(width: 17, height: 27, alignment: .topTrailing)
-                .padding(.trailing, 8)
-        } else {
-            EmptyView()
-        }
+        if bookmarked { Self.savedBadge }
+    }
+
+    static var savedBadge: some View {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy))
+                Text("Saved").font(.mdMono(11, weight: .bold)).textCase(.uppercase).tracking(0.3)
+            }
+            .foregroundStyle(Color.mdText)
+            .padding(.horizontal, 6)
+            .frame(height: 22)
+            .background(Color.black.opacity(0.62))
     }
 }

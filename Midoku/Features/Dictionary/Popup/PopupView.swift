@@ -389,26 +389,11 @@ struct PopupView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if #available(iOS 26.0, *), !userConfig.popupDisableTransparency {
-                GlassEffectContainer {
-                    if let selectionData, let layout, !content.isEmpty {
-                        popupContent(selectionData: selectionData, layout: layout)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 0))
-                            .position(layout.position)
-                    }
-                }
-            } else {
-                Group {
-                    if let selectionData, let layout, !content.isEmpty {
-                        popupContent(selectionData: selectionData, layout: layout)
-                            .background(
-                                userConfig.popupDisableTransparency ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.ultraThinMaterial),
-                                in: RoundedRectangle(cornerRadius: 0)
-                            )
-                            .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.primary.opacity(0.2), lineWidth: 1))
-                            .position(layout.position)
-                    }
-                }
+            if let selectionData, let layout, !content.isEmpty {
+                popupContent(selectionData: selectionData, layout: layout)
+                    .background(Color.mdS2)
+                    .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
+                    .position(layout.position)
             }
         }
         .ignoresSafeArea()

@@ -4,6 +4,10 @@
 //
 //  Created by Skitty on 8/21/23.
 //
+//  The extension page, laid out like Midoku Web's: no navigation bar, a page head
+//  (SourcePageHeader) that scrolls away with the content, and below it either the
+//  source's home / listings or its search results.
+//
 
 import AidokuRunner
 import Combine
@@ -16,47 +20,22 @@ class NewSourceViewController: UIViewController {
     // if the listings/home should be hidden and the search view shown by default
     private let onlySearch: Bool
 
-    private let searchController: UISearchController = .init(searchResultsController: nil)
-
-    private var originalNavbarAppearance: UINavigationBarAppearance?
-    private var originalNavbarEdgeAppearance: UINavigationBarAppearance?
-
-    private var cancellable: AnyCancellable?
-
-    private lazy var searchOverlayView = {
-        let scrollView = UIView()
-        scrollView.backgroundColor = .systemBackground
-        scrollView.clipsToBounds = false
-        return scrollView
-    }()
-
     private lazy var searchViewController = SourceSearchViewController(source: source)
 
-    // MARK: SwiftUI Bindings
+    // MARK: State
     private var listings: [AidokuRunner.Listing] = [] {
-        didSet {
-            updateHostingControllers()
-        }
+        didSet { updateHostingControllers() }
     }
     private var headerListingSelection: Int = 0 {
-        didSet {
-            updateHostingControllers()
-        }
+        didSet { updateHostingControllers() }
     }
     private var importing: Bool = false {
-        didSet {
-            importHostingController.rootView = importFileView
-        }
+        didSet { importHostingController.rootView = importFileView }
     }
-    private var searchText: String {
-        didSet {
-            handleFilterHeaderVisibility()
-        }
-    }
+    /// The submitted query.
+    private var searchText: String
     private var filters: [AidokuRunner.Filter]? {
-        didSet {
-            updateHostingControllers()
-        }
+        didSet { updateHostingControllers() }
     }
     private var enabledFilters: [FilterValue] = [] {
         didSet {
@@ -65,25 +44,25 @@ class NewSourceViewController: UIViewController {
             saveEnabledFilters()
         }
     }
-    private var filtersEmpty: Bool = false {
-        didSet {
-            if onlySearch && filtersEmpty {
-                searchController.searchBar.showsScopeBar = false
+    /// Filters picked on this page (or handed in by a Discover shelf) switch to results.
+    private var filtersApplied = false
+
+    private var searching: Bool {
+        onlySearch || !searchText.isEmpty || filtersApplied
+    }
+    private var showingSearch = false
+
+    private var filterCount: Int {
+        enabledFilters
+            .map {
+                switch $0 {
+                    case .text, .sort, .check, .select, .range: 1
+                    case let .multiselect(_, included, excluded): included.count + excluded.count
+                }
             }
-        }
+            .reduce(0, +)
     }
 
-    private var searchBinding: Binding<String> {
-        .init(
-            get: { [weak self] in self?.searchText ?? "" },
-            set: { [weak self] in
-                guard let self else { return }
-                self.searchController.searchBar.text = $0
-                self.searchBar(self.searchController.searchBar, textDidChange: $0)
-                self.searchBarSearchButtonClicked(self.searchController.searchBar)
-            }
-        )
-    }
     private var listingsBinding: Binding<[AidokuRunner.Listing]> {
         .init(
             get: { [weak self] in self?.listings ?? [] },
@@ -102,47 +81,49 @@ class NewSourceViewController: UIViewController {
             set: { [weak self] in self?.importing = $0 }
         )
     }
-    private var filtersBinding: Binding<[AidokuRunner.Filter]?> {
-        .init(
-            get: { [weak self] in self?.filters },
-            set: { [weak self] in self?.filters = $0 }
-        )
-    }
     private var enabledFiltersBinding: Binding<[FilterValue]> {
         .init(
             get: { [weak self] in self?.enabledFilters ?? [] },
-            set: { [weak self] in self?.enabledFilters = $0 }
+            set: { [weak self] in
+                guard let self else { return }
+                self.enabledFilters = $0
+                self.filtersApplied = !$0.isEmpty
+                self.updateMode()
+            }
         )
     }
-    private var filtersEmptyBinding: Binding<Bool> {
+    private var searchBinding: Binding<String> {
         .init(
-            get: { [weak self] in self?.filtersEmpty ?? false },
-            set: { [weak self] in self?.filtersEmpty = $0 }
+            get: { [weak self] in self?.searchText ?? "" },
+            set: { [weak self] in self?.submit($0) }
         )
     }
 
     // MARK: SwiftUI Views
-    private var searchFilterHeaderView: SearchFilterHeaderView {
-        SearchFilterHeaderView(
+    private var headerView: SourcePageHeader {
+        SourcePageHeader(
             source: source,
-            filters: filtersBinding,
-            search: searchBinding,
-            enabledFilters: enabledFiltersBinding,
-            filtersEmpty: filtersEmptyBinding
-        ) { [weak self] in
-            guard let self else { return }
-            self.present(
-                UIHostingController(rootView: self.filterSheetView),
-                animated: true
-            )
-        }
-    }
-
-    private var listingsHeaderView: ListingsHeaderView {
-        ListingsHeaderView(
-            source: source,
+            topInset: view.safeAreaInsets.top,
+            onlySearch: onlySearch,
+            query: searchText,
+            searching: searching,
+            filterCount: filterCount,
+            filtersReady: !(filters?.isEmpty ?? true),
+            canImport: source.id == LocalSourceRunner.sourceKey,
             listings: listingsBinding,
-            selectedListing: headerListingSelectionBinding
+            selectedListing: headerListingSelectionBinding,
+            onBack: { [weak self] in self?.navigationController?.popViewController(animated: true) },
+            onSettings: { [weak self] in self?.openSettings() },
+            onWebsite: source.urls.first == nil ? nil : { [weak self] in self?.openWebsite() },
+            onImport: { [weak self] in self?.importing = true },
+            onSubmit: { [weak self] in self?.submit($0) },
+            onFilters: { [weak self] in self?.openFilters() },
+            onClearFilters: { [weak self] in
+                guard let self else { return }
+                self.enabledFilters = []
+                self.filtersApplied = false
+                self.updateMode()
+            }
         )
     }
 
@@ -179,19 +160,24 @@ class NewSourceViewController: UIViewController {
     }
 
     // MARK: Hosting Controllers
-    private lazy var searchFilterController = {
-        let searchFilterController = UIHostingController(rootView: searchFilterHeaderView)
-        if !onlySearch {
-            searchFilterController.view.alpha = 0
-        }
-        searchFilterController.view.backgroundColor = .clear
-        searchFilterController.view.clipsToBounds = false
-        searchFilterController.view.translatesAutoresizingMaskIntoConstraints = false
-        return searchFilterController
+    private lazy var headerController = {
+        let controller = UIHostingController(rootView: headerView)
+        controller.sizingOptions = .intrinsicContentSize
+        controller.safeAreaRegions = []
+        controller.view.backgroundColor = .clear
+        controller.view.clipsToBounds = false
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        return controller
     }()
-    private lazy var listingHeaderController = UIHostingController(rootView: listingsHeaderView)
     private lazy var mainHostingController = UIHostingController(rootView: mainView)
     private lazy var importHostingController = UIHostingController(rootView: importFileView)
+
+    /// Covers the status bar once the header has scrolled away.
+    private let statusBarCover = UIView()
+    private var headerTop: NSLayoutConstraint?
+    private var headerHeight: CGFloat = 0
+    private var offsetObservation: NSKeyValueObservation?
+    private weak var trackedScrollView: UIScrollView?
 
     init(
         source: AidokuRunner.Source,
@@ -221,6 +207,7 @@ class NewSourceViewController: UIViewController {
         if let initialFilters {
             self.enabledFilters = initialFilters
             self.searchViewController.enabledFilters = initialFilters
+            self.filtersApplied = !initialFilters.isEmpty
         }
     }
 
@@ -228,463 +215,135 @@ class NewSourceViewController: UIViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    isolated deinit {
-        // if it isn't removed, an old search bar can potentially block pressing the filter
-        // header buttons in a newer source view controller for some reason
-        searchController.searchBar.removeFromSuperview()
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
         configure()
         constrain()
+        updateMode(initial: true)
+        Task { await loadFilters() }
     }
 
     func configure() {
         title = source.name
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = MDColor.bg
 
-        loadNavbarButtons()
-
-        navigationController?.delegate = self
-        navigationItem.searchController = searchController
-        navigationItem.hidesSearchBarWhenScrolling = false
-
-        if #available(iOS 16, *) {
-            navigationItem.preferredSearchBarPlacement = .stacked
-        }
-
-        searchController.hidesNavigationBarDuringPresentation = true
-        searchController.searchBar.delegate = self
-
-        // fix iPadOS 26 bug
-        if #available(iOS 26.0, *), UIDevice.current.userInterfaceIdiom == .pad {
-            typealias SetClearAsCancelButtonVisibility = @convention(c) (NSObject, Selector, NSInteger) -> Void
-            let selector = NSSelectorFromString("_setClearAsCancelButtonVisibilityWhenEmpty:")
-            let methodIMP = searchController.method(for: selector)
-            let method = unsafeBitCast(methodIMP, to: SetClearAsCancelButtonVisibility.self)
-            method(searchController, selector, 1)
-        }
-
-        setSearchBarHidden(!onlySearch)
-
-        // disable the search bar tap gesture while it's hidden
-        let searchBar = searchController.searchBar
         if !onlySearch {
-            searchBar.gestureRecognizers?.forEach {
-                $0.isEnabled = false
-            }
-        }
-
-        searchBar.text = searchText
-
-        // add search filters to scope bar
-        searchController.searchBar.showsScopeBar = onlySearch
-        searchController.searchBar.scopeButtonTitles = [""]
-        searchController.searchBar.scopeBarBackgroundImage = nil
-        (searchController.searchBar.value(forKey: "_scopeBar") as? UIView)?.isHidden = true
-
-        if
-            let containerView = searchController.searchBar.value(forKey: "_scopeBarContainerView") as? UIView,
-            !containerView.subviews.contains(where: { String(describing: $0.classForCoder).contains("UIHostingView") })
-        {
-            containerView.clipsToBounds = false
-            containerView.addSubview(searchFilterController.view)
-
-            NSLayoutConstraint.activate([
-                searchFilterController.view.topAnchor.constraint(equalTo: containerView.topAnchor),
-                searchFilterController.view.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-                searchFilterController.view.leadingAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.leadingAnchor),
-                searchFilterController.view.trailingAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.trailingAnchor)
-            ])
-        }
-
-        // replace search bar view with listings header view
-        if !onlySearch {
-            if source.hasListings {
-                listingHeaderController.view.backgroundColor = .clear
-                listingHeaderController.view.clipsToBounds = false
-                searchBar.addSubview(listingHeaderController.view)
-
-                // this superview keeps setting clipsToBounds to true, which messes up the shadow on ios 26
-                listingHeaderController.view.superview?.forceNoClip()
-            } else {
-                navigationItem.searchController = nil
-            }
-
-            // only add these views if we need them
             addChild(mainHostingController)
+            mainHostingController.view.backgroundColor = MDColor.bg
             view.addSubview(mainHostingController.view)
             mainHostingController.didMove(toParent: self)
-
-            // hide search view by default (show home view instead)
-            searchOverlayView.alpha = 0
-            searchOverlayView.isHidden = true
-
-            searchViewController.view.alpha = 0
-            searchViewController.view.isHidden = true
-        } else {
-            searchViewController.onAppear()
         }
 
-        view.addSubview(searchOverlayView)
         addChild(searchViewController)
-        searchOverlayView.addSubview(searchViewController.view)
+        view.addSubview(searchViewController.view)
         searchViewController.didMove(toParent: self)
+        searchViewController.view.backgroundColor = MDColor.bg
+        searchViewController.collectionView.backgroundColor = MDColor.bg
+
+        addChild(headerController)
+        view.addSubview(headerController.view)
+        headerController.didMove(toParent: self)
+
+        statusBarCover.backgroundColor = MDColor.bg
+        statusBarCover.alpha = 0
+        view.addSubview(statusBarCover)
 
         if source.id == LocalSourceRunner.sourceKey {
             addChild(importHostingController)
             view.addSubview(importHostingController.view)
             importHostingController.didMove(toParent: self)
+            importHostingController.view.isUserInteractionEnabled = false
+            importHostingController.view.backgroundColor = .clear
         }
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(refreshFilters), name: .init("refresh-filters"), object: nil
+        )
     }
 
     private func constrain() {
-        searchOverlayView.translatesAutoresizingMaskIntoConstraints = false
-        searchViewController.view.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            searchOverlayView.topAnchor.constraint(equalTo: view.topAnchor),
-            searchOverlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            searchOverlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            searchOverlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-
-            searchViewController.view.topAnchor.constraint(equalTo: searchOverlayView.topAnchor),
-            searchViewController.view.bottomAnchor.constraint(equalTo: searchOverlayView.bottomAnchor),
-            searchViewController.view.leadingAnchor.constraint(equalTo: searchOverlayView.leadingAnchor),
-            searchViewController.view.trailingAnchor.constraint(equalTo: searchOverlayView.trailingAnchor)
-        ])
-
-        if !onlySearch {
-            mainHostingController.view.translatesAutoresizingMaskIntoConstraints = false
-
-            if source.hasListings {
-                let searchBar = searchController.searchBar
-                listingHeaderController.view.translatesAutoresizingMaskIntoConstraints = false
-
-                NSLayoutConstraint.activate([
-                    listingHeaderController.view.topAnchor.constraint(equalTo: searchBar.topAnchor),
-                    listingHeaderController.view.bottomAnchor.constraint(equalTo: searchBar.bottomAnchor),
-                    listingHeaderController.view.leadingAnchor.constraint(equalTo: searchBar.safeAreaLayoutGuide.leadingAnchor),
-                    listingHeaderController.view.trailingAnchor.constraint(equalTo: searchBar.safeAreaLayoutGuide.trailingAnchor)
-                ])
-            }
-
-            NSLayoutConstraint.activate([
-                mainHostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
-                mainHostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-                mainHostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                mainHostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-            ])
+        var constraints: [NSLayoutConstraint] = []
+        for content in [searchViewController.view, onlySearch ? nil : mainHostingController.view].compactMap({ $0 }) {
+            content.translatesAutoresizingMaskIntoConstraints = false
+            constraints += [
+                content.topAnchor.constraint(equalTo: view.topAnchor),
+                content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            ]
         }
+        let top = headerController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
+        headerTop = top
+        statusBarCover.translatesAutoresizingMaskIntoConstraints = false
+        constraints += [
+            top,
+            headerController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            statusBarCover.topAnchor.constraint(equalTo: view.topAnchor),
+            statusBarCover.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            statusBarCover.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            statusBarCover.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ]
+        NSLayoutConstraint.activate(constraints)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(true, animated: animated)
+    }
 
-        // save original navbar appearance
-        if originalNavbarAppearance == nil, let navigationBar = navigationController?.navigationBar {
-            originalNavbarAppearance = navigationBar.standardAppearance
-            originalNavbarEdgeAppearance = navigationBar.scrollEdgeAppearance
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard let navigationController else { return }
+        // Screens pushed on top keep their bar; going back to a tab root that hides it leaves it hidden.
+        let backToBarlessRoot = isMovingFromParent
+            && navigationController.viewControllers.count <= 1
+            && (navigationController as? NavigationController)?.hidesBarAtRoot == true
+        let backToBarlessSource = isMovingFromParent && navigationController.viewControllers.last is NewSourceViewController
+        if !backToBarlessRoot && !backToBarlessSource {
+            navigationController.setNavigationBarHidden(false, animated: animated)
         }
-        if !searchOverlayView.isHidden {
-            // set navbar back to opaque if we entered the view while still searching
-            // e.g. returned to search page after exiting manga page
-            self.setNavigationBarOpaque(true)
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        headerController.rootView = headerView
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let height = headerController.view.frame.height
+        if abs(height - headerHeight) > 0.5 {
+            headerHeight = height
+            let insets = UIEdgeInsets(top: height, left: 0, bottom: 0, right: 0)
+            searchViewController.additionalSafeAreaInsets = insets
+            if !onlySearch { mainHostingController.additionalSafeAreaInsets = insets }
         }
+        trackActiveScrollView()
     }
 }
 
-extension NewSourceViewController: UINavigationControllerDelegate {
-    func navigationController(
-        _ navigationController: UINavigationController,
-        didShow viewController: UIViewController,
-        animated: Bool
-    ) {
-        // ensure navbar is set back to normal when view is exited
-        if viewController !== self {
-            if let navigationBar = navigationController.navigationBar as UINavigationBar? {
-                if let originalNavbarAppearance {
-                    navigationBar.standardAppearance = originalNavbarAppearance
-                }
-                navigationBar.scrollEdgeAppearance = originalNavbarEdgeAppearance
-            }
-        }
-    }
-}
-
+// MARK: - Header scrolling
 extension NewSourceViewController {
-    // show search view, hide listings view
-    func showSearchView() {
-        // set search view offset to top before we show it
-        searchViewController.scrollToTop(animated: false)
-
-        // show original search bar
-        setSearchBarHidden(false)
-
-        // hide listing selector
-        listingHeaderController.view.isHidden = true
-
-        // show scope bar (for filters header)
-        // shifts main scroll view down slightly to improve animation
-        if !filtersEmpty, let scrollView = findScrollView(in: mainHostingController.view) {
-            let searchBar = searchController.searchBar
-            let previousHeight = searchBar.frame.height
-            searchBar.showsScopeBar = true
-            let newHeight = searchBar.frame.height
-            let heightDifference = abs(previousHeight - newHeight)
-
-            let translationTransform = CGAffineTransform.identity.translatedBy(x: 0, y: -heightDifference)
-            scrollView.transform = translationTransform
+    /// The header moves up with whichever content is showing, like the web page head.
+    private func trackActiveScrollView() {
+        let scrollView: UIScrollView? = showingSearch
+            ? searchViewController.collectionView
+            : findScrollView(in: mainHostingController.view)
+        guard scrollView !== trackedScrollView else { return }
+        trackedScrollView = scrollView
+        offsetObservation = scrollView?.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+            MainActor.assumeIsolated { self?.syncHeader(to: scrollView) }
         }
-
-        searchOverlayView.isHidden = false
-
-        searchViewController.onAppear()
-
-        // fade in search overlay (background) and search filters, and hide navbar background
-        UIView.animate(withDuration: 0.2) {
-            self.searchOverlayView.alpha = 1
-            self.searchFilterController.view.alpha = 1
-            self.setNavigationBarOpaque(true)
-
-            // show search bar drawer if it was hidden
-            if !self.source.hasListings {
-                self.navigationItem.searchController = self.searchController
-                // prevent the scope bar background from appearing
-                self.searchController.searchBar.scopeBarBackgroundImage = nil
-            }
-        } completion: { _ in
-            // fade in search content
-            self.searchViewController.view.isHidden = false
-            UIView.animate(withDuration: 0.1) {
-                self.searchViewController.view.alpha = 1
-            }
-
-            // reset scroll view shift
-            if let mainScrollView = self.findScrollView(in: self.mainHostingController.view) {
-                mainScrollView.transform = .identity
-            }
-        }
-
-        // focus search bar
-        Task { @MainActor in
-            searchController.isActive = true
-            searchController.searchBar.becomeFirstResponder()
-        }
+        if let scrollView { syncHeader(to: scrollView) }
     }
 
-    // hide search view, show listings view
-    func hideSearchView() {
-        guard
-            let window = view.window,
-            let tabBarController = window.rootViewController as? UITabBarController
-        else {
-            return
-        }
-
-        // pop the scroll view off the search overlay and put it on the window above everything;
-        // stops the content from moving around when the navbar height changes during transition
-        let originalFrame = searchViewController.view.frame
-
-        searchViewController.removeFromParent()
-        searchViewController.view.removeFromSuperview()
-        searchViewController.view.translatesAutoresizingMaskIntoConstraints = true
-
-        searchViewController.view.frame = UIScreen.main.bounds
-        searchViewController.view.transform = .identity.translatedBy(x: 0, y: view.safeAreaInsets.top)
-
-        // scroll view frame changes automatically, so make sure it doesn't clip in the wrong place
-        searchViewController.view.clipsToBounds = false
-
-        // use mask to clip scroll view so it doesn't cover tab bar
-        let maskLayer = CAShapeLayer()
-        let path = UIBezierPath(rect: CGRect(
-            x: 0,
-            y: 0,
-            width: window.bounds.width,
-            // half point for tab bar separator
-            height: tabBarController.tabBar.frame.origin.y - 0.5 - view.safeAreaInsets.top
-        ))
-        maskLayer.path = path.cgPath
-        searchViewController.view.layer.mask = maskLayer
-
-        window.addSubview(searchViewController.view)
-
-        searchController.searchBar.showsScopeBar = false
-
-        UIView.animate(withDuration: 0.1) {
-            // fade out search content
-            self.searchViewController.view.alpha = 0
-        } completion: { _ in
-            self.searchViewController.view.isHidden = true
-
-            // hide search bar drawer if it should be
-            if !self.source.hasListings {
-                self.navigationItem.searchController = nil
-            }
-
-            // hide original search bar
-            self.setSearchBarHidden(true)
-
-            // show listings header
-            self.listingHeaderController.view.isHidden = false
-
-            // hide search filters
-            self.searchFilterController.view.alpha = 0
-
-            // fix for ios 15 navbar background not updating size properly
-            if UIDevice.current.systemVersion.hasPrefix("15.") {
-                if
-                    let navigationBar = self.navigationController?.navigationBar,
-                    let backgroundView = navigationBar.value(forKey: "_backgroundView") as? UIView
-                {
-                    let newFrame = CGRect(
-                        x: backgroundView.frame.origin.x,
-                        y: backgroundView.frame.origin.y,
-                        width: navigationBar.bounds.width,
-                        height: navigationBar.bounds.height - backgroundView.frame.origin.y
-                    )
-                    (navigationBar.value(forKey: "_backgroundView") as? UIView)?.frame = newFrame
-                }
-            }
-
-            UIView.animate(withDuration: 0.2) {
-                // fade out search background
-                self.searchOverlayView.alpha = 0
-                // reset navigation bar background
-                self.setNavigationBarOpaque(false)
-            } completion: { _ in
-                self.searchOverlayView.isHidden = true
-
-                // put scroll view back on original superview
-                self.searchViewController.view.removeFromSuperview()
-                self.addChild(self.searchViewController)
-                self.searchOverlayView.addSubview(self.searchViewController.view)
-                self.searchViewController.didMove(toParent: self)
-
-                self.searchViewController.view.frame = originalFrame
-                self.searchViewController.view.transform = .identity
-                self.searchViewController.view.layer.mask = nil
-
-                self.constrain()
-
-                // show shadow line
-                if let originalNavbarAppearance = self.originalNavbarAppearance {
-                    self.navigationController?.navigationBar.standardAppearance = originalNavbarAppearance
-                }
-            }
-        }
-    }
-
-    @objc private func search() {
-        showSearchView()
-    }
-
-    // refresh views in hosting controllers to update bindings
-    // (basically a substitute for swiftui state reactivity)
-    private func updateHostingControllers() {
-        searchFilterController.rootView = searchFilterHeaderView
-        listingHeaderController.rootView = listingsHeaderView
-        mainHostingController.rootView = mainView
-    }
-
-    // load navbar buttons (search, website, settings)
-    // - hide search button when source is onlySearch
-    // - hide website button when source doesn't have a url
-    // - put website and settings buttons into a menu button if we have all three
-    private func loadNavbarButtons() {
-        let settingsAction = UIAction(title: NSLocalizedString("SETTINGS"), image: UIImage(systemName: "gear")) { [weak self] _ in
-            guard let self else { return }
-
-            // there's a bug where navigationlinks in settingview don't work in NavigationView/NavigationStack,
-            // so we need to use a uikit navigation controller instead
-
-            let coordinator = NavigationCoordinator(rootViewController: self)
-
-            let hostingController = UIHostingController(
-                rootView: SourceSettingsView(source: self.source)
-                    .environmentObject(coordinator)
-            )
-            let navigationController = UINavigationController(rootViewController: hostingController)
-            navigationController.navigationBar.prefersLargeTitles = true
-
-            // update navigation coordinator
-            coordinator.rootViewController = hostingController
-
-            present(navigationController, animated: true)
-        }
-
-        let safariAction = UIAction(title: NSLocalizedString("OPEN_WEBSITE"), image: UIImage(systemName: "safari")) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                guard
-                    let url = (try? await self.source.getBaseUrl()) ?? self.source.urls.first,
-                    let scheme = url.scheme,
-                    scheme.hasPrefix("http")
-                else {
-                    let alert = UIAlertController(
-                        title: NSLocalizedString("INVALID_URL"),
-                        message: NSLocalizedString("INVALID_URL_TEXT"),
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: NSLocalizedString("OK"), style: .cancel) { _ in })
-                    alert.view.tintColor = self.view.tintColor // uikit bug :)
-                    self.present(alert, animated: true, completion: nil)
-                    return
-                }
-                let safariController = SFSafariViewController(url: url)
-                self.present(safariController, animated: true)
-            }
-        }
-
-        let rightmostButton = if !onlySearch && source.urls.first != nil {
-            UIBarButtonItem(
-                title: NSLocalizedString("MORE_BARBUTTON"),
-                image: UIImage(systemName: "ellipsis"),
-                primaryAction: nil,
-                menu: UIMenu(children: [
-                    settingsAction,
-                    safariAction
-                ])
-            )
-        } else {
-            UIBarButtonItem(
-                title: NSLocalizedString("SETTINGS"),
-                image: UIImage(systemName: "gear"),
-                primaryAction: settingsAction
-            )
-        }
-
-        var rightBarButtonItems: [UIBarButtonItem] = [rightmostButton]
-
-        if !onlySearch {
-            rightBarButtonItems.append(UIBarButtonItem(barButtonSystemItem: .search, target: self, action: #selector(search)))
-        } else if source.urls.first != nil {
-            rightBarButtonItems.append(
-                UIBarButtonItem(
-                    title: NSLocalizedString("OPEN_WEBSITE"),
-                    image: UIImage(systemName: "safari"),
-                    primaryAction: safariAction
-                )
-            )
-        }
-
-        if source.id == LocalSourceRunner.sourceKey {
-            rightBarButtonItems.append(
-                UIBarButtonItem(
-                    title: NSLocalizedString("UPLOAD_FILE"),
-                    image: UIImage(systemName: "plus"),
-                    primaryAction: UIAction(title: NSLocalizedString("UPLOAD_FILE"), image: UIImage(systemName: "plus")) { [weak self] _ in
-                        guard let self else { return }
-                        self.importing = true
-//                        self.showImportSheet()
-                    }
-                )
-            )
-        }
-
-        navigationItem.rightBarButtonItems = rightBarButtonItems
+    private func syncHeader(to scrollView: UIScrollView) {
+        guard let headerTop else { return }
+        let scrolled = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        let translation = -min(max(scrolled, 0), headerHeight)
+        if headerTop.constant != translation { headerTop.constant = translation }
+        statusBarCover.alpha = translation < 0 ? 1 : 0
     }
 
     // find a uiscrollview in a view hierarchy
@@ -700,91 +359,109 @@ extension NewSourceViewController {
         }
         return nil
     }
+}
 
-    // hides the search bar so that a blank space is left on the navbar
-    private func setSearchBarHidden(_ hidden: Bool) {
-        self.searchController.searchBar.subviews.first?.subviews.forEach {
-            $0.isHidden = hidden
+// MARK: - Search
+extension NewSourceViewController {
+    private func submit(_ query: String) {
+        guard query != searchText else { return }
+        searchText = query
+        searchViewController.searchText = query
+        if searching && showingSearch {
+            searchViewController.viewModel.loadManga(searchText: query, filters: enabledFilters, force: true)
         }
+        updateMode()
     }
 
-    // toggles the navigation bar background to opaque or transparent
-    private func setNavigationBarOpaque(_ opaque: Bool) {
-        if #available(iOS 26.0, *) {
-            // navigation bar should remain clear on ios 26
-            return
-        }
-
-        guard
-            !onlySearch,
-            let navigationBar = navigationController?.navigationBar
-        else { return }
-
-        if opaque {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = .systemBackground
-            appearance.shadowColor = .clear
-
-            navigationBar.standardAppearance = appearance
-            navigationBar.scrollEdgeAppearance = appearance
-        } else {
-            if let originalNavbarAppearance {
-                navigationBar.standardAppearance = originalNavbarAppearance
-                // bug fix: there's a second separator view that appears when animating
-                // here, we hide it, then when the animation resets in hideSearchView, we fully restore the appearance
-                navigationBar.standardAppearance.shadowColor = .clear
-            }
-            navigationBar.scrollEdgeAppearance = originalNavbarEdgeAppearance
-        }
+    /// Shows the results when there's a query or filters, the home / listings otherwise.
+    private func updateMode(initial: Bool = false) {
+        updateHostingControllers()
+        if initial || searching != showingSearch { applyMode(searching) }
     }
 
-    private func handleFilterHeaderVisibility() {
-        guard source.config?.hidesFiltersWhileSearching ?? false else { return }
-        if searchText.isEmpty {
-            UIView.animate(withDuration: 0.2) {
-                self.searchController.searchBar.showsScopeBar = true
+    private func applyMode(_ search: Bool) {
+        let wasShowing = showingSearch
+        showingSearch = search
+        if search && !wasShowing {
+            searchViewController.searchText = searchText
+            searchViewController.enabledFilters = enabledFilters
+            if searchViewController.viewModel.hasAppeared {
+                searchViewController.viewModel.loadManga(searchText: searchText, filters: enabledFilters, force: true)
+            } else {
+                searchViewController.onAppear()
             }
-        } else {
-            self.searchController.searchBar.showsScopeBar = false
+            searchViewController.scrollToTop(animated: false)
         }
+        searchViewController.view.isHidden = !search
+        if !onlySearch { mainHostingController.view.isHidden = search }
+        trackedScrollView = nil
+        view.setNeedsLayout()
+    }
+
+    private func openFilters() {
+        view.endEditing(true)
+        present(UIHostingController(rootView: filterSheetView), animated: true)
+    }
+
+    @objc private func refreshFilters() {
+        Task { await loadFilters() }
+    }
+
+    private func loadFilters() async {
+        filters = (try? await source.getSearchFilters()) ?? []
+    }
+
+    // refresh views in hosting controllers to update bindings
+    // (basically a substitute for swiftui state reactivity)
+    private func updateHostingControllers() {
+        guard isViewLoaded else { return }
+        headerController.rootView = headerView
+        if !onlySearch { mainHostingController.rootView = mainView }
     }
 }
 
+// MARK: - Actions
 extension NewSourceViewController {
+    private func openSettings() {
+        // there's a bug where navigationlinks in settingview don't work in NavigationView/NavigationStack,
+        // so we need to use a uikit navigation controller instead
+        let coordinator = NavigationCoordinator(rootViewController: self)
+        let hostingController = UIHostingController(
+            rootView: SourceSettingsView(source: source)
+                .environmentObject(coordinator)
+        )
+        let navigationController = UINavigationController(rootViewController: hostingController)
+        navigationController.navigationBar.prefersLargeTitles = true
+        coordinator.rootViewController = hostingController
+        present(navigationController, animated: true)
+    }
+
+    private func openWebsite() {
+        Task {
+            guard
+                let url = (try? await source.getBaseUrl()) ?? source.urls.first,
+                let scheme = url.scheme,
+                scheme.hasPrefix("http")
+            else {
+                let alert = UIAlertController(
+                    title: NSLocalizedString("INVALID_URL"),
+                    message: NSLocalizedString("INVALID_URL_TEXT"),
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: NSLocalizedString("OK"), style: .cancel) { _ in })
+                present(alert, animated: true, completion: nil)
+                return
+            }
+            present(SFSafariViewController(url: url), animated: true)
+        }
+    }
+
     private func saveEnabledFilters() {
         guard !AppSettings.general.incognitoMode.get() else { return }
 
         let filtersData = try? JSONEncoder().encode(enabledFilters)
         if let filtersData {
             SettingsStore.shared.set(key: "\(source.id).filters", value: filtersData)
-        }
-    }
-
-    private func showImportSheet() {
-        let viewController = UIHostingController(rootView: LocalFileImportView())
-        viewController.modalPresentationStyle = .pageSheet
-        present(viewController, animated: true)
-    }
-}
-
-// MARK: UISearchBarDelegate
-extension NewSourceViewController: UISearchBarDelegate {
-    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        searchViewController.searchBar(searchBar, textDidChange: searchText)
-        self.searchText = searchText
-    }
-
-    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-        searchViewController.searchBarSearchButtonClicked(searchBar)
-    }
-
-    func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
-        searchViewController.searchBarCancelButtonClicked(searchBar)
-        searchText = ""
-        // dismiss search view
-        if !onlySearch {
-            hideSearchView()
         }
     }
 }

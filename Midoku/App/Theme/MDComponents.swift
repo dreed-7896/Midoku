@@ -68,14 +68,16 @@ struct MDIconBox: View {
     var active = false
     var badge: Int?
     var size: CGFloat = 44
+    /// `.icon-btn--glass`: flat dark translucent square over artwork (no blur, no liquid glass).
+    var glass = false
 
     var body: some View {
         Image(systemName: systemImage)
             .font(.system(size: size > 40 ? 18 : 15, weight: .medium))
             .foregroundStyle(active ? Color.mdAccent : Color.mdText)
             .frame(width: size, height: size)
-            .background(Color.mdS1)
-            .overlay(Rectangle().strokeBorder(active ? Color.mdAccent : Color.mdLine, lineWidth: 1))
+            .background(glass ? Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255).opacity(0.55) : Color.mdS1)
+            .overlay(Rectangle().strokeBorder(active ? Color.mdAccent : glass ? Color.white.opacity(0.12) : Color.mdLine, lineWidth: 1))
             .overlay(alignment: .topTrailing) {
                 if let badge, badge > 0 {
                     Text("\(badge)")
@@ -96,10 +98,11 @@ struct MDIconButton: View {
     let label: String
     var active = false
     var badge: Int?
+    var glass = false
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) { MDIconBox(systemImage: systemImage, active: active, badge: badge) }
+        Button(action: action) { MDIconBox(systemImage: systemImage, active: active, badge: badge, glass: glass) }
             .buttonStyle(.plain)
             .accessibilityLabel(label)
     }
@@ -145,13 +148,15 @@ struct MDSearchField: View {
     var autofocus = true
     var onClose: (() -> Void)?
     var onSubmit: (() -> Void)?
+    /// `.field--lg`: 54pt, 17pt medium text (the Search page's main field).
+    var large = false
     @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+            Image(systemName: "magnifyingglass").font(.system(size: large ? 18 : 16, weight: .medium))
             TextField(prompt, text: $text)
-                .font(.mdSystem(size: 16))
+                .font(.mdSystem(size: large ? 17 : 16, weight: large ? .medium : .regular))
                 .foregroundStyle(Color.mdText)
                 .focused($focused)
                 .textInputAutocapitalization(.never)
@@ -160,7 +165,7 @@ struct MDSearchField: View {
                 .onSubmit { onSubmit?() }
             if onClose == nil, !text.isEmpty {
                 Button { text = "" } label: {
-                    Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 30).background(Color.mdS3)
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).frame(width: large ? 36 : 30, height: large ? 36 : 30).background(Color.mdS3)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
@@ -177,8 +182,9 @@ struct MDSearchField: View {
             }
         }
         .foregroundStyle(focused ? Color.mdText : Color.mdText3)
-        .padding(.horizontal, 14)
-        .frame(height: 46)
+        .padding(.leading, 14)
+        .padding(.trailing, large ? 8 : 14)
+        .frame(height: large ? 54 : 46)
         .background(Color.mdS1)
         .overlay(Rectangle().strokeBorder(focused ? Color.mdAccent : Color.mdLine, lineWidth: 1))
         .onAppear { if autofocus { focused = true } }
@@ -224,3 +230,41 @@ struct MDBadge: View {
             .background(Color.mdAccent)
     }
 }
+
+/// `.underline-tabs`: text tabs over a hairline; the selected one is bold with a 2pt accent rule.
+struct MDUnderlineTabs<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 24) { content }
+                .padding(.horizontal, 16)
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.mdLine).frame(height: 1).allowsHitTesting(false) }
+    }
+}
+
+struct MDUnderlineTab: View {
+    let title: String
+    var on = false
+    /// Shows an × after the title (search / filter tabs that clear themselves).
+    var clears = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.mdSystem(size: 15, weight: on ? .semibold : .medium))
+                    .lineLimit(1)
+                if clears { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }
+            }
+            .foregroundStyle(on ? Color.mdText : Color.mdText3)
+            .padding(.bottom, 11)
+            .overlay(alignment: .bottom) { Rectangle().fill(on ? Color.mdAccent : Color.clear).frame(height: 2) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
