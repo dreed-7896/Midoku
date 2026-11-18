@@ -60,29 +60,14 @@ struct MigrateResultsView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle(String(format: NSLocalizedString("MIGRATE_%i_OF_%i"), migratedManga.count, selectedSeries.count))
-        .navigationBarBackButtonHidden()
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                if isLoading {
-                    ProgressView()
-                } else if forceMigrate {
-                    Button(NSLocalizedString("MIGRATE")) {
-                        startMigration(copy: false)
-                    }
-                } else {
-                    Menu(NSLocalizedString("CONTINUE")) {
-                        Button(NSLocalizedString("COPY")) {
-                            startMigration(copy: true)
-                        }
-                        Button(NSLocalizedString("MIGRATE")) {
-                            showingConfirmAlert = true
-                        }
-                    }
-                }
-            }
-            .sharedBackgroundVisibility(.hidden)
-        }
+        .mdFlowPage(String(format: NSLocalizedString("MIGRATE_%i_OF_%i"), migratedManga.count, selectedSeries.count),
+                    kicker: "Step 4 · Review matches",
+                    onBack: forceMigrate ? nil : { path.navigationController?.popViewController(animated: true) },
+                    onClose: forceMigrate ? nil : { path.dismiss() },
+                    secondary: forceMigrate ? nil : MDSheetAction(title: NSLocalizedString("COPY"), disabled: isLoading) { startMigration(copy: true) },
+                    primary: MDSheetAction(title: isLoading ? "Searching…" : NSLocalizedString("MIGRATE"), disabled: isLoading) {
+                        if forceMigrate { startMigration(copy: false) } else { showingConfirmAlert = true }
+                    })
         .interactiveDismissDisabled(forceMigrate)
         .alert(
             {

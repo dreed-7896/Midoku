@@ -988,24 +988,9 @@ extension SettingView {
                     .edgesIgnoringSafeArea(.bottom)
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        showLoginWebView = false
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        loginReload = true
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
+            .mdSheet(setting.title, onClose: { showLoginWebView = false }) {
+                MDIconButton(systemImage: "arrow.clockwise", label: "Reload") { loginReload = true }
             }
-            .navigationTitle(setting.title)
-            .navigationBarTitleDisplayMode(.inline)
             .onChange(of: loginCookies) { newValue in
                 let key = key(setting.key)
                 let keys = Array(newValue.keys)

@@ -10,10 +10,22 @@ import SwiftUI
 class SwiftUINavigationViewController<Content: View>: UINavigationController {
     let path = NavigationCoordinator(rootViewController: nil)
 
-    init(rootView: Content, addDismissButton: Bool = true) {
-        let view = ModelWrapper(rootView: rootView, path: path, addDismissButton: addDismissButton)
+    private var hidesBar = false
+
+    /// `hidesNavigationBar`: every screen draws the web page header itself (`mdFlowPage`).
+    init(rootView: Content, addDismissButton: Bool = true, hidesNavigationBar: Bool = false) {
+        let view = ModelWrapper(rootView: rootView, path: path, addDismissButton: addDismissButton && !hidesNavigationBar)
         super.init(rootViewController: UIHostingController(rootView: view.midokuStyle()))
         path.rootViewController = self
+        hidesBar = hidesNavigationBar
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if hidesBar {
+            setNavigationBarHidden(true, animated: false)
+            MDSwipeBackDelegate.install(on: self)
+        }
     }
 
     required init?(coder aDecoder: NSCoder) {

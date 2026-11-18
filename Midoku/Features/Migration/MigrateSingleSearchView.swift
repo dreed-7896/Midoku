@@ -106,21 +106,18 @@ struct MigrateSingleSearchView: View {
         }
         .listStyle(.grouped)
         .environment(\.defaultMinListRowHeight, 10)
-        .customSearchable(
-            text: $query,
-            hideCancelButton: true,
-            hidesNavigationBarDuringPresentation: false,
-            hidesSearchBarWhenScrolling: false,
-            onSubmit: {
-                if query.isEmpty {
-                    results = []
-                } else {
-                    search()
-                }
-            }
-        )
         .environment(\.autocorrectionDisabled, true)
-        .navigationBarBackButtonHidden(isMigrating)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            MDSearchField(text: $query, prompt: "Search", autofocus: false, onSubmit: {
+                if query.isEmpty { results = [] } else { search() }
+            })
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .background(Color.mdBg)
+        }
+        .mdFlowPage(selectedSeries.title, kicker: "Step 4 · Pick the match",
+                    onBack: isMigrating ? nil : { path.navigationController?.popViewController(animated: true) },
+                    onClose: isMigrating ? nil : { path.dismiss() })
         .alert(NSLocalizedString("MIGRATE_ONE_ITEM?"), isPresented: $showMigrateAlert) {
             Button(NSLocalizedString("CANCEL"), role: .cancel) {
                 targetSeries = nil

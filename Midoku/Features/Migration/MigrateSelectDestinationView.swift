@@ -62,11 +62,10 @@ struct MigrateSelectDestinationView: View {
         }
         .listStyle(.insetGrouped)
         .environment(\.editMode, $editMode)
-        .navigationTitle(NSLocalizedString("DESTINATION"))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(NSLocalizedString("CONTINUE")) {
+        .mdFlowPage(NSLocalizedString("DESTINATION"), kicker: "Step 3 · Search these extensions",
+                    onBack: { path.navigationController?.popViewController(animated: true) },
+                    onClose: { path.dismiss() },
+                    primary: MDSheetAction(title: NSLocalizedString("CONTINUE"), disabled: selectedSources.isEmpty) {
                     Task {
                         let allSources = await SourceManager.shared.getLoadedSources()
                         var sources: [AidokuRunner.Source] = []
@@ -85,11 +84,7 @@ struct MigrateSelectDestinationView: View {
                             ))
                         }
                     }
-                }
-                .disabled(selectedSources.isEmpty)
-            }
-            .sharedBackgroundVisibility(.hidden)
-        }
+                })
         .task {
             guard availableSources.isEmpty && pinnedSources.isEmpty else { return }
             await loadSources()

@@ -46,11 +46,10 @@ struct MigrateSourcesView: View {
         .listStyle(.insetGrouped)
         .overlay {
             if isLoading {
-                ProgressView().progressViewStyle(.circular)
+                MDLoading(label: "Loading", shape: .rows, count: 3).padding(16)
             }
         }
-        .navigationTitle(NSLocalizedString("MIGRATE_SOURCES"))
-        .navigationBarTitleDisplayMode(.inline)
+        .mdFlowPage(NSLocalizedString("MIGRATE_SOURCES"), kicker: "Step 1 · Pick an extension", onClose: { path.dismiss() })
         .task {
             await loadSources()
             isLoading = false

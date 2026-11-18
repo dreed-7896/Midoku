@@ -39,40 +39,20 @@ struct MigrateSelectSeriesView: View {
         .environment(\.editMode, $editMode)
         .clearsStaleListSelection(selectedKeys)
         .restoresListSelectionOnAppear($selectedKeys)
-        .navigationTitle(sourceName)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            guard let navigationController = path.rootViewController as? UINavigationController else { return }
-            navigationController.isToolbarHidden = false
-            navigationController.toolbar.alpha = 1
+        let selectedSeries = series.filter { selectedKeys.contains($0.key) }
+        list.mdFlowPage(sourceName, kicker: "Step 2 · Pick titles",
+                        onBack: { path.navigationController?.popViewController(animated: true) },
+                        onClose: { path.dismiss() },
+                        primary: MDSheetAction(title: NSLocalizedString("CONTINUE"), disabled: selectedKeys.isEmpty) {
+                            path.push(MigrateSelectDestinationView(
+                                selectedSeries: selectedSeries,
+                                selectedSources: source.flatMap { [$0.toInfo()] } ?? []
+                            ))
+                        }) {
+            selectAllButton
+                .font(.mdSystem(size: 14, weight: .semibold))
+                .foregroundStyle(Color.mdAccent)
         }
-
-        if #available(iOS 26.0, *) {
-            list
-                .toolbar {
-                    toolbarContentiOS26
-                }
-        } else {
-            list
-                .toolbar {
-                    toolbarContentiOS18
-                }
-        }
-    }
-
-    @ToolbarContentBuilder
-    var commonToolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .confirmationAction) {
-            let selectedSeries = series.filter { selectedKeys.contains($0.key) }
-            Button(NSLocalizedString("CONTINUE")) {
-                path.push(MigrateSelectDestinationView(
-                    selectedSeries: selectedSeries,
-                    selectedSources: source.flatMap { [$0.toInfo()] } ?? []
-                ))
-            }
-            .disabled(selectedKeys.isEmpty)
-        }
-        .sharedBackgroundVisibility(.hidden)
     }
 
     @ViewBuilder
@@ -85,30 +65,6 @@ struct MigrateSelectSeriesView: View {
         } else {
             Button(NSLocalizedString("SELECT_ALL")) {
                 selectedKeys = Set(series.map { $0.key })
-            }
-        }
-    }
-
-    @available(iOS 26.0, *)
-    @ToolbarContentBuilder
-    var toolbarContentiOS26: some ToolbarContent {
-        commonToolbarContent
-
-        ToolbarSpacer(.flexible, placement: .bottomBar)
-
-        ToolbarItem(placement: .bottomBar) {
-            selectAllButton
-        }
-    }
-
-    @ToolbarContentBuilder
-    var toolbarContentiOS18: some ToolbarContent {
-        commonToolbarContent
-
-        ToolbarItem(placement: .bottomBar) {
-            HStack {
-                Spacer()
-                selectAllButton
             }
         }
     }

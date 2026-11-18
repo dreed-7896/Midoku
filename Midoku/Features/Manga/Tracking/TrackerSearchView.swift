@@ -49,19 +49,14 @@ struct TrackerSearchView: View {
                             TrackerSearchItemCell(item: item, selected: selectedItem == item.id)
                         }
                         .offsetListSeparator()
-                        .contextMenu {
-                            Button {
+                        .mdLongPressActions(item.title ?? tracker.name) {
+                            [MDActionRow(systemImage: "safari", title: NSLocalizedString("VIEW_ON_WEBSITE"), detail: tracker.name) {
                                 Task {
                                     safariUrl = await tracker.getUrl(trackId: item.id)
                                     guard safariUrl != nil else { return }
                                     showSafari = true
                                 }
-                            } label: {
-                                Label(
-                                    NSLocalizedString("VIEW_ON_WEBSITE"),
-                                    systemImage: "safari"
-                                )
-                            }
+                            }]
                         }
                     }
                 }
@@ -78,26 +73,22 @@ struct TrackerSearchView: View {
             }
             .scrollDismissesKeyboardImmediately()
             .scrollBackgroundHiddenPlease()
-            .background(Color(uiColor: .systemBackground))
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        if searchBarFocused == true {
-                            searchBarFocused = false
-                        } else {
-                            dismiss()
-                        }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    MDSearchField(text: $query, prompt: "Search \(tracker.name)", autofocus: false, onSubmit: {
+                        if query.isEmpty { results = [] } else { search(query: query, delay: false) }
+                    })
+                    MDIconButton(systemImage: "slider.horizontal.3", label: NSLocalizedString("SEARCH_OPTIONS"), active: includeNsfw) {
+                        showSearchOptions = true
                     }
                 }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    DoneButton {
-                        track()
-                    }
-                    .disabled(selectedItem == nil)
-                }
-                .sharedBackgroundVisibility(.hidden)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+                .background(Color.mdS2)
             }
+            .mdSheet("Track on \(tracker.name)", onClose: { dismiss() },
+                     secondary: MDSheetAction(title: NSLocalizedString("CANCEL")) { dismiss() },
+                     primary: MDSheetAction(title: "Track", disabled: selectedItem == nil) { track() })
             .sheet(isPresented: $showSearchOptions) {
                 let view = TrackerSearchOptionsView(showNsfw: $includeNsfw)
                 if #available(iOS 16.0, *) {
@@ -121,25 +112,6 @@ struct TrackerSearchView: View {
             .onChange(of: includeNsfw) { _ in
                 search(query: query, delay: false)
             }
-            .customSearchable(
-                text: $query,
-                focused: $searchBarFocused,
-                hideCancelButton: true,
-                hidesNavigationBarDuringPresentation: false,
-                hidesSearchBarWhenScrolling: false,
-                bookmarkIcon: UIImage(systemName: "slider.horizontal.3")?
-                    .withTintColor(.tintColor, renderingMode: .alwaysOriginal), // doesn't work ios 26
-                onSubmit: {
-                    if query.isEmpty {
-                        results = []
-                    } else {
-                        search(query: query, delay: false)
-                    }
-                },
-                onBookmarkPress: {
-                    showSearchOptions = true
-                }
-            )
             .environment(\.autocorrectionDisabled, true)
             .task {
                 do {

@@ -281,3 +281,55 @@ extension UIViewController {
         present(controller, animated: true)
     }
 }
+
+/// Web page chrome for screens in a modal flow (Migration): back or close square, display title,
+/// optional header actions and the sticky action bar. The flow's navigation bar stays hidden.
+private struct MDFlowPageChrome<Actions: View>: ViewModifier {
+    let title: String
+    var kicker: String?
+    var onBack: (() -> Void)?
+    var onClose: (() -> Void)?
+    var secondary: MDSheetAction?
+    var primary: MDSheetAction?
+    @ViewBuilder var actions: Actions
+
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background(Color.mdBg.ignoresSafeArea())
+            .navigationTitle(title)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        if let onBack { MDIconButton(systemImage: "chevron.left", label: "Back", action: onBack) }
+                        Spacer(minLength: 0)
+                        if let onClose { MDIconButton(systemImage: "xmark", label: "Close", action: onClose) }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    MDPageHeader(kicker: kicker, title: title) { actions }
+                        .padding(.bottom, 8)
+                }
+                .background(Color.mdBg)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let primary { MDSheetActions(secondary: secondary, primary: primary) }
+            }
+    }
+}
+
+extension View {
+    func mdFlowPage<Actions: View>(
+        _ title: String,
+        kicker: String? = nil,
+        onBack: (() -> Void)? = nil,
+        onClose: (() -> Void)? = nil,
+        secondary: MDSheetAction? = nil,
+        primary: MDSheetAction? = nil,
+        @ViewBuilder actions: () -> Actions = { EmptyView() }
+    ) -> some View {
+        modifier(MDFlowPageChrome(title: title, kicker: kicker, onBack: onBack, onClose: onClose,
+                                  secondary: secondary, primary: primary, actions: actions))
+    }
+}

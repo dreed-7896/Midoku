@@ -246,7 +246,7 @@ class BrowseViewController: UIViewController, MDBarlessScreen {
     }
 
     func openMigrateSourcePage() {
-        let viewController = SwiftUINavigationViewController(rootView: MigrateSourcesView())
+        let viewController = SwiftUINavigationViewController(rootView: MigrateSourcesView(), hidesNavigationBar: true)
         viewController.modalPresentationStyle = .pageSheet
         present(viewController, animated: true)
     }

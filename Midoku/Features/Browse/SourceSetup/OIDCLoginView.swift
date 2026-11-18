@@ -22,17 +22,8 @@ struct OIDCLoginView: View {
                 cookieHandler(cookies)
                 dismiss()
             }
-            .ignoresSafeArea()
-            .navigationTitle(webViewURL?.host ?? "")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .ignoresSafeArea(edges: .bottom)
+            .mdSheet(webViewURL?.host ?? "Sign in", onClose: { dismiss() })
         }
     }
 }
