@@ -294,16 +294,7 @@ private struct DictionaryInfoView: View {
                     }
                 }
             }
-            .navigationTitle(dictionary.info.index.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(dictionary.info.index.title, onClose: { dismiss() })
             .task(id: dictionary.info.path) {
                 let path = dictionary.info.path
                 dictionarySize = await Task.detached {
@@ -395,16 +386,7 @@ private struct DictionaryRecommendedListView: View {
                     }
                 }
             }
-            .navigationTitle(NSLocalizedString("RECOMMENDED_DICTIONARIES"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(NSLocalizedString("RECOMMENDED_DICTIONARIES"), onClose: { dismiss() })
             .sheet(isPresented: .init(get: { safariUrl != nil }, set: { _ in })) {
                 SafariView(url: $safariUrl)
             }

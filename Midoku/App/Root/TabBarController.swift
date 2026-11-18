@@ -124,6 +124,9 @@ class TabBarController: UITabBarController {
                         .midokuStyle()
                 }.introspect(.navigationStack, on: .iOS(.v26, .v27)) { entity in
                     settingsPath.rootViewController = entity
+                    MDSwipeBackDelegate.install(on: entity)
+                    // Settings subpages get the web's big display titles; the root draws its own header.
+                    entity.navigationBar.prefersLargeTitles = true
                 }
             )
         } else {

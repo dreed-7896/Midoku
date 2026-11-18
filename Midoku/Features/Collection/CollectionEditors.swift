@@ -135,16 +135,7 @@ struct MCEntryEditor: View {
                 }
             }
             .environment(\.editMode, .constant(entryID == nil ? .active : .inactive))
-            .navigationTitle(entryID == nil ? "Group into new title" : "Edit entry").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(entryID == nil ? "Create" : "Save") { save() }
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || loadingCoverURL)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(entryID == nil ? "Group into new title" : "Edit entry", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: entryID == nil ? "Create" : "Save", disabled: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || loadingCoverURL) { save() })
             .onAppear {
                 guard !loaded else { return }; loaded = true
                 if let entryID, let entry = store.library.entry(entryID) {
@@ -272,13 +263,7 @@ struct MCChapterEditor: View {
                     Button("Reset edits", systemImage: "arrow.counterclockwise", role: .destructive) { confirmReset = true }
                         .disabled(loadingCoverURL)
                 }
-            }.navigationTitle("Edit chapter").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { save(reset: false) }.disabled(loadingCoverURL) }
-                    .sharedBackgroundVisibility(.hidden)
-                }
+            }.mdSheet("Edit chapter", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Save", disabled: loadingCoverURL) { save(reset: false) })
                 .onAppear {
                     guard !loaded, let variant else { return }; loaded = true
                     title = store.library.chapterDisplayTitle(variant); number = store.library.number(variant) ?? ""
@@ -334,8 +319,7 @@ struct MCCategoriesView: View {
     var body: some View {
         NavigationStack {
             MCCategoriesPage()
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-.sharedBackgroundVisibility(.hidden) }
+                .mdSheet("Categories", onClose: { dismiss() })
         }
     }
 }
@@ -442,13 +426,7 @@ struct MCAddSourceView: View {
                     }
                     Button("Manage categories") { showCategories = true }
                 }
-            }.navigationTitle("Add to library").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .confirmationAction) { Button("Add") { save() }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-                    .sharedBackgroundVisibility(.hidden)
-                }
+            }.mdSheet("Add to library", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Add", disabled: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { save() })
                 .task {
                     guard !loaded else { return }; loaded = true
                     title = manga.title; summary = manga.description ?? ""; author = manga.authors?.joined(separator: ", ") ?? ""
@@ -554,20 +532,10 @@ struct MCBatchChapterEditor: View {
                     }
                 }
             }
-            .navigationTitle("Edit \(slotIDs.count) chapters")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply") {
-                        guard let edit else { return }
-                        if store.perform({ try $0.library.applyBatchEdit(entryID: entryID, slotIDs: slotIDs, edit: edit) }) { dismiss() }
-                    }
-                    .disabled(edit == nil || (!renames && !renumbers && !setsVolume))
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet("Edit \(slotIDs.count) chapters", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Apply", disabled: edit == nil || (!renames && !renumbers && !setsVolume)) {
+                guard let edit else { return }
+                if store.perform({ try $0.library.applyBatchEdit(entryID: entryID, slotIDs: slotIDs, edit: edit) }) { dismiss() }
+            })
             .mcErrors(store)
         }
         .midokuAccent()

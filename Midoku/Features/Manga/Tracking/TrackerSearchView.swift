@@ -225,7 +225,7 @@ private struct TrackerSearchItemCell: View {
             Spacer()
             if item.tracked {
                 Circle()
-                    .fill(Color.blue.opacity(0.5))
+                    .fill(Color.mdAccent)
                     .frame(width: 10, height: 10)
             }
             if selected {
@@ -247,16 +247,7 @@ private struct TrackerSearchOptionsView: View {
             List {
                 Toggle(NSLocalizedString("SHOW_NSFW_RESULTS"), isOn: $showNsfw)
             }
-            .navigationTitle(NSLocalizedString("SEARCH_OPTIONS"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(NSLocalizedString("SEARCH_OPTIONS"), onClose: { dismiss() })
         }
     }
 }

@@ -52,6 +52,8 @@ extension Color {
     static let mdText3 = Color(uiColor: MDColor.text3)
     static let mdAccent = Color(uiColor: MDColor.accent)
     static let mdAccentSoft = Color(uiColor: MDColor.accentSoft)
+    static let mdMint = Color(uiColor: MDColor.mint)
+    static let mdAmber = Color(uiColor: MDColor.amber)
 }
 
 // MARK: - Fonts
@@ -388,6 +390,29 @@ enum MidokuTheme {
         }
     }
 
+    private static func backSquareImage() -> UIImage {
+        let side: CGFloat = 38
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            let rect = CGRect(x: 0, y: 0, width: side, height: side)
+            MDColor.s1.setFill()
+            UIBezierPath(rect: rect).fill()
+            MDColor.line.setStroke()
+            let border = UIBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+            border.lineWidth = 1
+            border.stroke()
+            let config = UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+            if let chevron = UIImage(systemName: "chevron.left", withConfiguration: config)?
+                .withTintColor(MDColor.text, renderingMode: .alwaysOriginal) {
+                let size = chevron.size
+                chevron.draw(in: CGRect(x: (side - size.width) / 2, y: (side - size.height) / 2,
+                                        width: size.width, height: size.height))
+            }
+        }
+        return image.withRenderingMode(.alwaysOriginal)
+    }
+
     private static func applyAppearance() {
         let titleFont = MDFont.display(17, .bold) ?? .systemFont(ofSize: 17, weight: .semibold)
         let largeFont = MDFont.display(34, .heavy) ?? .systemFont(ofSize: 34, weight: .bold)
@@ -403,8 +428,15 @@ enum MidokuTheme {
             button.normal.titleTextAttributes = [.font: buttonFont]
             bar.buttonAppearance = button
             bar.doneButtonAppearance = button
-            bar.backButtonAppearance = button
         }
+        // Web `.icon-btn` back square: a bordered box with a chevron, no back title.
+        let backImage = backSquareImage()
+        bar.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
+        let back = UIBarButtonItemAppearance()
+        back.normal.titleTextAttributes = [.foregroundColor: UIColor.clear, .font: UIFont.systemFont(ofSize: 1)]
+        back.highlighted.titleTextAttributes = back.normal.titleTextAttributes
+        back.normal.titlePositionAdjustment = UIOffset(horizontal: -1000, vertical: 0)
+        bar.backButtonAppearance = back
         let edge = bar.copy()
         edge.shadowColor = .clear
         let navigationBar = UINavigationBar.appearance()

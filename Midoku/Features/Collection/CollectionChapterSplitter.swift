@@ -35,13 +35,7 @@ struct MCChapterSplitter: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Split chapter").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(loading || pages.isEmpty) }
-                    .sharedBackgroundVisibility(.hidden)
-                }
+                .mdSheet("Split chapter", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Save", disabled: loading || pages.isEmpty) { save() })
                 .confirmationDialog("Remove all splits?", isPresented: $confirmClear) {
                     Button("Rejoin chapter", role: .destructive) { starts = []; excluded = []; trailingExcluded = [] }
                 } message: { Text("Clears every split point and excluded page. Nothing changes until you save.") }

@@ -53,15 +53,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/publish_sidestore.py build/artifacts/Midoku-unsigned.ipa
-      - name: Publish to Cloudflare R2
-        if: github.ref == 'refs/heads/main' && vars.R2_BUCKET != ''
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
-        run: python3 scripts/publish_r2.py build/artifacts/Midoku-unsigned.ipa
       - name: Upload IPA
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

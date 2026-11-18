@@ -412,8 +412,9 @@ extension NewSourceViewController {
             rootView: SourceSettingsView(source: source)
                 .environmentObject(coordinator)
         )
-        let navigationController = UINavigationController(rootViewController: hostingController)
-        navigationController.navigationBar.prefersLargeTitles = true
+        // The settings screen draws the web sheet head; pushed setting pages show the bar.
+        let navigationController = NavigationController(rootViewController: hostingController)
+        navigationController.hidesBarAtRoot = true
         coordinator.rootViewController = hostingController
         present(navigationController, animated: true)
     }

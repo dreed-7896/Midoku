@@ -615,6 +615,7 @@ struct MCCollectionRootView: View {
         .introspect(.navigationStack, on: .iOS(.v26, .v27)) { navigation in
             navigation.interactivePopGestureRecognizer?.isEnabled = true
             navigation.interactiveContentPopGestureRecognizer?.isEnabled = true
+            MDSwipeBackDelegate.install(on: navigation)
         }
         .midokuAccent()
     }
@@ -1363,19 +1364,7 @@ private struct MCReadingAddSheet: View {
                     Text("Tap one entry or select several, then add them together.")
                 }
             }
-            .navigationTitle("Add to Reading")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add \(selected.count)") {
-                        if store.addToReading(selected) { dismiss() }
-                    }
-                    .disabled(selected.isEmpty)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet("Add to Reading", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Add \(selected.count)", disabled: selected.isEmpty) { if store.addToReading(selected) { dismiss() } })
             .mcErrors(store)
         }
         .midokuAccent()
@@ -1423,17 +1412,7 @@ private struct MCBatchCategoryEditor: View {
                     mode = .replace; categories = entry.categoryIDs
                 }
             }
-            .navigationTitle(singleEntry ? "Edit category" : "Edit Categories")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply") { apply() }
-                        .disabled(mode != .replace && categories.isEmpty)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(singleEntry ? "Edit category" : "Edit Categories", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Apply", disabled: mode != .replace && categories.isEmpty) { apply() })
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .mcErrors(store)
         }
@@ -1475,14 +1454,7 @@ private struct MCBatchArtistEditor: View {
                     Text("Leave blank to restore each entry’s artist from its source.")
                 }
             }
-            .navigationTitle("Edit Artist")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) { Button("Apply") { apply() } }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet("Edit Artist", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Apply") { apply() })
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
@@ -1565,8 +1537,7 @@ struct MCImportCollectionView: View {
                         }
                     }
                 }
-            }.navigationTitle("Import library").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-.sharedBackgroundVisibility(.hidden) }
+            }.mdSheet("Import library", onClose: { dismiss() })
                 .fileImporter(isPresented: $picking, allowedContentTypes: [.json]) { result in
                     do {
                         let url = try result.get(); let access = url.startAccessingSecurityScopedResource()

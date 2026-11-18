@@ -55,8 +55,6 @@ struct BackupCreateView: View {
                     MDSettingsHeader(title: "SETTINGS")
                 }
             }
-            .navigationTitle(NSLocalizedString("CREATE_BACKUP"))
-            .navigationBarTitleDisplayMode(.inline)
             .alert(NSLocalizedString("BACKUP_ERROR"), isPresented: Binding(
                 get: { backupError != nil },
                 set: { if !$0 { backupError = nil } }
@@ -65,45 +63,34 @@ struct BackupCreateView: View {
             } message: {
                 Text(backupError ?? "")
             }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
+            .mdSheet(NSLocalizedString("CREATE_BACKUP"), onClose: { dismiss() }, secondary: MDSheetAction(title: NSLocalizedString("CANCEL")) { dismiss() }, primary: MDSheetAction(title: NSLocalizedString("SAVE"), disabled: isSaving) {
+                guard !isSaving else { return }
+                isSaving = true
+                Task {
+                    do {
+                        try await BackupManager.shared.saveNewBackup(
+                            name: name,
+                            options: .init(
+                                libraryEntries: libraryEntries,
+                                history: history,
+                                chapters: chapters,
+                                tracking: tracking,
+                                readingSessions: readingSessions,
+                                vocabulary: vocabulary,
+                                updates: updates,
+                                categories: categories,
+                                settings: settings,
+                                sourceLists: sourceLists,
+                                sensitiveSettings: sensitiveSettings
+                            )
+                        )
                         dismiss()
+                    } catch {
+                        backupError = error.localizedDescription
                     }
+                    isSaving = false
                 }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    DoneButton {
-                        guard !isSaving else { return }
-                        isSaving = true
-                        Task {
-                            do {
-                                try await BackupManager.shared.saveNewBackup(
-                                    name: name,
-                                    options: .init(
-                                        libraryEntries: libraryEntries,
-                                        history: history,
-                                        chapters: chapters,
-                                        tracking: tracking,
-                                        readingSessions: readingSessions,
-                                        vocabulary: vocabulary,
-                                        updates: updates,
-                                        categories: categories,
-                                        settings: settings,
-                                        sourceLists: sourceLists,
-                                        sensitiveSettings: sensitiveSettings
-                                    )
-                                )
-                                dismiss()
-                            } catch {
-                                backupError = error.localizedDescription
-                            }
-                            isSaving = false
-                        }
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            })
         }
     }
 }

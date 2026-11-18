@@ -145,16 +145,7 @@ struct ReaderSettingsView: View {
             .animation(.default, value: downsampleImages.value)
             .animation(.default, value: upscaleImages.value)
             .animation(.default, value: splitWideImages.value)
-            .navigationTitle(NSLocalizedString("READER_SETTINGS"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(NSLocalizedString("READER_SETTINGS"), onClose: { dismiss() })
             .onReceive(NotificationCenter.default.publisher(for: .readerReadingMode)) { _ in
                 readingMode = UserDefaults.standard.string(forKey: "Reader.readingMode.\(mangaId)").flatMap(ReadingMode.init)
             }

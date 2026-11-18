@@ -62,12 +62,7 @@ struct MCAddChapterToEntryView: View {
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search library")
-            .navigationTitle("Add to entry")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet("Add to entry", onClose: { dismiss() })
             .safeAreaInset(edge: .bottom) {
                 Button("Add chapter", systemImage: "plus") { add() }
                     .font(.mdHeadline)
@@ -153,23 +148,12 @@ struct MCRemovedChaptersView: View {
                     }
                 }
             }
-            .navigationTitle("Removed chapters")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                if !chapters.isEmpty {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Restore all") {
-                            let ids = chapters.map(\.id)
-                            if store.perform({ state in
-                                for id in ids { try state.library.restoreChapter(entryID: entryID, chapterID: id) }
-                            }) { dismiss() }
-                        }
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
-            }
+            .mdSheet("Removed chapters", onClose: { dismiss() }, primary: chapters.isEmpty ? nil : MDSheetAction(title: "Restore all") {
+                let ids = chapters.map(\.id)
+                if store.perform({ state in
+                    for id in ids { try state.library.restoreChapter(entryID: entryID, chapterID: id) }
+                }) { dismiss() }
+            })
             .mcErrors(store)
         }
         .midokuAccent()
@@ -252,9 +236,7 @@ struct MCEntrySourcesView: View {
                         }
                     }
                 }
-            }.navigationTitle("Sources").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-.sharedBackgroundVisibility(.hidden) }
+            }.mdSheet("Sources", onClose: { dismiss() })
                 .sheet(item: $listing) { item in
                     if let manga = store.snapshot.manga.first(where: { $0.listingID == item.id })?.manga { MCOriginalListingView(manga: manga) }
                 }.mcErrors(store)

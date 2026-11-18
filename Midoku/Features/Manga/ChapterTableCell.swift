@@ -53,7 +53,7 @@ struct ChapterTableCell: View {
                 alwaysShowPageCount: alwaysShowPageCount,
                 sourceKey: sourceKey
             ).map { read ? "Read · \($0)" : $0 } ?? (read ? "Read" : nil),
-            read: read || locked,
+            read: read,
             current: inProgress,
             progress: inProgress ? totalPages.map { Double(page ?? 0) / Double(max(1, $0)) } : nil
         ) {

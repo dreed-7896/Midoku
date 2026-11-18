@@ -33,10 +33,7 @@ struct SourceSettingsView: View {
                 SourceTableCell(source: source)
                     .listRowInsets(.init(top: 16, leading: 16, bottom: 16, trailing: 16))
             }
-            .listRowBackground(
-                Color(uiColor: .secondarySystemGroupedBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
-            )
+            .listRowBackground(Color.mdS1)
 
             // source settings
             if let error {
@@ -71,21 +68,7 @@ struct SourceSettingsView: View {
             }
         }
         .scrollDismissesKeyboardImmediately()
-        .navigationTitle(NSLocalizedString("SOURCE_SETTINGS"))
-        .navigationBarTitleDisplayMode(.inline)
-        // for ios 15
-        .background(
-            Color(uiColor: .systemGroupedBackground)
-                .ignoresSafeArea()
-        )
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                CloseButton {
-                    path.dismiss()
-                }
-            }
-            .sharedBackgroundVisibility(.hidden)
-        }
+        .mdSheet(NSLocalizedString("SOURCE_SETTINGS"), onClose: { path.dismiss() })
         .animation(.default, value: settings)
         .task {
             guard settings.isEmpty else { return }

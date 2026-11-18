@@ -117,10 +117,7 @@ struct MCPanelBookmarksView: View {
                 }.pickerStyle(.segmented).padding(.horizontal).padding(.vertical, 10).background(Color.mdS2)
             }
             .searchable(text: $query, prompt: "Search bookmarks")
-            .navigationTitle("Bookmarks")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-.sharedBackgroundVisibility(.hidden) }
+            .mdSheet("Bookmarks", onClose: { dismiss() })
             .onAppear { reload() }
             .onReceive(NotificationCenter.default.publisher(for: MCPanelBookmarks.changed)) { _ in reload() }
         }

@@ -18,15 +18,14 @@ struct AddSourceView: View {
     @State private var hasLocalSourceInstalled: Bool
     @State private var loadedInitial = false
     @State private var importing = false
-    @State private var searching = false
     @State private var searchText = ""
+    private var searching: Bool { !searchText.isEmpty }
     @State private var showLocalSetup = false
     @State private var showKomgaSetup = false
     @State private var showKavitaSetup = false
     @State private var showSuwayomiSetup = false
     @State private var showImportFailAlert = false
 
-    @State private var searchFocused: Bool? = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -40,6 +39,12 @@ struct AddSourceView: View {
     var body: some View {
         PlatformNavigationStack {
             List {
+                if !allExternalSources.isEmpty {
+                    MDSearchField(text: $searchText, prompt: "Search sources", autofocus: false)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
                 if !searching {
                     Section {
                         LargeButton {
@@ -113,34 +118,12 @@ struct AddSourceView: View {
                     }
                 } header: {
                     HStack {
-                        Text(NSLocalizedString("EXTERNAL_SOURCES"))
+                        MDSettingsHeader(title: "EXTERNAL_SOURCES")
                         Spacer()
-                        if !externalSources.isEmpty, !searching {
-                            Button {
-                                searching = true
-                                searchFocused = true
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                            }
-                            .controlSize(.small)
-                        }
                     }
                 }
             }
             .contentMarginsPlease(.top, 4)
-            .customSearchable(
-                text: $searchText,
-                enabled: $searching,
-                focused: $searchFocused,
-                hidesNavigationBarDuringPresentation: false,
-                hidesSearchBarWhenScrolling: false,
-                onCancel: {
-                    // task delays slightly to prevent sheet from closing
-                    Task {
-                        searching = false
-                    }
-                }
-            )
             .environment(\.autocorrectionDisabled, true)
             .animation(.default, value: searchText)
             .animation(.default, value: searching)
@@ -171,29 +154,17 @@ struct AddSourceView: View {
             } message: {
                 Text(NSLocalizedString("SOURCE_IMPORT_FAIL_TEXT"))
             }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
+            .mdSheet(NSLocalizedString("ADD_SOURCE"), onClose: { dismiss() }) {
+                if !allExternalSources.isEmpty {
+                    AddSourceFilterMenu()
                 }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !allExternalSources.isEmpty {
-                        AddSourceFilterMenu()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
             }
-            .navigationTitle(NSLocalizedString("ADD_SOURCE"))
-            .navigationBarTitleDisplayMode(.inline)
             .onReceive(NotificationCenter.default.publisher(for: .filterExternalSources)) { _ in
                 Task {
                     await reload()
                 }
             }
         }
-        .interactiveDismissDisabled(searching)
         .onReceive(NotificationCenter.default.publisher(for: .sourceLoaded)) { output in
             if let key = output.object as? String, key == LocalSourceRunner.sourceKey {
                 hasLocalSourceInstalled = true

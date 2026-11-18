@@ -38,16 +38,7 @@ struct AutomaticBackupsView: View {
                         toggle(key: AppSettings.backups.autoBackups.sensitiveSettings.key, title: NSLocalizedString("SENSITIVE_SETTINGS"))
                     }
             }
-            .navigationTitle(NSLocalizedString("AUTOMATIC_BACKUPS"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(NSLocalizedString("AUTOMATIC_BACKUPS"), onClose: { dismiss() })
         }
     }
 

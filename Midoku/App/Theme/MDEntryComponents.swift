@@ -275,7 +275,7 @@ struct MDRowBadge: View {
     }
 }
 
-/// `.ch-row`: a chapter as a list row. Current chapter = accent rule on the left; read ones fade.
+/// `.ch-row`: a chapter as a list row. Current chapter = accent rule on the left; read ones get a check mark.
 struct MDChapterRow<Badges: View, Trailing: View>: View {
     let label: String
     var meta: String?
@@ -314,9 +314,17 @@ struct MDChapterRow<Badges: View, Trailing: View>: View {
                     .padding(.top, 2)
                 }
             }
-            .opacity(read ? 0.45 : 1)
             .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 6) { trailing }
+            HStack(spacing: 6) {
+                trailing
+                if read {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(Color.mdMint)
+                        .frame(width: 22, height: 22)
+                        .accessibilityLabel("Read")
+                }
+            }
                 .foregroundStyle(Color.mdText2)
         }
         .padding(.leading, 10)

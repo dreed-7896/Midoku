@@ -22,6 +22,8 @@ class NavigationController: UINavigationController, UINavigationControllerDelega
         delegate = self
         interactivePopGestureRecognizer?.isEnabled = true
         if #available(iOS 26.0, *) { interactiveContentPopGestureRecognizer?.isEnabled = true }
+        // Swipe back keeps working on screens with a hidden bar or back button.
+        MDSwipeBackDelegate.install(on: self)
     }
     /// Tab roots that draw the web page header themselves hide the navigation bar; pushed screens show it
     /// unless they adopt `MDBarlessScreen`.

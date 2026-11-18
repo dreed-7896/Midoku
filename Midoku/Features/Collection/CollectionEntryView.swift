@@ -59,24 +59,15 @@ struct MCEntryStatusEditor: View {
                     Button("Manage Categories") { showCategories = true }
                 }
             }
-            .navigationTitle(includeStatus ? "Status and categories" : "Edit category")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if store.perform({ state in
-                            let valid = categories.intersection(Set(state.categories.map(\.id)))
-                            try state.library.editEntry(entryID) { entry in
-                                if includeStatus { entry.status = status }
-                                entry.categoryIDs = valid
-                            }
-                        }) { dismiss() }
+            .mdSheet(includeStatus ? "Status and categories" : "Edit category", onClose: { dismiss() }, secondary: MDSheetAction(title: "Cancel") { dismiss() }, primary: MDSheetAction(title: "Save") {
+                if store.perform({ state in
+                    let valid = categories.intersection(Set(state.categories.map(\.id)))
+                    try state.library.editEntry(entryID) { entry in
+                        if includeStatus { entry.status = status }
+                        entry.categoryIDs = valid
                     }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+                }) { dismiss() }
+            })
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
@@ -1000,9 +991,7 @@ struct MCChapterOrderView: View {
                     }
                 }
             }.environment(\.editMode, .constant(.active))
-                .navigationTitle("Chapters and titles").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-.sharedBackgroundVisibility(.hidden) }
+                .mdSheet("Chapters and titles", onClose: { dismiss() })
                 .mcErrors(store)
         }
     }

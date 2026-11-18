@@ -113,17 +113,7 @@ struct DownloadQueueView: View {
                 }
             }
             .contentMarginsPlease(.top, 4)
-            .navigationTitle(NSLocalizedString("DOWNLOAD_QUEUE"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-
-                ToolbarItem(placement: .topBarTrailing) {
+            .mdSheet(NSLocalizedString("DOWNLOAD_QUEUE"), count: queue.reduce(0) { $0 + $1.1.count }, onClose: { dismiss() }) {
                     Menu {
                         Button {
                             Task {
@@ -161,8 +151,7 @@ struct DownloadQueueView: View {
                     } label: {
                         MoreIcon()
                     }
-                }
-                .sharedBackgroundVisibility(.hidden)
+                    .buttonStyle(.plain)
             }
             .task {
                 isPaused = await DownloadManager.shared.isQueuePaused()

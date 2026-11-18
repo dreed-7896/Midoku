@@ -59,10 +59,7 @@ struct MCReadingStatsView: View {
                     NavigationLink("Streaks, heatmap and totals") { InsightsView() }
                 }
             }
-            .navigationTitle("Reading stats")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-.sharedBackgroundVisibility(.hidden) }
+            .mdSheet("Reading stats", onClose: { dismiss() })
             .task { sessions = await MCReadingStatSession.load() }
         }
         .midokuAccent()

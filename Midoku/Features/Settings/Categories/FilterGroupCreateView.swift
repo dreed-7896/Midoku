@@ -153,26 +153,12 @@ struct FilterGroupCreateView: View {
                 }
             }
             .scrollDismissesKeyboardImmediately()
-            .navigationTitle(editingGroupTitle != nil ? NSLocalizedString("EDIT_FILTER_GROUP") : NSLocalizedString("CREATE_FILTER_GROUP"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
+            .mdSheet(editingGroupTitle != nil ? NSLocalizedString("EDIT_FILTER_GROUP") : NSLocalizedString("CREATE_FILTER_GROUP"), onClose: { dismiss() }, secondary: MDSheetAction(title: NSLocalizedString("CANCEL")) { dismiss() }, primary: MDSheetAction(title: NSLocalizedString("SAVE"), disabled: !isValid) {
+                Task {
+                    await commit()
                 }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .confirmationAction) {
-                    DoneButton {
-                        Task {
-                            await commit()
-                        }
-                        dismiss()
-                    }
-                    .disabled(!isValid)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+                dismiss()
+            })
             .onChange(of: title) { _ in
                 checkValidity()
             }

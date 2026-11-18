@@ -50,16 +50,10 @@ struct MCDuplicateFinderView: View {
                         description: Text("Titles with the same name, ignoring case, accents, punctuation and notes in brackets, appear here."))
                 }
             }
-            .navigationTitle("Duplicates")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-                .sharedBackgroundVisibility(.hidden)
+            .mdSheet("Duplicates", onClose: { dismiss() }) {
                 if !ignored.isEmpty {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Show hidden") { ignoredData = Data() }
-                    }
-                    .sharedBackgroundVisibility(.hidden)
+                    Button("Show hidden") { ignoredData = Data() }
+                        .buttonStyle(MDGhostButtonStyle())
                 }
             }
         }

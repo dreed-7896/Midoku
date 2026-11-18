@@ -71,16 +71,7 @@ struct BackupContentView: View {
                     }
                 }
             }
-            .navigationTitle(NSLocalizedString("BACKUP_INFO_TITLE"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    CloseButton {
-                        dismiss()
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
+            .mdSheet(NSLocalizedString("BACKUP_INFO_TITLE"), onClose: { dismiss() })
             .alert(NSLocalizedString("RESTORE_BACKUP"), isPresented: $showRestoreAlert) {
                 Button(NSLocalizedString("CANCEL"), role: .cancel) {}
                 Button(NSLocalizedString("RESTORE"), role: .destructive) {
