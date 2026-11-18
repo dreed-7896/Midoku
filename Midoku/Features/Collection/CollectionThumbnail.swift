@@ -229,7 +229,7 @@ struct MCChapterThumbnail: View {
                     SourceImageView(source: store.source(chapter.identity.listing.connectionID), imageUrl: thumbnail,
                         width: geometry.size.width, height: geometry.size.height, placeholder: "MidokuChapterPlaceholder")
                 } else {
-                    MCArtworkPlaceholder()
+                    MCPagePlaceholder(layout: Int(variant?.chapterID.uuid.0 ?? 0))
                 }
             }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .top).clipped()
         }

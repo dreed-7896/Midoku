@@ -4,160 +4,152 @@
 //
 //  Created by Skitty on 1/23/22.
 //
+//  Midoku Web's Sources page for the extensions on this device: Installed / Available tabs, an
+//  updates banner, search with a language box, pinned extensions as big tiles and the rest as a
+//  three-column grid of tiles.
+//
 
 import AidokuRunner
 import SafariServices
 import SwiftUI
 
-class BrowseViewController: BaseTableViewController, MDBarlessScreen {
-    let viewModel = BrowseViewModel()
+@MainActor
+@Observable
+final class ExtensionsModel {
+    @ObservationIgnored let viewModel = BrowseViewModel()
 
-    private lazy var dataSource = makeDataSource()
+    var pinned: [SourceInfo] = []
+    var installed: [SourceInfo] = []
+    var updates: [SourceInfo] = []
+    var available: [ExternalSourceInfo] = []
+    var loaded = false
+    var busy: Set<String> = []
+    var updatingAll = false
 
-    private lazy var refreshControl = UIRefreshControl()
-    private lazy var emptyStackView = EmptyPageStackView()
+    var allInstalled: [SourceInfo] { pinned + installed }
 
-    private var hasAppliedInitialSnapshot = false
-    private var searchText = ""
-    private lazy var headerHost = UIHostingController(rootView: headerView(editing: false))
-
-    override var tableViewStyle: UITableView.Style {
-        .grouped
+    func reloadInstalled() async {
+        await viewModel.loadInstalledSources()
+        await viewModel.loadPinnedSources()
+        viewModel.loadUpdates()
+        publish()
     }
 
-    override func configure() {
-        super.configure()
+    func reloadExternal(reload: Bool = false) async {
+        await viewModel.loadExternalSources(reload: reload)
+        viewModel.loadUpdates()
+        publish()
+    }
 
+    private func publish() {
+        pinned = viewModel.pinnedSources
+        installed = viewModel.installedSources
+        updates = viewModel.updatesSources
+        available = availableSources()
+        loaded = true
+        AppSettings.browse.updateCount.set(updates.count)
+    }
+
+    func hasUpdate(_ info: SourceInfo) -> Bool {
+        updates.contains { $0.sourceId == info.sourceId }
+    }
+
+    private func availableSources() -> [ExternalSourceInfo] {
+        let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map(SemanticVersion.init)
+        let installedIDs = Set(allInstalled.map(\.sourceId))
+        let ratings = AppSettings.browse.contentRatings.get()
+        return viewModel.unfilteredExternalSources
+            .filter { info in
+                guard !installedIDs.contains(info.id) else { return false }
+                if let appVersion, let min = info.minAppVersion, SemanticVersion(min) > appVersion { return false }
+                if let appVersion, let max = info.maxAppVersion, SemanticVersion(max) < appVersion { return false }
+                return ratings.contains(info.resolvedContentRating)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func install(_ info: ExternalSourceInfo) async -> Bool {
+        guard let url = info.fileURL else { return false }
+        busy.insert(info.id)
+        defer { busy.remove(info.id) }
+        return await SourceManager.shared.importSource(from: url) != nil
+    }
+
+    func update(_ sourceId: String) async {
+        guard let external = viewModel.unfilteredExternalSources.first(where: { $0.id == sourceId }),
+              let url = external.fileURL else { return }
+        busy.insert(sourceId)
+        _ = await SourceManager.shared.importSource(from: url)
+        busy.remove(sourceId)
+    }
+
+    func updateAll() async {
+        updatingAll = true
+        for info in updates { await update(info.sourceId) }
+        updatingAll = false
+        await reloadInstalled()
+    }
+}
+
+class BrowseViewController: UIViewController, MDBarlessScreen {
+    private let model = ExtensionsModel()
+    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
         title = "Extensions"
-
+        view.backgroundColor = MDColor.bg
         navigationItem.largeTitleDisplayMode = .never
 
-        // web page head: back, title, actions and the search field
-        headerHost.view.backgroundColor = .clear
-        headerHost.safeAreaRegions = []
-        addChild(headerHost)
-        tableView.tableHeaderView = headerHost.view
-        headerHost.didMove(toParent: self)
+        let page = ExtensionsPageView(
+            model: model,
+            onBack: { [weak self] in self?.navigationController?.popViewController(animated: true) },
+            onAdd: { [weak self] in self?.openAddSourcePage() },
+            onMigrate: { [weak self] in self?.openMigrateSourcePage() },
+            onOpen: { [weak self] in self?.open($0) },
+            onLatest: { [weak self] in self?.openLatest($0) },
+            onUninstall: { [weak self] in self?.uninstall(sourceKeys: [$0.sourceId]) },
+            onGuide: { [weak self] in self?.openGuidePage() }
+        ).midokuStyle()
+        let host = UIHostingController(rootView: page)
+        host.view.backgroundColor = .clear
+        addChild(host)
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.topAnchor.constraint(equalTo: view.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        host.didMove(toParent: self)
 
-        // toolbar buttons
-        let deleteButton = UIBarButtonItem(
-            title: nil,
-            style: .plain,
-            target: self,
-            action: #selector(deleteSelected)
-        )
-        deleteButton.image = UIImage(systemName: "trash")
-        if #unavailable(iOS 26.0) {
-            deleteButton.tintColor = .systemRed
-        }
-        toolbarItems = [
-            deleteButton,
-            UIBarButtonItem(systemItem: .flexibleSpace)
-        ]
-
-        updateNavbar()
-        updateToolbar()
-
-        // configure table view
-        tableView.dataSource = dataSource
-        tableView.register(
-            SourceTableViewCell.self,
-            forCellReuseIdentifier: String(describing: SourceTableViewCell.self)
-        )
-        tableView.register(
-            UITableViewHeaderFooterView.self,
-            forHeaderFooterViewReuseIdentifier: String(describing: UITableViewHeaderFooterView.self)
-        )
-        tableView.rowHeight = UITableView.automaticDimension
-        tableView.estimatedRowHeight = 72
-        tableView.sectionFooterHeight = 8
-        tableView.separatorStyle = .none
-        tableView.backgroundColor = .systemBackground
-        tableView.keyboardDismissMode = .onDrag
-        tableView.allowsMultipleSelectionDuringEditing = true
-
-        refreshControl.addTarget(self, action: #selector(refreshSourceLists(_:)), for: .valueChanged)
-        tableView.refreshControl = refreshControl
-
-        // empty text
-        emptyStackView.imageSystemName = "globe"
-        emptyStackView.title = NSLocalizedString("BROWSE_NO_SOURCES")
-        emptyStackView.text = NSLocalizedString("BROWSE_NO_SOURCES_TEXT_NEW")
-        emptyStackView.buttonText = NSLocalizedString("ADDING_SOURCES_GUIDE_BUTTON")
-        emptyStackView.addButtonTarget(self, action: #selector(openGuidePage))
-        emptyStackView.showsButton = true
-        emptyStackView.isHidden = true
-        emptyStackView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(emptyStackView)
-
-        // load data
-        Task {
-            await viewModel.loadInstalledSources()
-            await viewModel.loadPinnedSources()
-            updateDataSource()
-
-            Task {
-                await viewModel.loadExternalSources()
-                viewModel.loadUpdates()
-                updateDataSource()
+        observers.append(NotificationCenter.default.addObserver(forName: .updateSourceList, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                await self?.model.reloadInstalled()
+                self?.checkUpdateCount()
             }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: .updateSourceLists, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                await self?.model.reloadExternal()
+                self?.checkUpdateCount()
+            }
+        })
 
-            if viewModel.hasLegacySourceList && !AppSettings.flags.showedLegacySourceListNotice.get() {
+        Task {
+            await model.reloadInstalled()
+            await model.reloadExternal()
+            checkUpdateCount()
+            if model.viewModel.hasLegacySourceList && !AppSettings.flags.showedLegacySourceListNotice.get() {
                 showLegacySourceListNotice()
                 AppSettings.flags.showedLegacySourceListNotice.set(true)
             }
         }
     }
 
-    override func constrain() {
-        super.constrain()
-
-        NSLayoutConstraint.activate([
-            emptyStackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyStackView.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-    }
-
-    override func observe() {
-        // source installed/imported/pinned
-        addObserver(forName: .updateSourceList) { [weak self] _ in
-            guard let self = self else { return }
-            Task { @MainActor in
-                await self.viewModel.loadInstalledSources()
-                await self.viewModel.loadPinnedSources()
-                self.viewModel.loadUpdates()
-                if !self.searchText.isEmpty {
-                    let query = self.searchText
-                    self.viewModel.search(query: query)
-                }
-                self.updateDataSource()
-            }
-        }
-        // source lists added/removed
-        addObserver(forName: .updateSourceLists) { [weak self] _ in
-            guard let self = self else { return }
-            Task {
-                await self.viewModel.loadExternalSources()
-                self.viewModel.loadUpdates()
-                self.updateDataSource()
-            }
-        }
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        dataSource.onReorder = { [weak self] snapshot in
-            guard let self = self else { return }
-            let sourceList = snapshot.itemIdentifiers(inSection: .pinned).map { $0.info.sourceId }
-            AppSettings.browse.pinnedList.set(sourceList)
-
-            if sourceList.isEmpty { self.stopEditing() }
-            Task { @MainActor in
-                await self.viewModel.loadInstalledSources()
-                await self.viewModel.loadPinnedSources()
-                self.updateDataSource()
-            }
-        }
+    deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -165,37 +157,18 @@ class BrowseViewController: BaseTableViewController, MDBarlessScreen {
         navigationController?.isToolbarHidden = true
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-
-        // fix refresh control snapping height
-        refreshControl.didMoveToSuperview()
-
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let width = tableView.bounds.width
-        guard width > 0 else { return }
-        let height = headerHost.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
-        if abs(headerHost.view.frame.height - height) > 0.5 || abs(headerHost.view.frame.width - width) > 0.5 {
-            headerHost.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
-            tableView.tableHeaderView = headerHost.view
+    private func open(_ info: SourceInfo) {
+        guard !info.disabled, let source = SourceManager.shared.store.source(for: info.sourceId) else { return }
+        let controller: UIViewController = if let legacy = source.legacySource {
+            SourceViewController(source: legacy)
+        } else {
+            NewSourceViewController(source: source)
         }
+        navigationController?.pushViewController(controller, animated: true)
     }
 
-    override func setEditing(_ editing: Bool, animated: Bool) {
-        super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: animated)
-        updateNavbar()
-        updateToolbar()
-    }
-}
-
-extension BrowseViewController {
-    func latestButtonPressed(cell: SourceTableViewCell) {
-        guard let key = cell.info?.sourceId,
-              let source = SourceManager.shared.store.source(for: key) else { return }
+    private func openLatest(_ info: SourceInfo) {
+        guard let source = SourceManager.shared.store.source(for: info.sourceId) else { return }
         Task {
             let names: [String]
             if let legacy = source.legacySource {
@@ -209,11 +182,10 @@ extension BrowseViewController {
                 presentAlert(title: "Latest unavailable", message: "This extension does not provide a Latest or New tab.")
                 return
             }
-            let controller: UIViewController
-            if let legacy = source.legacySource {
-                controller = SourceViewController(source: legacy, initialListingIndex: index)
+            let controller: UIViewController = if let legacy = source.legacySource {
+                SourceViewController(source: legacy, initialListingIndex: index)
             } else {
-                controller = NewSourceViewController(source: source, initialListingIndex: index)
+                NewSourceViewController(source: source, initialListingIndex: index)
             }
             navigationController?.pushViewController(controller, animated: true)
         }
@@ -227,24 +199,19 @@ extension BrowseViewController {
                 for key in sourceKeys {
                     await SourceManager.shared.remove(sourceKey: key, skipUpdateNotification: true)
                 }
-                await self.viewModel.loadInstalledSources()
-                await self.viewModel.loadPinnedSources()
-                self.viewModel.loadUpdates()
-                self.updateDataSource()
-                self.setEditing(false, animated: true)
+                await self.model.reloadInstalled()
+                self.checkUpdateCount()
             }
         }
 
         if containsLocalSource {
-            self.presentAlert(
+            presentAlert(
                 title: NSLocalizedString("REMOVE_LOCAL_SOURCE"),
                 message: NSLocalizedString("REMOVE_LOCAL_SOURCE_TEXT"),
                 actions: [
                     UIAlertAction(title: NSLocalizedString("CANCEL"), style: .cancel),
                     UIAlertAction(title: NSLocalizedString("OK"), style: .default) { _ in
-                        Task {
-                            await LocalFileManager.shared.removeAllLocalFiles()
-                        }
+                        Task { await LocalFileManager.shared.removeAllLocalFiles() }
                         commit()
                     }
                 ]
@@ -256,7 +223,7 @@ extension BrowseViewController {
 
     // store update count and display badge
     func checkUpdateCount() {
-        let updateCount = viewModel.updatesSources.count
+        let updateCount = model.updates.count
         AppSettings.browse.updateCount.set(updateCount)
         (tabBarController as? TabBarController)?.setSourcesBadge(updateCount)
     }
@@ -271,32 +238,23 @@ extension BrowseViewController {
         present(alert, animated: true)
     }
 
-    @objc func refreshSourceLists(_ refreshControl: UIRefreshControl? = nil) {
-        Task {
-            await viewModel.loadExternalSources(reload: true)
-            self.viewModel.loadUpdates()
-            updateExternalSources()
-            refreshControl?.endRefreshing()
-        }
-    }
-
-    @objc func openGuidePage() {
+    func openGuidePage() {
         let safariViewController = SFSafariViewController(
             url: URL(string: "https://aidoku.app/help/guides/getting-started/#installing-a-source")!
         )
         present(safariViewController, animated: true)
     }
 
-    @objc func openMigrateSourcePage() {
+    func openMigrateSourcePage() {
         let viewController = SwiftUINavigationViewController(rootView: MigrateSourcesView())
         viewController.modalPresentationStyle = .pageSheet
         present(viewController, animated: true)
     }
 
-    @objc func openAddSourcePage() {
+    func openAddSourcePage() {
         let path = NavigationCoordinator(rootViewController: self)
         let hostingController = UIHostingController(
-            rootView: AddSourceView(externalSources: viewModel.unfilteredExternalSources)
+            rootView: AddSourceView(externalSources: model.viewModel.unfilteredExternalSources)
                 .ignoresSafeArea() // fixes some weird keyboard clipping stuff
                 .environmentObject(path)
         )
@@ -304,429 +262,385 @@ extension BrowseViewController {
         hostingController.modalPresentationStyle = .pageSheet
         present(hostingController, animated: true)
     }
-
-    @objc func stopEditing() {
-        setEditing(false, animated: true)
-    }
-
-    @objc func deleteSelected() {
-        confirmAction(
-            continueActionName: NSLocalizedString("UNINSTALL"),
-            sourceItem: toolbarItems?.first
-        ) {
-            let sourceKeys = self.tableView.indexPathsForSelectedRows?.compactMap { (path: IndexPath) -> String? in
-                guard let item = self.dataSource.itemIdentifier(for: path) else { return nil }
-                return item.info.sourceId
-            } ?? []
-            self.uninstall(sourceKeys: sourceKeys)
-        }
-    }
 }
 
-// MARK: - Table View Delegate
-extension BrowseViewController {
-    // support two finger drag to select
-    func tableView(_ tableView: UITableView, shouldBeginMultipleSelectionInteractionAt indexPath: IndexPath) -> Bool {
-        true
+// MARK: - Page
+
+private enum ExtensionsTab { case installed, available }
+
+private func languageLabel(_ languages: [String]) -> String {
+    let codes = languages.filter { $0 != "multi" }
+    if codes.count > 1 || languages.contains("multi") { return "Multi" }
+    return (codes.first ?? "").uppercased()
+}
+
+struct ExtensionsPageView: View {
+    @Bindable var model: ExtensionsModel
+    var onBack: () -> Void
+    var onAdd: () -> Void
+    var onMigrate: () -> Void
+    var onOpen: (SourceInfo) -> Void
+    var onLatest: (SourceInfo) -> Void
+    var onUninstall: (SourceInfo) -> Void
+    var onGuide: () -> Void
+
+    @State private var tab: ExtensionsTab = .installed
+    @State private var query = ""
+    @State private var language = ""
+    @State private var failedInstall: String?
+
+    private func matches(name: String, languages: [String]) -> Bool {
+        (query.isEmpty || name.localizedCaseInsensitiveContains(query))
+            && (language.isEmpty || languages.contains(language) || (language == "multi" && languages.count > 1))
     }
 
-    func tableView(_ tableView: UITableView, didBeginMultipleSelectionInteractionAt indexPath: IndexPath) {
-        setEditing(true, animated: true)
-    }
-
-    func tableView(_ tableView: UITableView, didHighlightRowAt indexPath: IndexPath) {
-        guard let cell = tableView.cellForRow(at: indexPath) else { return }
-        if isEditing {
-            // fix double selection animation when editing
-            cell.setHighlighted(false, animated: false)
-        }
-    }
-
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let sectionId = dataSource.sectionIdentifier(for: indexPath.section)
-        guard !isEditing else {
-            if sectionId != .pinned && sectionId != .installed {
-                tableView.deselectRow(at: indexPath, animated: false)
-            } else {
-                updateToolbar()
-            }
-            return
-        }
-        if
-            sectionId == .installed || sectionId == .pinned,
-            let item = dataSource.itemIdentifier(for: indexPath),
-            !item.info.disabled,
-            let source = SourceManager.shared.store.source(for: item.info.sourceId)
-        {
-            let vc: UIViewController = if let legacySource = source.legacySource {
-                SourceViewController(source: legacySource)
-            } else {
-                NewSourceViewController(source: source)
-            }
-            navigationController?.pushViewController(vc, animated: true)
-        }
-        tableView.deselectRow(at: indexPath, animated: true)
-    }
-
-    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
-        if isEditing {
-            updateToolbar()
+    private var languages: [String] {
+        let all = model.allInstalled.flatMap(\.languages) + model.available.flatMap { $0.languages ?? [$0.lang ?? ""] }
+        return Array(Set(all.filter { !$0.isEmpty })).sorted {
+            SourceLanguage.displayName(for: $0).localizedCaseInsensitiveCompare(SourceLanguage.displayName(for: $1)) == .orderedAscending
         }
     }
 
-    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        guard
-            let cell = tableView.dequeueReusableHeaderFooterView(
-                withIdentifier: String(describing: UITableViewHeaderFooterView.self)
-            ),
-            let currentSection = dataSource.sectionIdentifier(for: section)
-        else {
-            return nil
-        }
-        var config = SmallSectionHeaderConfiguration()
-        switch currentSection {
-            case .updates:
-                config.title = NSLocalizedString("UPDATES")
-            case .pinned:
-                config.title = NSLocalizedString("PINNED")
-            case .installed:
-                config.title = NSLocalizedString("INSTALLED")
-            case .external:
-                config.title = NSLocalizedString("EXTERNAL")
-        }
-        cell.contentConfiguration = config
-        return cell
-    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                MDIconButton(systemImage: "chevron.left", label: "Back", action: onBack)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
 
-    func tableView(
-        _ tableView: UITableView,
-        contextMenuConfigurationForRowAt indexPath: IndexPath,
-        point: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        guard
-            !tableView.isEditing, // do not allow context menu when the sources are being edited
-            case let section = dataSource.sectionIdentifier(for: indexPath.section),
-            section == .installed || section == .pinned,
-            let item = dataSource.itemIdentifier(for: indexPath)
-        else {
-            return nil
-        }
-        let info = item.info
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ -> UIMenu? in
-            let editAction = UIMenu(title: "", options: .displayInline, children: [
-                UIAction(
-                    title: section == .pinned ? NSLocalizedString("REORDER") : NSLocalizedString("EDIT_SOURCES"),
-                    image: UIImage(systemName: section == .pinned ? "shuffle" : "minus.circle")
-                ) { _ in
-                    self.setEditing(true, animated: true)
+                MDPageHeader(kicker: "\(model.allInstalled.count) installed · On this device", title: "Extensions") {
+                    MDIconButton(systemImage: "arrow.left.arrow.right", label: NSLocalizedString("MIGRATE_SOURCES"), action: onMigrate)
+                    MDIconButton(systemImage: "plus", label: NSLocalizedString("ADD_SOURCE"), action: onAdd)
                 }
-            ])
 
-            let pinAction = UIAction(
-                title: section == .pinned ? NSLocalizedString("UNPIN") : NSLocalizedString("PIN"),
-                image: UIImage(systemName: section == .pinned ? "pin.slash" : "pin")
-            ) { _ in
-                if section == .pinned {
-                    SourceManager.shared.unpin(sourceKey: info.sourceId)
+                segmented.padding(.horizontal, 16).padding(.top, 16)
+
+                if tab == .installed && !model.updates.isEmpty {
+                    updatesBanner.padding(.horizontal, 16).padding(.top, 12)
+                }
+
+                HStack(spacing: 8) {
+                    MDSearchField(text: $query, prompt: "Search extensions", autofocus: false)
+                    languageBox
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
+                if tab == .installed { installedContent } else { availableContent }
+            }
+            .padding(.bottom, 32)
+        }
+        .scrollDismissesKeyboard(.immediately)
+        .refreshable { await model.reloadExternal(reload: true) }
+        .background(Color.mdBg.ignoresSafeArea())
+        .alert("Couldn't install", isPresented: Binding(get: { failedInstall != nil }, set: { if !$0 { failedInstall = nil } })) {
+            Button(NSLocalizedString("OK"), role: .cancel) {}
+        } message: {
+            Text("\(failedInstall ?? "The extension") could not be installed.")
+        }
+    }
+
+    // `.segmented--lg`
+    private var segmented: some View {
+        HStack(spacing: 0) {
+            segment("Installed · \(model.allInstalled.count)", on: tab == .installed) { tab = .installed }
+            Rectangle().fill(Color.mdLine2).frame(width: 1)
+            segment("Available · \(model.available.count)", on: tab == .available) { tab = .available }
+        }
+        .frame(height: 44)
+        .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
+    }
+
+    private func segment(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.mdSystem(size: 14, weight: on ? .semibold : .medium))
+                .foregroundStyle(on ? Color(uiColor: MDColor.onAccent) : Color.mdText2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(on ? Color.mdText : Color.clear)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    // `.banner`
+    private var updatesBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.clockwise").font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.mdAccent)
+            Text("\(model.updates.count) update\(model.updates.count == 1 ? "" : "s") available")
+                .font(.mdSystem(size: 14, weight: .semibold))
+                .foregroundStyle(Color.mdText)
+            Spacer(minLength: 0)
+            Button {
+                Task { await model.updateAll() }
+            } label: {
+                Group {
+                    if model.updatingAll { ProgressView().tint(Color(uiColor: MDColor.onAccent)) } else { Text("Update all") }
+                }
+                .font(.mdSystem(size: 13, weight: .semibold))
+                .foregroundStyle(Color(uiColor: MDColor.onAccent))
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(Color.mdAccent)
+            }
+            .buttonStyle(.plain)
+            .disabled(model.updatingAll)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.mdAccentSoft)
+    }
+
+    // `.select-box`
+    private var languageBox: some View {
+        Menu {
+            Button { language = "" } label: {
+                if language.isEmpty { Label("All languages", systemImage: "checkmark") } else { Text("All languages") }
+            }
+            ForEach(languages, id: \.self) { code in
+                Button { language = code } label: {
+                    let name = SourceLanguage.displayName(for: code)
+                    if language == code { Label(name, systemImage: "checkmark") } else { Text(name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(language.isEmpty ? "All languages" : SourceLanguage.displayName(for: language))
+                    .font(.mdSystem(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.mdText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.mdText2)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 46)
+            .background(Color.mdS1)
+            .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Language")
+    }
+
+    @ViewBuilder private var installedContent: some View {
+        let pinned = model.pinned.filter { matches(name: $0.name, languages: $0.languages) }
+        let rest = model.installed.filter { matches(name: $0.name, languages: $0.languages) }
+        if !pinned.isEmpty {
+            section("Pinned") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+                    ForEach(pinned, id: \.sourceId) { info in
+                        Button { onOpen(info) } label: { bigTile(info) }
+                            .buttonStyle(.plain)
+                            .contextMenu { menu(info, pinned: true) }
+                    }
+                }
+            }
+        }
+        if !rest.isEmpty {
+            section("Installed") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 18) {
+                    ForEach(rest, id: \.sourceId) { info in
+                        Button { onOpen(info) } label: { tile(info) }
+                            .buttonStyle(.plain)
+                            .contextMenu { menu(info, pinned: false) }
+                    }
+                }
+            }
+        }
+        if model.loaded && pinned.isEmpty && rest.isEmpty {
+            if model.allInstalled.isEmpty {
+                emptyState(title: NSLocalizedString("BROWSE_NO_SOURCES"), detail: NSLocalizedString("BROWSE_NO_SOURCES_TEXT_NEW"),
+                           action: NSLocalizedString("ADDING_SOURCES_GUIDE_BUTTON"), perform: onGuide)
+            } else {
+                emptyState(title: "No extensions match", detail: "Try another name.")
+            }
+        }
+    }
+
+    @ViewBuilder private var availableContent: some View {
+        let items = model.available.filter { matches(name: $0.name, languages: $0.languages ?? [$0.lang ?? ""]) }
+        if !items.isEmpty {
+            section("Available") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 18) {
+                    ForEach(items, id: \.id) { info in availableTile(info) }
+                }
+            }
+        } else if model.loaded {
+            if model.available.isEmpty && !model.viewModel.unfilteredExternalSources.isEmpty {
+                emptyState(title: NSLocalizedString("ALL_SOURCES_INSTALLED"), detail: NSLocalizedString("ALL_SOURCES_INSTALLED_INFO"))
+            } else if model.viewModel.unfilteredExternalSources.isEmpty {
+                emptyState(title: NSLocalizedString("NO_EXTERNAL_SOURCES"), detail: NSLocalizedString("NO_EXTERNAL_SOURCES_INFO"),
+                           action: NSLocalizedString("ADD_SOURCE"), perform: onAdd)
+            } else {
+                emptyState(title: "No extensions match", detail: "Try another name.")
+            }
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).mdLabel()
+            content()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 26)
+    }
+
+    @ViewBuilder private func menu(_ info: SourceInfo, pinned: Bool) -> some View {
+        Button("Latest", systemImage: "clock") { onLatest(info) }
+        if model.hasUpdate(info) {
+            Button(NSLocalizedString("UPDATE"), systemImage: "arrow.clockwise") { Task { await model.update(info.sourceId) } }
+        }
+        Button(pinned ? NSLocalizedString("UNPIN") : NSLocalizedString("PIN"), systemImage: pinned ? "pin.slash" : "pin") {
+            if pinned {
+                SourceManager.shared.unpin(sourceKey: info.sourceId)
+            } else {
+                SourceManager.shared.pin(sourceKey: info.sourceId)
+            }
+        }
+        Button(info.disabled ? NSLocalizedString("ENABLE") : NSLocalizedString("DISABLE"), systemImage: info.disabled ? "play" : "pause") {
+            Task {
+                if info.disabled {
+                    await SourceManager.shared.enable(sourceKey: info.sourceId)
                 } else {
-                    SourceManager.shared.pin(sourceKey: info.sourceId)
+                    await SourceManager.shared.disable(sourceKey: info.sourceId)
                 }
             }
+        }
+        Button(NSLocalizedString("UNINSTALL"), systemImage: "trash", role: .destructive) { onUninstall(info) }
+    }
 
-            let disableAction = UIAction(
-                title: info.disabled ? NSLocalizedString("ENABLE") : NSLocalizedString("DISABLE"),
-                image: UIImage(systemName: info.disabled ? "play" : "pause")
-            ) { _ in
+    // `.tile.tile--big`
+    private func bigTile(_ info: SourceInfo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                SourceIconView(sourceId: info.sourceId, imageUrl: info.iconUrl, iconSize: 50)
+                Spacer(minLength: 0)
+                if model.hasUpdate(info) {
+                    Text("Update")
+                        .font(.mdMono(10, weight: .bold)).textCase(.uppercase).tracking(0.6)
+                        .foregroundStyle(Color.mdAccent)
+                        .padding(.horizontal, 6).frame(height: 20)
+                        .background(Color.mdAccentSoft)
+                }
+            }
+            Text(info.name)
+                .font(.mdDisplay(18, weight: .bold))
+                .foregroundStyle(Color.mdText)
+                .lineLimit(1)
+                .padding(.top, 12)
+            Text(info.disabled ? "Disabled" : "\(languageLabel(info.languages)) · \(info.languages.filter { $0 != "multi" }.count) languages")
+                .font(.mdSystem(size: 11.5)).foregroundStyle(Color.mdText3).lineLimit(1)
+                .padding(.top, 2)
+            HStack(spacing: 4) {
+                Text("Browse")
+                Image(systemName: "arrow.right").font(.system(size: 12, weight: .bold))
+            }
+            .font(.mdSystem(size: 13, weight: .semibold))
+            .foregroundStyle(Color.mdAccent)
+            .padding(.top, 12)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .topTrailing) {
+            Circle().fill(Color.mdAccent).frame(width: 140, height: 140).blur(radius: 44).opacity(0.35).offset(x: 50, y: -50)
+        }
+        .background(Color.mdS1)
+        .clipped()
+        .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+        .opacity(info.disabled ? 0.5 : 1)
+        .contentShape(Rectangle())
+    }
+
+    // `.tile`
+    private func tile(_ info: SourceInfo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                SourceIconView(sourceId: info.sourceId, imageUrl: info.iconUrl, iconSize: 42)
+                Spacer(minLength: 0)
+                if model.busy.contains(info.sourceId) {
+                    ProgressView().controlSize(.mini)
+                } else if model.hasUpdate(info) {
+                    Rectangle().fill(Color.mdAccent).frame(width: 9, height: 9)
+                        .accessibilityLabel("Update available")
+                }
+            }
+            Text(info.name)
+                .font(.mdSystem(size: 14, weight: .semibold))
+                .foregroundStyle(Color.mdText)
+                .lineLimit(1)
+                .padding(.top, 12)
+            Text(info.disabled ? "Disabled" : "\(languageLabel(info.languages)) · v\(info.version)")
+                .font(.mdSystem(size: 11.5)).foregroundStyle(Color.mdText3).lineLimit(1)
+                .padding(.top, 2)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.mdS1)
+        .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+        .opacity(info.disabled ? 0.5 : 1)
+        .contentShape(Rectangle())
+    }
+
+    private func availableTile(_ info: ExternalSourceInfo) -> some View {
+        let languages = info.languages ?? [info.lang ?? ""]
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                SourceIconView(sourceId: info.id, imageUrl: info.toInfo().iconUrl, iconSize: 42)
+                Spacer(minLength: 0)
+                if info.resolvedContentRating == .containsNsfw {
+                    Text("18+").font(.mdSystem(size: 12, weight: .medium)).foregroundStyle(Color.mdText2)
+                        .padding(.horizontal, 6).frame(height: 22)
+                        .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
+                }
+            }
+            Text(info.name)
+                .font(.mdSystem(size: 14, weight: .semibold))
+                .foregroundStyle(Color.mdText)
+                .lineLimit(1)
+                .padding(.top, 12)
+            Text("\(languageLabel(languages)) · v\(info.version)")
+                .font(.mdSystem(size: 11.5)).foregroundStyle(Color.mdText3).lineLimit(1)
+                .padding(.top, 2)
+            Button {
                 Task {
-                    if info.disabled {
-                        await SourceManager.shared.enable(sourceKey: info.sourceId)
+                    if !(await model.install(info)) { failedInstall = info.name }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    if model.busy.contains(info.id) {
+                        ProgressView().controlSize(.mini)
                     } else {
-                        await SourceManager.shared.disable(sourceKey: info.sourceId)
+                        Image(systemName: "arrow.down").font(.system(size: 12, weight: .bold))
+                        Text("Install")
                     }
                 }
+                .font(.mdSystem(size: 13, weight: .semibold))
+                .foregroundStyle(Color.mdText)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
+                .contentShape(Rectangle())
             }
-
-            let uninstallAction = UIAction(
-                title: NSLocalizedString("UNINSTALL"),
-                image: UIImage(systemName: "trash"),
-                attributes: .destructive
-            ) { _ in
-                self.uninstall(sourceKeys: [info.sourceId])
-            }
-
-            return UIMenu(title: "", children: [
-                editAction,
-                pinAction,
-                disableAction,
-                uninstallAction
-            ])
+            .buttonStyle(.plain)
+            .disabled(model.busy.contains(info.id))
+            .padding(.top, 10)
         }
-    }
-}
-
-// MARK: - Data Source
-extension BrowseViewController {
-    enum Section: Int {
-        case pinned
-        case updates
-        case installed
-        case external
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.mdS1)
+        .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
     }
 
-    struct SourceItem: Hashable {
-        let section: Section
-        let info: SourceInfo
-
-        static func == (lhs: SourceItem, rhs: SourceItem) -> Bool {
-            lhs.section == rhs.section && lhs.info.sourceId == rhs.info.sourceId
-        }
-
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(section)
-            hasher.combine(info.sourceId)
-        }
-    }
-
-    private func sourceItems(_ sources: [SourceInfo], in section: Section) -> [SourceItem] {
-        var seenSourceIds = Set<String>()
-        return sources.compactMap { info in
-            guard seenSourceIds.insert(info.sourceId).inserted else { return nil }
-            return SourceItem(section: section, info: info)
-        }
-    }
-
-    // Ability to edit tableview for a diffable data source.
-    // Changing data in a diffable data source requires its seperate tableview override which can't be done with the view's tableview delegate.
-    class SourceCellDataSource: UITableViewDiffableDataSource<Section, SourceItem> {
-        // Used for callback when cells are reordered in the pinned section.
-        var onReorder: ((NSDiffableDataSourceSnapshot<Section, SourceItem>) -> Void)?
-        // Let the rows in the Pinned section be reordered (used for reordering sources)
-        override func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
-            sectionIdentifier(for: indexPath.section) == .pinned
-        }
-
-        // Move a selected source row from pinned section to a destination index.
-        override func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
-            guard
-                let sourceItem = itemIdentifier(for: sourceIndexPath),
-                sourceIndexPath != destinationIndexPath
-            else { return }
-
-            let destinationItem = itemIdentifier(for: destinationIndexPath)
-
-            var snapshot = self.snapshot()
-
-            if
-                let destinationItem = destinationItem,
-                let sourceIndex = snapshot.indexOfItem(sourceItem),
-                let destinationIndex = snapshot.indexOfItem(destinationItem)
-            {
-                snapshot.deleteItems([sourceItem])
-
-                if destinationIndex > sourceIndex {
-                    snapshot.insertItems([sourceItem], afterItem: destinationItem)
-                } else {
-                    snapshot.insertItems([sourceItem], beforeItem: destinationItem)
-                }
-            }
-            // Save the order and notify the observer to reload table.
-            apply(snapshot, animatingDifferences: false)
-            onReorder?(snapshot)
-        }
-
-        override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-            let identifier = sectionIdentifier(for: indexPath.section)
-            return identifier == .pinned || identifier == .installed
-        }
-    }
-
-    private func makeDataSource() -> SourceCellDataSource {
-        // Use subclass of UITableViewDiffableDataSource to add tableview overrides.
-        SourceCellDataSource(tableView: tableView) { [weak self] tableView, indexPath, item in
-            guard
-                let self = self,
-                let cell = tableView.dequeueReusableCell(
-                    withIdentifier: String(describing: SourceTableViewCell.self)
-                ) as? SourceTableViewCell,
-                let section = self.dataSource.sectionIdentifier(for: indexPath.section)
-            else {
-                return UITableViewCell()
-            }
-
-            cell.delegate = self
-            cell.setSourceInfo(item.info, section: section)
-
-            return cell
-        }
-    }
-
-    func updateDataSource() {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, SourceItem>()
-
-        if !viewModel.updatesSources.isEmpty {
-            snapshot.appendSections([.updates])
-            snapshot.appendItems(sourceItems(viewModel.updatesSources, in: .updates), toSection: .updates)
-        }
-        if !viewModel.pinnedSources.isEmpty {
-            snapshot.appendSections([.pinned])
-            snapshot.appendItems(sourceItems(viewModel.pinnedSources, in: .pinned), toSection: .pinned)
-        }
-        if !viewModel.installedSources.isEmpty {
-            snapshot.appendSections([.installed])
-            snapshot.appendItems(sourceItems(viewModel.installedSources, in: .installed), toSection: .installed)
-        }
-//        if !viewModel.externalSources.isEmpty {
-//            snapshot.appendSections([.external])
-//            snapshot.appendItems(viewModel.externalSources, toSection: .external)
-//        }
-
-        let isInitialSnapshot = !hasAppliedInitialSnapshot
-        hasAppliedInitialSnapshot = true
-
-        if isInitialSnapshot {
-            // fade in animation for initial load to avoid jumpy default animation
-            tableView.alpha = 0
-
-            dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                guard let self else { return }
-
-                self.tableView.layoutIfNeeded()
-
-                UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
-                    self.tableView.alpha = 1
-                }
-            }
-        } else {
-            let previousItems = dataSource.snapshot().itemIdentifiers
-            let changedItems = snapshot.itemIdentifiers.filter { item in
-                guard let previous = previousItems.first(where: { $0 == item }) else {
-                    return false
-                }
-                return previous.info != item.info
-            }
-            snapshot.reconfigureItems(changedItems)
-
-            dataSource.apply(snapshot)
-        }
-
-        Task { @MainActor in
-            if searchText.isEmpty {
-                emptyStackView.isHidden = !snapshot.itemIdentifiers.isEmpty
-            }
-            checkUpdateCount()
-            updateNavbar()
-        }
-    }
-
-    func updateExternalSources() {
-        var snapshot = dataSource.snapshot()
-
-        snapshot.deleteSections([.updates, .external])
-        if !viewModel.updatesSources.isEmpty {
-            if snapshot.indexOfSection(.pinned) != nil {
-                snapshot.insertSections([.updates], beforeSection: .pinned)
-            } else if snapshot.indexOfSection(.installed) != nil {
-                snapshot.insertSections([.updates], beforeSection: .installed)
-            } else {
-                snapshot.appendSections([.updates])
-            }
-            snapshot.appendItems(sourceItems(viewModel.updatesSources, in: .updates), toSection: .updates)
-        }
-//        if !viewModel.externalSources.isEmpty {
-//            snapshot.appendSections([.external])
-//            snapshot.appendItems(viewModel.externalSources, toSection: .external)
-//        }
-
-        // prevents jumpiness from pull to refresh
-        dataSource.apply(snapshot)
-
-        Task { @MainActor in
-            emptyStackView.isHidden = !snapshot.itemIdentifiers.isEmpty
-            checkUpdateCount()
-        }
-    }
-}
-
-extension BrowseViewController {
-    func updateNavbar(isEditing: Bool? = nil) {
-        headerHost.rootView = headerView(editing: isEditing ?? self.isEditing)
-    }
-
-    private func headerView(editing: Bool) -> BrowseHeaderView {
-        BrowseHeaderView(
-            installedCount: viewModel.installedSources.count + viewModel.pinnedSources.count,
-            editing: editing,
-            search: .init(
-                get: { [weak self] in self?.searchText ?? "" },
-                set: { [weak self] in
-                    guard let self else { return }
-                    self.searchText = $0
-                    self.viewModel.search(query: $0)
-                    self.updateDataSource()
-                }
-            ),
-            onBack: { [weak self] in self?.navigationController?.popViewController(animated: true) },
-            onAdd: { [weak self] in self?.openAddSourcePage() },
-            onMigrate: { [weak self] in self?.openMigrateSourcePage() },
-            onDone: { [weak self] in self?.stopEditing() }
-        )
-    }
-
-    func updateToolbar(isEditing: Bool? = nil) {
-        let isEditing = isEditing ?? self.isEditing
-        if isEditing {
-            // show toolbar
-            if navigationController?.isToolbarHidden ?? false {
-                UIView.animate(withDuration: CATransaction.animationDuration()) {
-                    self.navigationController?.isToolbarHidden = false
-                    self.navigationController?.toolbar.alpha = 1
-                    if #available(iOS 26.0, *) {
-                        // hide tab bar on iOS 26 (it covers the toolbar)
-                        self.tabBarController?.isTabBarHidden = true
-                    }
-                }
-            }
-            // enable items
-            let hasSelectedItems = !(tableView.indexPathsForSelectedRows?.isEmpty ?? true)
-            toolbarItems?.first?.isEnabled = hasSelectedItems
-        } else if !(self.navigationController?.isToolbarHidden ?? true) {
-            // fade out toolbar
-            UIView.animate(withDuration: CATransaction.animationDuration()) {
-                self.navigationController?.toolbar.alpha = 0
-                if #available(iOS 26.0, *) {
-                    // reshow tab bar on iOS 26
-                    self.tabBarController?.isTabBarHidden = false
-                }
-            } completion: { _ in
-                self.navigationController?.isToolbarHidden = true
+    private func emptyState(title: String, detail: String, action: String? = nil, perform: (() -> Void)? = nil) -> some View {
+        VStack(spacing: 10) {
+            Text(title).font(.mdDisplay(19, weight: .bold)).foregroundStyle(Color.mdText)
+            Text(detail).font(.mdSystem(size: 14)).foregroundStyle(Color.mdText3).multilineTextAlignment(.center)
+            if let action, let perform {
+                Button(action, action: perform).buttonStyle(MDGhostButtonStyle(small: false)).padding(.top, 6)
             }
         }
-    }
-}
-
-extension BrowseViewController: @MainActor SourceCellDelegate {
-    func getButtonPressed(cell: SourceTableViewCell) {
-        guard
-            let externalInfo = cell.info?.externalInfo,
-            let url = externalInfo.fileURL
-        else {
-            cell.getButton.buttonState = .fail
-            return
-        }
-        cell.getButton.buttonState = .downloading
-        Task {
-            let installedSource = await SourceManager.shared.importSource(from: url)
-            cell.getButton.buttonState = installedSource == nil ? .fail : .get
-        }
-    }
-
-    func warningButtonPressed(cell: SourceTableViewCell) {
-        let alert = UIAlertController(
-            title: NSLocalizedString("MISSING_SOURCE_LIST"),
-            message: NSLocalizedString("MISSING_SOURCE_LIST_INFO"),
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: NSLocalizedString("OK"), style: .cancel) { _ in })
-        present(alert, animated: true)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+        .padding(.top, 48)
     }
 }

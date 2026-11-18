@@ -44,7 +44,7 @@ class MangaListCell: UICollectionViewCell {
 
     lazy var coverImageView = {
         let imageView = GIFImageView()
-        imageView.image = UIImage(named: "MangaPlaceholder")
+        imageView.image = MDCoverArt.image(title: nil)
         imageView.clipsToBounds = true
         imageView.contentMode = .scaleAspectFill
         imageView.layer.cornerRadius = 0
@@ -159,7 +159,7 @@ class MangaListCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        coverImageView.image = UIImage(named: "MangaPlaceholder")
+        coverImageView.image = MDCoverArt.image(title: nil)
         imageTask?.cancel()
         imageTask = nil
         setBadgeVisible(false)

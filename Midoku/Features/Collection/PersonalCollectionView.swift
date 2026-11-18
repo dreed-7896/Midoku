@@ -227,6 +227,9 @@ struct MCCollectionRootView: View {
     @State private var newChaptersOnly = false
     @State private var showDuplicates = false
     @State private var showStats = false
+    @State private var showFilters = false
+    @State private var showLibraryOptions = false
+    @State private var saveTabAfterFilters = false
     @State private var pendingMerge: [UUID]?
     @State private var namingTab: MCSmartTab?
     @State private var tabName = ""
@@ -547,6 +550,16 @@ struct MCCollectionRootView: View {
             }
             .modifier(MCReaderPresentation(sheet: $reader))
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
+            .mdActionSheet(isPresented: $showLibraryOptions, title: "Library") { libraryOptionRows() }
+            .sheet(isPresented: $showFilters, onDismiss: {
+                // "Save as tab" names the tab once the sheet has closed.
+                guard saveTabAfterFilters else { return }
+                saveTabAfterFilters = false
+                tabName = trimmedQuery.isEmpty ? "Filtered" : trimmedQuery
+                namingTab = MCSmartTab(name: "", filter: currentFilter)
+            }) {
+                filterSheet.presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: $showStats) { MCReadingStatsView() }
             .sheet(isPresented: $showDuplicates, onDismiss: {
                 // Present the grouping editor once the finder has closed.
@@ -730,40 +743,46 @@ struct MCCollectionRootView: View {
     }
 
     private var libraryOptionsMenu: some View {
-        Menu {
-            Button("Select entries", systemImage: "checkmark.circle") {
+        Button { showLibraryOptions = true } label: { MDIconBox(systemImage: "ellipsis") }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Library options")
+    }
+
+    /// Library options (`.menu` sheet); sorting and grouping live in Filter and sort.
+    private func libraryOptionRows() -> [MDActionRow] {
+        let onOff: (Bool) -> String = { $0 ? "On" : "Off" }
+        let subgrouping = subgroupBinding(for: activeGroupPage)
+        var rows: [MDActionRow] = [
+            MDActionRow(systemImage: "checkmark.circle", title: "Select entries", detail: "Pick titles to edit, move or remove") {
                 searchFocused = false; searchVisible = false
                 query = ""
                 selecting = true; selected.removeAll()
             }
-            Picker("Sort", selection: sortBinding) { ForEach(MCLibrarySort.allCases) { Text($0.title).tag($0) } }
-                .disabled(activeGroupPage == Self.readingPageID)
-            Picker(selection: $grouping) {
-                ForEach(MCLibraryGrouping.allCases) { Text($0.title).tag($0) }
-            } label: {
-                Label("Group by", systemImage: "square.stack.3d.up")
-            }
-            .pickerStyle(.menu)
-            Picker(selection: subgroupBinding(for: activeGroupPage)) {
-                ForEach(MCLibrarySubgrouping.allCases) { Text($0.title).tag($0) }
-            } label: {
-                Label("Group in \(activePageTitle)", systemImage: "rectangle.3.group")
-            }
-            .pickerStyle(.menu)
-            .disabled(activeGroupPage == Self.readingPageID || showsFlatResults)
-            readingMenu
-            Toggle("Cover grid", isOn: $grid)
-            Toggle("Chapter grid", isOn: $chapterGrid)
-            Button("Categories", systemImage: "folder") { showCategories = true }
-            Button("Bookmarks", systemImage: "bookmark") { showBookmarks = true }
-            Button("Reading stats", systemImage: "chart.bar") { showStats = true }
-            Button("Find duplicates", systemImage: "square.on.square") { showDuplicates = true }
-            Toggle("Shuffle button", isOn: $showShuffle)
-            Button("Refresh library", systemImage: "arrow.clockwise") { Task { await store.refresh() } }.disabled(store.isRefreshing)
-        } label: {
-            MDIconBox(systemImage: "ellipsis")
+        ]
+        if activeGroupPage != Self.readingPageID && !showsFlatResults {
+            let all = MCLibrarySubgrouping.allCases
+            rows.append(MDActionRow(systemImage: "rectangle.3.group", title: "Group in \(activePageTitle)",
+                                    detail: subgrouping.wrappedValue.title, keepsOpen: true) {
+                let index = all.firstIndex(of: subgrouping.wrappedValue) ?? 0
+                subgrouping.wrappedValue = all[(index + 1) % all.count]
+            })
         }
-        .accessibilityLabel("Library options")
+        rows += [
+            MDActionRow(systemImage: "book", title: "Show Reading tab", detail: onOff(showReadingTab), keepsOpen: true) { showReadingTab.toggle() },
+            MDActionRow(systemImage: "plus", title: "Add to Reading", detail: "Your hand-kept reading list") { showReadingAdd = true },
+            MDActionRow(systemImage: "arrow.counterclockwise", title: "Clear Reading", detail: "Empties the Reading tab",
+                        destructive: true, disabled: store.library.readingIDs.isEmpty) { confirmResetReading = true },
+            MDActionRow(systemImage: "square.grid.2x2", title: "Cover grid", detail: onOff(grid), keepsOpen: true) { grid.toggle() },
+            MDActionRow(systemImage: "square.grid.3x3", title: "Chapter grid", detail: onOff(chapterGrid), keepsOpen: true) { chapterGrid.toggle() },
+            MDActionRow(systemImage: "shuffle", title: "Shuffle button", detail: onOff(showShuffle), keepsOpen: true) { showShuffle.toggle() },
+            MDActionRow(systemImage: "folder", title: "Categories", detail: "Create, rename and order categories") { showCategories = true },
+            MDActionRow(systemImage: "bookmark", title: "Bookmarks", detail: "Pages bookmarked in the reader") { showBookmarks = true },
+            MDActionRow(systemImage: "chart.bar", title: "Reading stats", detail: "Chapters and time read") { showStats = true },
+            MDActionRow(systemImage: "square.on.square", title: "Find duplicates", detail: "Titles saved more than once") { showDuplicates = true },
+            MDActionRow(systemImage: "arrow.clockwise", title: "Refresh library", detail: store.isRefreshing ? "Refreshing…" : "Check sources for new chapters",
+                        disabled: store.isRefreshing) { Task { await store.refresh() } }
+        ]
+        return rows
     }
 
     @ViewBuilder private func readingPage(size: CGSize) -> some View {
@@ -1078,71 +1097,116 @@ struct MCCollectionRootView: View {
     }
 
     private var filterMenu: some View {
-        Menu {
-            Menu("Status", systemImage: "bookmark") {
-                ForEach(MCPersonalStatus.allCases) { item in
-                    Toggle(item.title, isOn: Binding(
-                        get: { statuses.contains(item) },
-                        set: { if $0 { statuses.insert(item) } else { statuses.remove(item) } }
-                    ))
-                }
-            }
-            Picker("Reading progress", selection: $progressFilter) {
-                ForEach(MCLibraryProgressFilter.allCases) { Text($0.title).tag($0) }
-            }
-            Toggle("New chapters", systemImage: "sparkles", isOn: $newChaptersOnly)
-            if !availableArtists.isEmpty {
-                Menu("Artist", systemImage: "person.crop.square") {
-                    ForEach(availableArtists, id: \.self) { artist in
-                        Toggle(artist, isOn: Binding(
-                            get: { artists.contains(artist) },
-                            set: { if $0 { artists.insert(artist) } else { artists.remove(artist) } }
-                        ))
-                    }
-                }
-            }
-            if !availableTags.isEmpty {
-                Menu("Tags", systemImage: "tag") {
-                    ForEach(availableTags, id: \.self) { tag in
-                        Toggle(tag, isOn: Binding(
-                            get: { tags.contains(tag) },
-                            set: { if $0 { tags.insert(tag) } else { tags.remove(tag) } }
-                        ))
-                    }
-                }
-            }
-            if !availableSources.isEmpty {
-                Menu("Source", systemImage: "globe") {
-                    ForEach(availableSources, id: \.id) { source in
-                        Toggle(source.name, isOn: Binding(
-                            get: { sources.contains(source.id) },
-                            set: { if $0 { sources.insert(source.id) } else { sources.remove(source.id) } }
-                        ))
-                    }
-                }
-            }
-            if hasActiveFilters || !trimmedQuery.isEmpty {
-                Divider()
-                if let saved = savedCurrentFilter {
-                    Label("Saved as “\(saved.name)”", systemImage: "checkmark")
-                } else {
-                    Button("Save as tab…", systemImage: "plus.rectangle.on.rectangle") {
-                        tabName = trimmedQuery.isEmpty ? "Filtered" : trimmedQuery
-                        namingTab = MCSmartTab(name: "", filter: currentFilter)
-                    }
-                }
-            }
-            if hasActiveFilters {
-                Button("Clear filters", systemImage: "xmark.circle", role: .destructive) {
-                    statuses.removeAll(); artists.removeAll(); tags.removeAll(); sources.removeAll(); progressFilter = .all
-                    newChaptersOnly = false
-                }
-            }
-        } label: {
+        Button { showFilters = true } label: {
             MDIconBox(systemImage: "slider.horizontal.3", active: hasActiveFilters,
                       badge: hasActiveFilters ? activeFilterCount : nil)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(hasActiveFilters ? "Library filters, \(activeFilterCount) active" : "Filter library")
+    }
+
+    private func clearFilters() {
+        statuses.removeAll(); artists.removeAll(); tags.removeAll(); sources.removeAll(); progressFilter = .all
+        newChaptersOnly = false
+    }
+
+    /// Midoku Web's "Filter and sort" sheet.
+    private var filterSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    filterGroup("Status") {
+                        MDFlow {
+                            ForEach(MCPersonalStatus.allCases) { item in
+                                filterChip(item.title, on: statuses.contains(item)) {
+                                    if statuses.contains(item) { statuses.remove(item) } else { statuses.insert(item) }
+                                }
+                            }
+                        }
+                    }
+                    filterGroup("Reading progress") {
+                        MDSegmented(options: MCLibraryProgressFilter.allCases, selection: $progressFilter) { $0.title }
+                    }
+                    Toggle(isOn: $newChaptersOnly) {
+                        Label("Only titles with new chapters", systemImage: "sparkles")
+                            .font(.mdSystem(size: 15))
+                            .foregroundStyle(Color.mdText)
+                    }
+                    .tint(Color.mdAccent)
+                    if !availableArtists.isEmpty {
+                        filterGroup("Artist") {
+                            MDFlow {
+                                ForEach(availableArtists, id: \.self) { artist in
+                                    filterChip(artist, on: artists.contains(artist)) {
+                                        if artists.contains(artist) { artists.remove(artist) } else { artists.insert(artist) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !availableTags.isEmpty {
+                        filterGroup("Tags") {
+                            MDFlow {
+                                ForEach(availableTags, id: \.self) { tag in
+                                    filterChip(tag, on: tags.contains(tag)) {
+                                        if tags.contains(tag) { tags.remove(tag) } else { tags.insert(tag) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !availableSources.isEmpty {
+                        filterGroup("Source") {
+                            MDFlow {
+                                ForEach(availableSources, id: \.id) { source in
+                                    filterChip(source.name, on: sources.contains(source.id)) {
+                                        if sources.contains(source.id) { sources.remove(source.id) } else { sources.insert(source.id) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    filterGroup("Sort") {
+                        MDSegmented(options: MCLibrarySort.allCases, selection: sortBinding) { $0.title }
+                    }
+                    .disabled(activeGroupPage == Self.readingPageID)
+                    .opacity(activeGroupPage == Self.readingPageID ? 0.45 : 1)
+                    filterGroup("Group the library by") {
+                        MDFlow {
+                            ForEach(MCLibraryGrouping.allCases) { item in
+                                filterChip(item.title, on: grouping == item) { grouping = item }
+                            }
+                        }
+                    }
+                    if let saved = savedCurrentFilter {
+                        Label("Saved as “\(saved.name)”", systemImage: "checkmark")
+                            .font(.mdSystem(size: 13)).foregroundStyle(Color.mdText3)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 20)
+            }
+            .mdSheet("Filter and sort", onClose: { showFilters = false },
+                     secondary: MDSheetAction(title: "Clear filters", disabled: !hasActiveFilters) { clearFilters() },
+                     primary: MDSheetAction(title: "Save as tab",
+                                            disabled: savedCurrentFilter != nil || !(hasActiveFilters || !trimmedQuery.isEmpty)) {
+                         saveTabAfterFilters = true
+                         showFilters = false
+                     })
+        }
+        .midokuAccent()
+    }
+
+    private func filterGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).mdLabel()
+            content()
+        }
+    }
+
+    private func filterChip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action).buttonStyle(MDFilterChipStyle(state: on ? .on : .off))
     }
 
     @ViewBuilder private func entryLabel(_ entry: MCPersonalEntry) -> some View {
@@ -1492,9 +1556,9 @@ struct MCEntryCover: View {
                 SourceImageView(source: store.source(listing.identity.connectionID), imageUrl: cover.absoluteString,
                     width: geometry.size.width, height: geometry.size.height, contentMode: contentMode, placeholder: "MidokuCoverPlaceholder",
                     cacheSourceKey: store.snapshot.connections.first { $0.id == listing.identity.connectionID }?.sourceKey,
-                    persistent: true).clipped()
+                    persistent: true, placeholderTitle: store.library.title(entry)).clipped()
             } else {
-                MCArtworkPlaceholder()
+                MCArtworkPlaceholder(title: store.library.title(entry))
                     .frame(width: geometry.size.width, height: geometry.size.height).clipped()
             }
         }.clipped().contentShape(Rectangle()).accessibilityHidden(true)

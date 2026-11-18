@@ -19,8 +19,12 @@ class MangaGridCell: UICollectionViewCell {
         }
         set {
             titleLabel.text = newValue ?? NSLocalizedString("UNTITLED")
+            // The cover title only shows when the cell title sits under the cover, not over it.
+            if !hasArtwork { imageView.image = MDCoverArt.image(title: titleBelow ? newValue : nil) }
         }
     }
+    /// False while the web placeholder cover is shown.
+    private var hasArtwork = false
 
     var showsBookmark: Bool {
         get {
@@ -107,7 +111,7 @@ class MangaGridCell: UICollectionViewCell {
         contentView.layer.borderWidth = 1
         contentView.layer.borderColor = MDColor.line.cgColor
 
-        imageView.image = UIImage(named: "MangaPlaceholder")
+        imageView.image = MDCoverArt.image(title: nil)
         imageView.contentMode = .scaleAspectFill
         contentView.addSubview(imageView)
 
@@ -239,7 +243,8 @@ class MangaGridCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        imageView.image = UIImage(named: "MangaPlaceholder")
+        hasArtwork = false
+        imageView.image = MDCoverArt.image(title: nil)
         imageTask?.cancel()
         imageTask = nil
         highlightView.alpha = 0
@@ -343,6 +348,7 @@ extension MangaGridCell {
                         return
                     }
                     Task { @MainActor in
+                        self.hasArtwork = true
                         if cached {
                             self.imageView.image = response.image
                         } else {

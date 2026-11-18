@@ -24,6 +24,8 @@ struct SourceImageView: View {
     var cacheSourceKey: String?
     /// Library covers go to the persistent store and are kept until the entry gets new artwork.
     var persistent = false
+    /// Title drawn on the web placeholder cover while there's no artwork.
+    var placeholderTitle: String?
 
     @State private var artwork: MCArtworkCache.Artwork?
     @State private var loadedKey: String?
@@ -70,8 +72,10 @@ struct SourceImageView: View {
             if let placeholderSymbol {
                 Image(systemName: placeholderSymbol).font(.mdTitle3).foregroundStyle(.tertiary)
                     .frame(width: width, height: height).background(Color(uiColor: .secondarySystemBackground))
-            } else if ["MangaPlaceholder", "MidokuCoverPlaceholder", "MidokuChapterPlaceholder"].contains(placeholder) {
-                MCArtworkPlaceholder().frame(width: width, height: height)
+            } else if placeholder == "MidokuChapterPlaceholder" {
+                MCPagePlaceholder(layout: imageUrl.utf8.reduce(0) { $0 &+ Int($1) }).frame(width: width, height: height)
+            } else if ["MangaPlaceholder", "MidokuCoverPlaceholder"].contains(placeholder) {
+                MCArtworkPlaceholder(title: placeholderTitle).frame(width: width, height: height)
             } else {
                 Image(placeholder).resizable().aspectRatio(contentMode: contentMode).frame(width: width, height: height)
             }

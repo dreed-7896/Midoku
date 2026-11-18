@@ -41,6 +41,11 @@ class NavigationController: UINavigationController, UINavigationControllerDelega
         return viewController is MDBarlessScreen || (hidesBarAtRoot && viewController === viewControllers.first)
     }
 
+    func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+        // Screens can swap the pop gesture's delegate (the reader does); put ours back.
+        MDSwipeBackDelegate.install(on: self)
+    }
+
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         setNavigationBarHidden(wantsBarHidden(viewController), animated: animated)
         Self.flattenBarItems(of: viewController.navigationItem)

@@ -16,6 +16,11 @@ struct SourceSettingsView: View {
     @State private var showingClearCacheConfirm = false
     @State private var showingResetAlert = false
     @State private var error: Error?
+    @State private var tabs: [String] = []
+    @State private var defaultTab = 0
+
+    /// Index of the Home / listing tab an extension opens on (Home counts as 0 when the source has one).
+    static func defaultTabKey(_ sourceKey: String) -> String { "\(sourceKey).defaultTab" }
 
     @EnvironmentObject var path: NavigationCoordinator
 
@@ -34,6 +39,21 @@ struct SourceSettingsView: View {
                     .listRowInsets(.init(top: 16, leading: 16, bottom: 16, trailing: 16))
             }
             .listRowBackground(Color.mdS1)
+
+            // the tab the extension opens on
+            if tabs.count > 1 {
+                Section {
+                    Picker("Open on", selection: $defaultTab) {
+                        ForEach(tabs.indices, id: \.self) { index in
+                            Text(tabs[index]).tag(index)
+                        }
+                    }
+                } header: {
+                    MDSettingsHeader(title: "Default tab")
+                } footer: {
+                    Text("The tab shown when you open \(source.name).")
+                }
+            }
 
             // source settings
             if let error {
@@ -71,8 +91,12 @@ struct SourceSettingsView: View {
         .mdSheet(NSLocalizedString("SOURCE_SETTINGS"), onClose: { path.dismiss() })
         .animation(.default, value: settings)
         .task {
+            await loadTabs()
             guard settings.isEmpty else { return }
             await loadSettings()
+        }
+        .onChange(of: defaultTab) { _, value in
+            UserDefaults.standard.set(value, forKey: Self.defaultTabKey(source.key))
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("refresh-settings"))) { _ in
             Task {
@@ -96,6 +120,14 @@ struct SourceSettingsView: View {
         } message: {
             Text(NSLocalizedString("CLEAR_SOURCE_CACHE_TEXT"))
         }
+    }
+
+    func loadTabs() async {
+        guard tabs.isEmpty, source.hasListings || source.features.providesHome else { return }
+        let listings = (try? await source.getListings()) ?? []
+        tabs = (source.features.providesHome ? [NSLocalizedString("HOME")] : []) + listings.map(\.name)
+        let saved = UserDefaults.standard.integer(forKey: Self.defaultTabKey(source.key))
+        defaultTab = tabs.indices.contains(saved) ? saved : 0
     }
 
     func loadSettings() async {

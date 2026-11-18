@@ -62,7 +62,8 @@ enum MDFont {
     static let files = [
         "Inter-Regular", "Inter-Medium", "Inter-SemiBold", "Inter-Bold",
         "BricolageGrotesque-SemiBold", "BricolageGrotesque-Bold", "BricolageGrotesque-ExtraBold",
-        "JetBrainsMono-Medium", "JetBrainsMono-SemiBold", "JetBrainsMono-Bold"
+        "JetBrainsMono-Medium", "JetBrainsMono-SemiBold", "JetBrainsMono-Bold",
+        "Fraunces-SemiBold"
     ]
 
     nonisolated(unsafe) private(set) static var available = false

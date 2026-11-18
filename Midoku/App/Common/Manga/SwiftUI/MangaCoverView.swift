@@ -20,6 +20,7 @@ struct MangaCoverView: View {
     var contentMode: ContentMode = .fill
     var placeholder = "MangaPlaceholder"
     var bookmarked: Bool = false
+    var title: String?
 
     var body: some View {
         SourceImageView(
@@ -29,7 +30,8 @@ struct MangaCoverView: View {
             height: height,
             downsampleWidth: downsampleWidth,
             contentMode: contentMode,
-            placeholder: placeholder
+            placeholder: placeholder,
+            placeholderTitle: title
         )
         .overlay(alignment: .topLeading) { bookmarkView }
         .clipShape(Rectangle())

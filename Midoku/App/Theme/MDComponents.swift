@@ -309,3 +309,70 @@ struct MDCheckBox: View {
             .overlay(Rectangle().strokeBorder(state == .on ? Color.mdText : state == .excluded ? Color.mdAccent : Color.mdLine2, lineWidth: 1.5))
     }
 }
+
+/// Wrapping row of chips (`.chips--wrap`).
+struct MDFlow: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, maxX: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0; y += lineHeight + lineSpacing; lineHeight = 0
+            }
+            x += size.width + spacing
+            maxX = max(maxX, x - spacing)
+            lineHeight = max(lineHeight, size.height)
+        }
+        return CGSize(width: proposal.width ?? maxX, height: y + lineHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX; y += lineHeight + lineSpacing; lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
+/// `.segmented`: equal-width square segments, the selected one filled white.
+struct MDSegmented<Value: Hashable>: View {
+    let options: [Value]
+    @Binding var selection: Value
+    let title: (Value) -> String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                if index > 0 { Rectangle().fill(Color.mdLine2).frame(width: 1) }
+                let on = option == selection
+                Button { selection = option } label: {
+                    Text(title(option))
+                        .font(.mdSystem(size: 13, weight: on ? .semibold : .medium))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(on ? Color(uiColor: MDColor.onAccent) : Color.mdText2)
+                        .padding(.horizontal, 4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(on ? Color.mdText : Color.clear)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .frame(minHeight: 44)
+        .fixedSize(horizontal: false, vertical: true)
+        .overlay(Rectangle().strokeBorder(Color.mdLine2, lineWidth: 1))
+    }
+}

@@ -147,6 +147,7 @@ struct MCEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var store = MCCollectionStore.shared
     @State private var showEdit = false
+    @State private var showOptions = false
     @State private var showAddNested = false
     @State private var movingEntry: MCID?
     @State private var showCover = false
@@ -250,38 +251,49 @@ struct MCEntryView: View {
             if let url = entryWebURL(entry) {
                 MDIconButton(systemImage: "globe", label: "Open source website", glass: true) { webPage = MCWebPage(url: url) }
             }
-            Menu {
-                            Button("Edit entry", systemImage: "square.and.pencil") { showEdit = true }
-                            Button("Add title", systemImage: "plus.rectangle.on.rectangle") { showAddNested = true }
-                            Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: entryID) }
-                            if entry.parentEntryID != nil {
-                                Button("Move to library", systemImage: "arrow.up.left") {
-                                    store.perform { try $0.library.moveEntry(entryID, into: nil) }
-                                }
-                            }
-                            if !entry.exclusions.isEmpty {
-                                Button("Removed chapters", systemImage: "arrow.uturn.backward") { showRemovedChapters = true }
-                            }
-                            Divider()
-                            Button("Sources", systemImage: "square.stack.3d.up") { showSources = true }
-                            if store.snapshot.manga.contains(where: { $0.listingID == entry.primaryListingID }) {
-                                Button("Migrate", systemImage: "arrow.triangle.branch") {
-                                    migrateEntry(entry)
-                                }
-                            }
-                            Button("Reset thumbnails", systemImage: "arrow.counterclockwise") { confirmResetThumbnails = true }
-                                .disabled(entry.slots.isEmpty)
-                            Button("Reorder", systemImage: "line.3.horizontal") { selecting = false; showReorder = true }
-                            if entry.manualOrder && !contents.contains(where: { if case .title = $0 { return true }; return false }) {
-                                Button("Sort by number", systemImage: "number") { store.perform { try $0.library.editEntry(entryID) { $0.manualOrder = false; $0.contentOrder = nil } } }
-                            }
-                            Divider()
-                            Button("Remove title", systemImage: "trash", role: .destructive) { confirmRemove = true }
-                        } label: { MDIconBox(systemImage: "ellipsis", glass: true) }
+            Button { showOptions = true } label: { MDIconBox(systemImage: "ellipsis", glass: true) }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Entry options")
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)
+    }
+
+    /// The entry's options (`.menu` sheet).
+    private func optionRows() -> [MDActionRow] {
+        guard let entry else { return [] }
+        var rows: [MDActionRow] = [
+            MDActionRow(systemImage: "square.and.pencil", title: "Edit entry", detail: "Title, cover, description, details") { showEdit = true },
+            MDActionRow(systemImage: "plus.rectangle.on.rectangle", title: "Add title", detail: "Group volumes or seasons inside") { showAddNested = true },
+            MDActionRow(systemImage: "text.badge.plus", title: "Add to entry", detail: "Put this title inside another") { movingEntry = MCID(id: entryID) }
+        ]
+        if entry.parentEntryID != nil {
+            rows.append(MDActionRow(systemImage: "arrow.up.left", title: "Move to library", detail: "Take it out of its parent title") {
+                store.perform { try $0.library.moveEntry(entryID, into: nil) }
+            })
+        }
+        if !entry.exclusions.isEmpty {
+            rows.append(MDActionRow(systemImage: "arrow.uturn.backward", title: "Removed chapters",
+                                    detail: "\(entry.exclusions.count) removed") { showRemovedChapters = true })
+        }
+        rows.append(MDActionRow(systemImage: "square.stack.3d.up", title: "Sources", detail: "\(entry.links.count) linked") { showSources = true })
+        if store.snapshot.manga.contains(where: { $0.listingID == entry.primaryListingID }) {
+            rows.append(MDActionRow(systemImage: "arrow.triangle.branch", title: "Migrate", detail: "Move to another source · progress comes along") {
+                migrateEntry(entry)
+            })
+        }
+        rows.append(MDActionRow(systemImage: "arrow.counterclockwise", title: "Reset thumbnails",
+                                detail: "Clears picked and made chapter thumbnails", disabled: entry.slots.isEmpty) { confirmResetThumbnails = true })
+        rows.append(MDActionRow(systemImage: "line.3.horizontal", title: "Reorder", detail: "Drag chapters and titles into your order") {
+            selecting = false; showReorder = true
+        })
+        if entry.manualOrder && !contents.contains(where: { if case .title = $0 { return true }; return false }) {
+            rows.append(MDActionRow(systemImage: "number", title: "Sort by number", detail: "Drop your personal order") {
+                store.perform { try $0.library.editEntry(entryID) { $0.manualOrder = false; $0.contentOrder = nil } }
+            })
+        }
+        rows.append(MDActionRow(systemImage: "trash", title: "Remove title", detail: "Delete it from your library", destructive: true) { confirmRemove = true })
+        return rows
     }
 
     var body: some View {
@@ -323,6 +335,7 @@ struct MCEntryView: View {
         .sheet(isPresented: $showAddNested) { MCEntryPlacementView(mode: .addInside(entryID)) }
         .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
         .sheet(isPresented: $showEdit) { MCEntryEditor(entryID: entryID) }
+        .mdActionSheet(isPresented: $showOptions, title: entry.map { store.library.title($0) } ?? "Options") { optionRows() }
         .fullScreenCover(isPresented: $showCover) { if let entry { MCFullscreenCoverView(entry: entry) } }
         .background { MCEntryCategoryPresenter(entry: $categoryEntry, includeStatus: true).frame(width: 0, height: 0) }
         .sheet(item: $webPage) { MCInAppWebView(url: $0.url).ignoresSafeArea() }

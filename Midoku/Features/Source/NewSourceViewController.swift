@@ -191,6 +191,9 @@ class NewSourceViewController: UIViewController, MDBarlessScreen {
         self.searchText = searchQuery ?? ""
         if let initialListingIndex {
             self.headerListingSelection = initialListingIndex + (source.features.providesHome ? 1 : 0)
+        } else if let saved = UserDefaults.standard.object(forKey: SourceSettingsView.defaultTabKey(source.key)) as? Int, saved > 0 {
+            // the tab picked in the extension's settings ("Open on")
+            self.headerListingSelection = saved
         }
         super.init(nibName: nil, bundle: nil)
 

@@ -132,3 +132,104 @@ extension View {
         modifier(MDSheetChrome(title: title, count: count, onClose: onClose, secondary: secondary, primary: primary) { EmptyView() })
     }
 }
+
+/// One `.menu__row` in an action sheet.
+struct MDActionRow: Identifiable {
+    let id = UUID()
+    let systemImage: String
+    let title: String
+    var detail: String?
+    var destructive = false
+    var disabled = false
+    /// Runs without closing the sheet (switches and choices).
+    var keepsOpen = false
+    let action: () -> Void
+}
+
+/// Midoku Web's options sheet: a bordered list of rows with a square icon, a title and a detail line.
+struct MDActionSheet: View {
+    let title: String
+    let rows: [MDActionRow]
+    let onPick: (MDActionRow) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        Button { onPick(row) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: row.systemImage)
+                                    .font(.system(size: 17, weight: .regular))
+                                    .foregroundStyle(row.destructive ? Color.mdAccent : Color.mdText2)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.mdS3)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(row.title)
+                                        .font(.mdSystem(size: 15, weight: .medium))
+                                        .foregroundStyle(row.destructive ? Color.mdAccent : Color.mdText)
+                                    if let detail = row.detail {
+                                        Text(detail).font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3).lineLimit(1)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                                if !row.keepsOpen {
+                                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.mdText3)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .frame(minHeight: 60)
+                            .background(Color.mdS1)
+                            .overlay(alignment: .top) {
+                                if index > 0 { Rectangle().fill(Color.mdLine).frame(height: 1) }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(row.disabled)
+                        .opacity(row.disabled ? 0.5 : 1)
+                    }
+                }
+                .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
+            }
+            .mdSheet(title, onClose: onClose)
+        }
+    }
+}
+
+private struct MDActionSheetModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    let rows: () -> [MDActionRow]
+    @State private var pending: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: $isPresented, onDismiss: {
+            // Actions that open another sheet run once this one has closed.
+            let action = pending
+            pending = nil
+            action?()
+        }) {
+            MDActionSheet(title: title, rows: rows(), onPick: { row in
+                if row.keepsOpen {
+                    row.action()
+                } else {
+                    pending = row.action
+                    isPresented = false
+                }
+            }, onClose: { isPresented = false })
+            .presentationDetents([.medium, .large])
+            .midokuAccent()
+        }
+    }
+}
+
+extension View {
+    func mdActionSheet(isPresented: Binding<Bool>, title: String, rows: @escaping () -> [MDActionRow]) -> some View {
+        modifier(MDActionSheetModifier(isPresented: isPresented, title: title, rows: rows))
+    }
+}

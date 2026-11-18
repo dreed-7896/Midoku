@@ -4,8 +4,7 @@
 //
 //  Screens that draw their own web-style top bar hide the navigation bar or its back button, which
 //  makes UIKit refuse the swipe back. This delegate keeps the edge swipe and the full-width content
-//  swipe working whenever there is a screen to go back to, and forwards everything else to UIKit's
-//  own delegate so scroll views and controls keep their usual priority.
+//  swipe working whenever there is a screen to go back to.
 //
 
 import UIKit
@@ -42,13 +41,19 @@ final class MDSwipeBackDelegate: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
-    override func responds(to aSelector: Selector!) -> Bool {
-        super.responds(to: aSelector) || (original?.responds(to: aSelector) ?? false)
+    // UIKit's own delegate refuses to start while the bar or back button is hidden, including through
+    // private delegate methods, so nothing is forwarded to it for the edge swipe. The full-width swipe
+    // still asks it how to share touches with scroll views.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        guard fullWidth else { return false }
+        return original?.gestureRecognizer?(gestureRecognizer, shouldRecognizeSimultaneouslyWith: other) ?? false
     }
 
-    override func forwardingTarget(for aSelector: Selector!) -> Any? {
-        if let original, original.responds(to: aSelector) { return original }
-        return super.forwardingTarget(for: aSelector)
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+        guard fullWidth else { return false }
+        return original?.gestureRecognizer?(gestureRecognizer, shouldBeRequiredToFailBy: other) ?? false
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {

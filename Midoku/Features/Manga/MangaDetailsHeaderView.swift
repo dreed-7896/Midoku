@@ -198,7 +198,7 @@ struct MangaDetailsHeaderView: View {
                 onCover: { coverPressed = true },
                 onTitleHold: { onTitlePressed?() }
             ) {
-                MangaCoverView(source: source, coverImage: manga.cover ?? "", width: 156, height: 234)
+                MangaCoverView(source: source, coverImage: manga.cover ?? "", width: 156, height: 234, title: manga.title)
                     .id(manga.cover ?? "")
                     .matchedTransitionSourcePlease(id: manga.identifier, in: transitionNamespace)
             } byline: {

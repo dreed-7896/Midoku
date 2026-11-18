@@ -92,7 +92,7 @@ struct MDMangaCard: View {
                 .fill(Color.mdS2)
                 .aspectRatio(2/3, contentMode: .fill)
                 .overlay {
-                    SourceImageView(source: source, imageUrl: coverImage, downsampleWidth: 400)
+                    SourceImageView(source: source, imageUrl: coverImage, downsampleWidth: 400, placeholderTitle: title)
                 }
                 .clipped()
                 .overlay(alignment: .topLeading) { if saved { MangaCoverView.savedBadge } }

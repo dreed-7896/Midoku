@@ -161,7 +161,8 @@ struct HomeListView: View {
                 width: 100 * 2/3,
                 height: 100,
                 downsampleWidth: 200,
-                bookmarked: mangaKey.flatMap { (usesBookmarksState ? bookmarkedItemsState : bookmarkedItems).contains($0) } ?? false
+                bookmarked: mangaKey.flatMap { (usesBookmarksState ? bookmarkedItemsState : bookmarkedItems).contains($0) } ?? false,
+                title: entry.title
             )
 
             let titleStack = VStack(alignment: .leading, spacing: 4) {

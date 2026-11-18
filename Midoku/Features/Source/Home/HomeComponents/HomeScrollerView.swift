@@ -79,7 +79,8 @@ struct HomeScrollerView: View {
                                     width: Self.coverHeight * 2/3,
                                     height: Self.coverHeight,
                                     downsampleWidth: 200,
-                                    bookmarked: mangaKey.flatMap { bookmarkedItems.contains($0) } ?? false
+                                    bookmarked: mangaKey.flatMap { bookmarkedItems.contains($0) } ?? false,
+                                    title: entry.title
                                 )
 
                                 VStack(alignment: .leading, spacing: 0) {
