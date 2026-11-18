@@ -19,35 +19,30 @@ struct ReaderChapterListView: View {
     var body: some View {
         PlatformNavigationStack {
             ScrollViewReader { proxy in
-                List(chapterList) { chapter in
-                    Button {
-                        self.chapter = chapter
-                        chapterSet?(chapter)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(displayString(for: chapter))
-                                    .foregroundColor(.primary)
-                                    .font(.mdSubheadline)
-                                if let route = collectionSequence?.route(chapter) {
-                                    Text(route.source?.name ?? route.manga.sourceKey).font(.mdCaption).foregroundStyle(.secondary)
-                                }
-                                if let title = chapter.title, chapter.chapterNumber != nil || chapter.volumeNumber != nil {
-                                    Text(title)
-                                        .foregroundColor(.secondary)
-                                        .font(.mdSubheadline)
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(chapterList) { chapter in
+                            Button {
+                                self.chapter = chapter
+                                chapterSet?(chapter)
+                            } label: {
+                                let source = collectionSequence?.route(chapter).map { $0.source?.name ?? $0.manga.sourceKey }
+                                let subtitle = chapter.chapterNumber != nil || chapter.volumeNumber != nil ? chapter.title : nil
+                                MDChapterRow(
+                                    label: displayString(for: chapter),
+                                    meta: [subtitle, source].compactMap { $0 }.joined(separator: " · "),
+                                    current: chapter == self.chapter
+                                ) {
+                                    if chapter == self.chapter { MDFlag(systemImage: "book.fill", accent: true) }
                                 }
                             }
-                            Spacer()
-                            if chapter == self.chapter {
-                                Image(systemName: "checkmark")
-                                    .foregroundColor(.accentColor)
-                            }
+                            .buttonStyle(.plain)
+                            .id(chapter.id)
                         }
-                        .padding(.vertical, 2)
                     }
-                    .id(chapter.id)
+                    .padding(.horizontal, 16)
                 }
+                .background(Color.mdBg)
                 .onAppear {
                     proxy.scrollTo(chapter.id, anchor: .center)
                 }
