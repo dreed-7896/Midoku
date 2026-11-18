@@ -92,15 +92,10 @@ struct MangaView: View {
                 }
 
                 if !viewModel.otherDownloadedChapters.isEmpty {
-                    VStack {
-                        HStack {
-                            Text(NSLocalizedString("DOWNLOADED_CHAPTERS"))
-                                .font(.mdHeadline)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 20)
-                        ListDivider()
-                    }
+                    MDSectionHead(title: NSLocalizedString("DOWNLOADED_CHAPTERS"), count: "\(viewModel.otherDownloadedChapters.count)") { EmptyView() }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 24)
+                        .padding(.bottom, 8)
                     .listRowInsets(.zero)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -175,6 +170,8 @@ struct MangaView: View {
                 }
             )
             .scrollBackgroundHiddenPlease()
+            .background(Color.mdBg)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .navigationBarBackButtonHidden(editMode == .active)
             .fullScreenCover(isPresented: $showingCoverView) {
                 MangaCoverPageView(
@@ -343,7 +340,11 @@ extension MangaView {
                     if let nextChapter = viewModel.nextChapter {
                         openChapter = nextChapter
                     }
-                }
+                },
+                readCount: (viewModel.manga.chapters ?? viewModel.chapters).filter { viewModel.readingHistory[$0.key]?.page == -1 }.count,
+                downloadedCount: viewModel.downloadStatus.values.filter { $0 == .finished }.count,
+                onRefresh: { refreshController.refresh() },
+                onDownloadUnread: downloadUnread
             )
             .environmentObject(path)
             .frame(minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
@@ -351,6 +352,21 @@ extension MangaView {
         .listRowInsets(.zero)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+
+    func downloadUnread() {
+        let unread = (viewModel.manga.chapters ?? viewModel.chapters).filter {
+            viewModel.readingHistory[$0.key]?.page != -1
+                && viewModel.downloadStatus[$0.key, default: .none] != .finished
+                && !$0.locked
+        }
+        guard !unread.isEmpty else { return }
+        let wifiOnly = AppSettings.downloads.downloadOnlyOnWifi.get()
+        guard !wifiOnly || Reachability.getConnectionType() == .wifi else {
+            showConnectionAlert = true
+            return
+        }
+        Task { await DownloadManager.shared.download(manga: viewModel.manga, chapters: unread) }
     }
 
     var bottomSeparator: some View {
@@ -419,6 +435,8 @@ extension MangaView {
         // improves the scrolling performance of the list
         .equatable()
         .listRowInsets(.zero)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.mdBg)
         .disabled(locked)
         .opacity(opacity)
         .id(chapter.key)

@@ -38,65 +38,39 @@ struct ChapterTableCell: View {
         downloadProgress ?? (downloadStatus == .queued || downloadStatus == .downloading ? 0 : nil)
     }
 
-    var body: some View {
-        let view = HStack {
-            if let thumbnail = chapter.thumbnail ?? (alwaysShowPageCount ? fallbackThumbnail : nil) {
-                MangaCoverView(
-                    source: source,
-                    coverImage: thumbnail,
-                    width: 40,
-                    height: 56
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
-            }
+    /// Started but not finished: the chapter you'd continue with.
+    var inProgress: Bool {
+        !read && (page ?? 0) > 0
+    }
 
-            VStack(alignment: .leading, spacing: 8 / 3) {
-                let title = chapter.formattedTitle(forceMode: displayMode)
-                Text(title)
-                    .foregroundStyle(locked || read ? .secondary : .primary)
-                    .font(.mdSystem(size: 16))
-                    .lineLimit(1)
-                if let subtitle = chapter.formattedSubtitle(
-                    page: page,
-                    totalPages: totalPages,
-                    alwaysShowPageCount: alwaysShowPageCount,
-                    sourceKey: sourceKey
-                ) {
-                    Text(subtitle)
-                        .foregroundStyle(.secondary)
-                        .font(.mdSystem(size: 14))
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
+    var body: some View {
+        let isNew = !read && (chapter.dateUploaded.map { $0 > Date.now.addingTimeInterval(-7 * 86_400) } ?? false)
+        MDChapterRow(
+            label: chapter.formattedTitle(forceMode: displayMode),
+            meta: chapter.formattedSubtitle(
+                page: page,
+                totalPages: totalPages,
+                alwaysShowPageCount: alwaysShowPageCount,
+                sourceKey: sourceKey
+            ).map { read ? "Read · \($0)" : $0 } ?? (read ? "Read" : nil),
+            read: read || locked,
+            current: inProgress,
+            progress: inProgress ? totalPages.map { Double(page ?? 0) / Double(max(1, $0)) } : nil
+        ) {
+            if isNew { MDRowBadge(text: "New") }
+        } trailing: {
             if downloaded {
-                Image(systemName: "arrow.down.circle.fill")
-                    .imageScale(.small)
-                    .foregroundStyle(.tertiary)
+                MDFlag(systemImage: "arrow.down")
             } else if downloadFailed {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .imageScale(.small)
-                    .foregroundStyle(.orange)
+                Image(systemName: "exclamationmark.circle.fill").imageScale(.small).foregroundStyle(Color(uiColor: MDColor.amber))
             } else if let progress {
                 DownloadProgressView(progress: progress)
                     .frame(width: 13, height: 13)
             } else if locked {
-                Image(systemName: "lock.fill")
-                    .imageScale(.small)
+                MDFlag(systemImage: "lock.fill")
             }
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 22 / 3)
-        .frame(alignment: .leading)
-        .contentShape(Rectangle())
-        if #available(iOS 16.0, *) {
-            view.alignmentGuide(.listRowSeparatorTrailing) { d in
-                d[.trailing] // ensure separator goes all the way to the trailing edge
-            }
-        } else {
-            view
-        }
+        .padding(.horizontal, 16)
     }
 }
 

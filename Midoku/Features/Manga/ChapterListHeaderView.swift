@@ -24,6 +24,8 @@ struct ChapterListHeaderView: View {
     private var languages: [String] = []
     private var scanlators: [String] = []
     private var mangaId: MangaIdentifier
+    private var unreadCount: Int?
+    private var downloadedCount: Int?
 
     init(
         allChapters: [AidokuRunner.Chapter]? = nil,
@@ -34,8 +36,12 @@ struct ChapterListHeaderView: View {
         langFilter: Binding<String?>,
         scanlatorFilter: Binding<[String]>,
         displayMode: Binding<ChapterTitleDisplayMode>,
-        mangaId: MangaIdentifier
+        mangaId: MangaIdentifier,
+        unreadCount: Int? = nil,
+        downloadedCount: Int? = nil
     ) {
+        self.unreadCount = unreadCount
+        self.downloadedCount = downloadedCount
         self.chapterCount = filteredChapters?.count
         self._sortOption = sortOption
         self._sortAscending = sortAscending
@@ -66,28 +72,41 @@ struct ChapterListHeaderView: View {
         }
     }
 
+    private func isOn(_ method: ChapterFilterMethod) -> Bool {
+        filters.contains { $0.type == method && !$0.exclude }
+    }
+
+    /// The web's chapter chips: All, Unread, Downloaded (one at a time; the menu keeps the finer options).
+    private func choose(_ method: ChapterFilterMethod?) {
+        filters.removeAll { $0.type == .unread || $0.type == .downloaded }
+        if let method { filters.append(ChapterFilterOption(type: method, exclude: false)) }
+    }
+
     var body: some View {
-        HStack {
-            let text = if let chapterCount {
-                if chapterCount == 0 {
-                    NSLocalizedString("NO_CHAPTERS")
-                } else if chapterCount == 1 {
-                    NSLocalizedString("1_CHAPTER").lowercased()
-                } else {
-                    String(format: NSLocalizedString("%i_CHAPTERS"), chapterCount).lowercased()
+        VStack(alignment: .leading, spacing: 12) {
+            MDSectionHead(title: "Chapters", count: chapterCount.map(String.init) ?? "…") {
+                if showMenu {
+                    Button {
+                        sortAscending.toggle()
+                    } label: {
+                        MDIconBox(systemImage: "arrow.up.arrow.down")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(sortAscending ? "Show newest first" : "Show oldest first")
+                    menu
                 }
-            } else {
-                NSLocalizedString("LOADING_ELLIPSIS")
             }
-            Text(text)
-                .font(.mdHeadline)
-                .transition(.scale) // for some reason this makes it animate correctly
-                .id("chapters")
-
-            Spacer()
-
             if showMenu {
-                menu
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        let none = !isOn(.unread) && !isOn(.downloaded)
+                        Button { choose(nil) } label: { MDChip(title: "All", active: none, large: false) }
+                        Button { choose(.unread) } label: { MDChip(title: "Unread", count: unreadCount, active: isOn(.unread), large: false) }
+                        Button { choose(.downloaded) } label: { MDChip(title: "Downloaded", count: downloadedCount, active: isOn(.downloaded), large: false) }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .scrollClipDisabled()
             }
         }
     }
@@ -202,9 +221,8 @@ struct ChapterListHeaderView: View {
                 }
             }
         } label: {
-            Image(systemName: "line.3.horizontal.decrease")
-                .font(.mdSystem(size: 21, weight: .regular))
+            MDIconBox(systemImage: "slider.horizontal.3", badge: filters.count + (langFilter == nil ? 0 : 1) + scanlatorFilter.count)
         }
-        .foregroundStyle(.tint)
+        .accessibilityLabel("Filter and sort chapters")
     }
 }

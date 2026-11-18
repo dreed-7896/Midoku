@@ -183,6 +183,7 @@ struct MCEntryView: View {
     @State private var viewportSize = CGSize.zero
     @State private var rowsCache = MCEntryRowsCache()
     @State private var batchEditing: MCBatchSelection?
+    @State private var chapterFilter = MCEntryChapterFilter.all
     private var entry: MCPersonalEntry? { store.library.entry(entryID) }
     private var grid: Bool { entry?.chapterGridOverride ?? defaultChapterGrid }
     private var chapterGridOverride: Binding<Bool?> {
@@ -251,33 +252,35 @@ struct MCEntryView: View {
     var body: some View {
         Group {
             if let entry {
+                let next = nextSlot
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
-                        header(entry).padding(.horizontal)
-                        Section {
-                            if contents.isEmpty {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("No chapters yet.").foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        header(entry, next: next)
+                        chapterActions.padding(.top, 28)
+                        let visible = contents.filter(passes)
+                        if visible.isEmpty {
+                            emptyChapters.padding(.horizontal, 16).padding(.top, 12)
+                        }
+                        if grid {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
+                                count: viewportSize.width > viewportSize.height ? min(10, max(2, landscapeColumns)) : min(6, max(2, portraitColumns))), alignment: .leading, spacing: 18) {
+                                ForEach(visible) { contentRow($0, grid: true, current: next?.id) }
+                            }.padding(.horizontal, 16).padding(.top, 16)
+                        } else {
+                            Color.clear.frame(height: 8)
+                            ForEach(visible) { item in
+                                contentRow(item, grid: false, current: next?.id).padding(.horizontal, 16)
                             }
-                            if grid {
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top),
-                                    count: viewportSize.width > viewportSize.height ? min(10, max(2, landscapeColumns)) : min(6, max(2, portraitColumns))), alignment: .leading, spacing: 18) {
-                                    ForEach(contents) { contentRow($0, grid: true) }
-                                }.padding(.horizontal)
-                            } else {
-                                ForEach(contents) { item in
-                                    contentRow(item, grid: false).padding(.horizontal)
-                                    Divider().padding(.leading, 76)
-                                }
-                            }
-                        } header: { chapterActions }
-                    }.padding(.vertical, 12)
+                        }
+                    }.padding(.bottom, 28)
                 }
-                .background(Color(uiColor: .systemBackground))
+                .background(alignment: .top) {
+                    MDEntryBackdrop { MCEntryCover(entry: entry) }.ignoresSafeArea(edges: .top)
+                }
+                .background(Color.mdBg)
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .mcRefreshable { await store.refresh(entryID: entryID) }
-                .navigationTitle(store.library.title(entry)).navigationBarTitleDisplayMode(.inline)
+                .navigationTitle("").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
@@ -307,7 +310,13 @@ struct MCEntryView: View {
                             }
                             Divider()
                             Button("Remove title", systemImage: "trash", role: .destructive) { confirmRemove = true }
-                        } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Entry options")
+                        } label: { Image(systemName: "ellipsis") }.accessibilityLabel("Entry options")
+                    }
+                    if let url = entryWebURL(entry) {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button { webPage = MCWebPage(url: url) } label: { Image(systemName: "globe") }
+                                .accessibilityLabel("Open source website")
+                        }
                     }
                 }
             } else { UnavailableView("Entry unavailable", systemImage: "book.closed") }
@@ -397,127 +406,33 @@ struct MCEntryView: View {
         migrationTarget = MCEntryMigrationTarget(manga: manga)
     }
 
+    private var nextSlot: MCChapterSlot? {
+        store.library.flattenedChapters(entryID: entryID).map(\.slot).first { !store.library.isRead($0) }
+    }
+
+    private func passes(_ item: MCEntryContent) -> Bool {
+        guard case .chapter(let id) = item, let slot = cachedRows.slots[id] else { return chapterFilter == .all }
+        switch chapterFilter {
+            case .all: return true
+            case .unread: return !store.library.isRead(slot)
+            case .bookmarked: return bookmarkedSlotIDs.contains(slot.id)
+        }
+    }
+
+    @ViewBuilder private var emptyChapters: some View {
+        switch chapterFilter {
+            case .all: MDEmpty(systemImage: "book", title: "No chapters yet", detail: Text("The source has not published any chapters for this title."))
+            case .unread: MDEmpty(systemImage: "checkmark", title: "All caught up", detail: Text("Every chapter is read. New ones show up here."), tone: .done)
+            case .bookmarked: MDEmpty(systemImage: "bookmark", title: "No bookmarks", detail: Text("Hold a chapter to bookmark it."))
+        }
+    }
+
     private var chapterActions: some View {
-        VStack(spacing: 8) {
-            if let entry { readingActions(entry) }
-            HStack {
-                Text(selecting ? "\(selected.count) selected" : "\(store.chapterCount(entryID: entryID)) chapters").font(.mdHeadline)
-                Spacer()
-                if store.isRefreshing { ProgressView() }
-            }
-            if selecting {
-                HStack {
-                    Button(selected.count == slots.count ? "Deselect all" : "Select all") {
-                        selected = selected.count == slots.count ? [] : Set(slots.map(\.id))
-                    }
-                    Spacer()
-                    Menu {
-                        Button("Mark read", systemImage: "checkmark") { store.setRead(entryID: entryID, slotIDs: selected, read: true) }
-                        Button("Mark unread", systemImage: "circle") { store.setRead(entryID: entryID, slotIDs: selected, read: false) }
-                        Button("Rename & renumber…", systemImage: "textformat.123") {
-                            batchEditing = MCBatchSelection(slotIDs: slots.map(\.id).filter { selected.contains($0) })
-                        }
-                        Button("Remove chapters", systemImage: "trash", role: .destructive) { confirmRemoveChapters = true }
-                    } label: { Label("Actions", systemImage: "ellipsis.circle") }.disabled(selected.isEmpty)
-                }.font(.mdSubheadline)
-            }
-        }.padding(.horizontal).padding(.vertical, 8).background(Color(uiColor: .systemBackground))
-    }
-
-    /// The header names a single creator: the main artist, or the main author when no artist is known.
-    private func mainCreator(_ entry: MCPersonalEntry) -> String {
-        let details = store.library.listing(entry.primaryListingID)?.details
-        func firstName(_ override: String?, _ names: [String]?) -> String? {
-            let candidates = override.map { $0.split(separator: ",").map(String.init) } ?? names ?? []
-            return candidates.lazy.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
-        }
-        return firstName(entry.artistOverride, details?.artists) ?? firstName(entry.authorOverride, details?.authors) ?? ""
-    }
-
-    private func header(_ entry: MCPersonalEntry) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 16) {
-                Button { showCover = true } label: {
-                    MCEntryCover(entry: entry).frame(width: headerCoverWidth, height: headerCoverWidth * 1.5)
-                        .clipShape(RoundedRectangle(cornerRadius: 0))
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("View cover fullscreen")
-                VStack(alignment: .leading, spacing: 8) {
-                    let title = store.library.title(entry)
-                    // The full title always shows, wrapping over as many lines as it needs.
-                    Text(title)
-                        .font(.mdTitle3.bold())
-                        .fixedSize(horizontal: false, vertical: true)
-                        .contentShape(Rectangle())
-                        .gesture(copyOrSearchGesture(for: title))
-                    let artist = mainCreator(entry)
-                    if !artist.isEmpty {
-                        Text(artist)
-                            .font(.mdSubheadline)
-                            .foregroundStyle(.secondary)
-                            .contentShape(Rectangle())
-                            .gesture(copyOrSearchGesture(for: artist))
-                    }
-                    Text(([publishingStatus(entry)].compactMap { $0 } + ["\(entry.links.count) sources"]).joined(separator: " · ")).font(.mdCaption).foregroundStyle(.secondary)
-                    if let sourceName = mainSourceName(entry) {
-                        Label("Main source: \(sourceName)", systemImage: "globe")
-                            .font(.mdCaption)
-                            .foregroundStyle(.secondary)
-                    }
-                    coverActions(entry)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !store.library.description(entry).isEmpty {
-                MCExpandableText(text: store.library.description(entry))
-                    .font(.mdSubheadline).foregroundStyle(.secondary)
-            }
-            let tags = entryTags(entry)
-            if !tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(tags, id: \.self) { tag in
-                            Text(tag)
-                                .font(.mdSubheadline)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Color(uiColor: .secondarySystemFill), in: Rectangle())
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func readingActions(_ entry: MCPersonalEntry) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                Task {
-                    guard let slotID = await store.resumeSlot(entryID: entryID),
-                          let slot = store.library.flattenedChapters(entryID: entryID).first(where: { $0.slot.id == slotID })?.slot else { return }
-                    open(slot)
-                }
-            } label: {
-                Label(entry.lastReadAt != nil || store.unreadCount(entryID: entryID) < store.chapterCount(entryID: entryID) ? "Resume" : "Read",
-                    systemImage: "book.pages").font(.mdSubheadline.weight(.semibold))
-                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(.white)
-                    .frame(height: 44).padding(.horizontal, 12)
-                    .background(Color.accentColor, in: Rectangle())
-            }
-            .buttonStyle(.plain)
-            .opacity(store.chapterCount(entryID: entryID) == 0 ? 0.5 : 1)
-            .disabled(store.chapterCount(entryID: entryID) == 0)
-            Spacer(minLength: 0)
-            HStack(spacing: 0) {
-                Button { selecting.toggle(); selected.removeAll() } label: {
-                    entryActionIcon(selecting ? "checkmark.circle.fill" : "checkmark.circle", selected: selecting)
-                }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
-                Button { showBookmarks = true } label: { entryActionIcon("bookmark") }
-                    .accessibilityLabel("View bookmarks")
-                Button { chapterGridOverride.wrappedValue = !grid } label: {
-                    entryActionIcon(grid ? "list.bullet" : "square.grid.2x2")
-                }.accessibilityLabel(grid ? "List view" : "Grid view")
+            MDSectionHead(title: "Chapters", count: "\(store.chapterCount(entryID: entryID))") {
+                if store.isRefreshing { MDSpinner(size: 14) }
+                Button { chapterGridOverride.wrappedValue = !grid } label: { MDIconBox(systemImage: grid ? "list.bullet" : "square.grid.2x2") }
+                    .accessibilityLabel(grid ? "Show chapters as a list" : "Show chapter thumbnails")
                 Menu {
                     Picker("Sort chapters", selection: Binding(
                         get: { self.entry?.chapterSort ?? .custom },
@@ -530,11 +445,172 @@ struct MCEntryView: View {
                             store.perform { try $0.library.editEntry(entryID) { $0.descendingDisplay.toggle() } }
                         }
                     }
-                } label: { entryActionIcon("arrow.up.arrow.down") }
+                } label: { MDIconBox(systemImage: "arrow.up.arrow.down") }
                     .accessibilityLabel("Sort chapters")
+                Button { selecting.toggle(); selected.removeAll() } label: {
+                    MDIconBox(systemImage: "checkmark.square", active: selecting)
+                }.accessibilityLabel(selecting ? "Done selecting" : "Select chapters")
             }
             .buttonStyle(.plain)
-            .background(Color(uiColor: .secondarySystemBackground), in: Rectangle())
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MCEntryChapterFilter.allCases, id: \.self) { filter in
+                        Button { chapterFilter = filter } label: {
+                            MDChip(title: filter.title, count: count(for: filter), active: chapterFilter == filter, large: false)
+                        }
+                    }
+                    Button { showBookmarks = true } label: { MDChip(title: "Page bookmarks", active: false, systemImage: "bookmark", large: false, dashed: true) }
+                }.buttonStyle(.plain)
+            }
+            .scrollClipDisabled()
+            if selecting {
+                HStack {
+                    Text("\(selected.count) selected").font(.mdMono(12, weight: .medium)).foregroundStyle(Color.mdText3)
+                    Spacer()
+                    Button(selected.count == slots.count ? "Deselect all" : "Select all") {
+                        selected = selected.count == slots.count ? [] : Set(slots.map(\.id))
+                    }
+                    .buttonStyle(MDGhostButtonStyle())
+                    Menu {
+                        Button("Mark read", systemImage: "checkmark") { store.setRead(entryID: entryID, slotIDs: selected, read: true) }
+                        Button("Mark unread", systemImage: "circle") { store.setRead(entryID: entryID, slotIDs: selected, read: false) }
+                        Button("Download", systemImage: "arrow.down.to.line") { download(slotIDs: selected) }
+                        Button("Rename & renumber…", systemImage: "textformat.123") {
+                            batchEditing = MCBatchSelection(slotIDs: slots.map(\.id).filter { selected.contains($0) })
+                        }
+                        Button("Remove chapters", systemImage: "trash", role: .destructive) { confirmRemoveChapters = true }
+                    } label: {
+                        Text("Actions").font(.mdSystem(size: 13, weight: .semibold)).foregroundStyle(Color(uiColor: MDColor.onAccent))
+                            .padding(.horizontal, 12).frame(height: 36).background(Color.mdAccent)
+                    }
+                    .disabled(selected.isEmpty)
+                    .opacity(selected.isEmpty ? 0.5 : 1)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func count(for filter: MCEntryChapterFilter) -> Int? {
+        switch filter {
+            case .all: return nil
+            case .unread: return store.unreadCount(entryID: entryID)
+            case .bookmarked: return bookmarkedSlotIDs.intersection(Set(slots.map(\.id))).count
+        }
+    }
+
+    private func download(slotIDs: Set<UUID>) {
+        var byManga: [String: (manga: AidokuRunner.Manga, chapters: [AidokuRunner.Chapter])] = [:]
+        for slot in slots where slotIDs.contains(slot.id) {
+            guard let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID),
+                  let physical = store.physical(chapter.identity) else { continue }
+            let key = physical.manga.sourceKey + "\u{0}" + physical.manga.key
+            byManga[key, default: (physical.manga, [])].chapters.append(physical.chapter)
+        }
+        for group in byManga.values {
+            Task { await DownloadManager.shared.download(manga: group.manga, chapters: group.chapters) }
+        }
+    }
+
+    /// The header names a single creator: the main artist, or the main author when no artist is known.
+    private func mainCreator(_ entry: MCPersonalEntry) -> String {
+        let details = store.library.listing(entry.primaryListingID)?.details
+        func firstName(_ override: String?, _ names: [String]?) -> String? {
+            let candidates = override.map { $0.split(separator: ",").map(String.init) } ?? names ?? []
+            return candidates.lazy.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+        }
+        return firstName(entry.artistOverride, details?.artists) ?? firstName(entry.authorOverride, details?.authors) ?? ""
+    }
+
+    private func header(_ entry: MCPersonalEntry, next: MCChapterSlot?) -> some View {
+        let title = store.library.title(entry)
+        let total = store.chapterCount(entryID: entryID)
+        let unread = store.unreadCount(entryID: entryID)
+        let percent = total == 0 ? 0 : Int((Double(total - unread) / Double(total) * 100).rounded())
+        return VStack(alignment: .leading, spacing: 0) {
+            MDEntryHero(title: title, onCover: { showCover = true }, onTitleHold: { search(title) }) {
+                MCEntryCover(entry: entry)
+            } byline: {
+                let artist = mainCreator(entry)
+                HStack(spacing: 4) {
+                    if !artist.isEmpty {
+                        Text(artist).onTapGesture { copy(artist) }.onLongPressGesture { search(artist) }
+                    }
+                    if let parentID = entry.parentEntryID, let parent = store.library.entry(parentID) {
+                        if !artist.isEmpty { Text("·") }
+                        NavigationLink(destination: MCEntryView(entryID: parentID)) {
+                            Text("in \(store.library.title(parent))").foregroundStyle(Color.mdAccent)
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+
+            readingActions(entry, next: next).padding(.horizontal, 16).padding(.top, 20)
+
+            MDFactGrid(facts: [
+                MDFact(label: "Chapters", value: "\(total)"),
+                MDFact(label: "Unread", value: "\(unread)", valueColor: unread > 0 ? .mdAccent : .mdText),
+                MDFact(label: "Read", value: "\(percent)%", progress: Double(percent) / 100),
+                MDFact(label: "Source", value: mainSourceName(entry) ?? "—",
+                       note: entry.links.count > 1 ? "+\(entry.links.count - 1) more" : nil, action: { showSources = true }),
+                MDFact(label: "Status", value: publishingStatus(entry) ?? "Unknown", dot: publishingDot(entry)),
+                MDFact(label: "Reading", value: entry.status.title,
+                       note: entry.lastReadAt.map { "read " + $0.formatted(.relative(presentation: .named)) } ?? "never read",
+                       action: { categoryEntry = MCID(id: entryID) })
+            ])
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+
+            let description = store.library.description(entry)
+            let tags = entryTags(entry)
+            if !description.isEmpty || !tags.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !description.isEmpty { MDDescription(text: description) }
+                    if !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) { ForEach(tags, id: \.self) { MDTag(text: $0) } }
+                        }
+                        .scrollClipDisabled()
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+            }
+        }
+    }
+
+    private func publishingDot(_ entry: MCPersonalEntry) -> Color? {
+        let listingID = entry.primaryListingID ?? entry.links.first?.listingID
+        switch store.storedManga(listingID: listingID)?.status {
+            case .ongoing: return Color(uiColor: MDColor.mint)
+            case .completed: return Color(red: 0.5, green: 0.65, blue: 1)
+            case .cancelled, .hiatus: return Color(uiColor: MDColor.amber)
+            case .unknown, nil: return nil
+        }
+    }
+
+    private func readingActions(_ entry: MCPersonalEntry, next: MCChapterSlot?) -> some View {
+        let total = store.chapterCount(entryID: entryID)
+        let unread = store.unreadCount(entryID: entryID)
+        let started = entry.lastReadAt != nil || unread < total
+        let title = total == 0 ? "No chapters yet" : next == nil ? "All caught up" : started ? "Resume" : "Start reading"
+        let subtitle = next.flatMap { $0.preferred }.map { store.library.chapterDisplayTitle($0) } ?? (total > 0 ? "\(total) chapters read" : nil)
+        return HStack(spacing: 8) {
+            MDResumeButton(title: title, subtitle: subtitle, systemImage: next == nil && total > 0 ? "checkmark" : "play.fill", disabled: total == 0) {
+                Task {
+                    guard let slotID = await store.resumeSlot(entryID: entryID),
+                          let slot = store.library.flattenedChapters(entryID: entryID).first(where: { $0.slot.id == slotID })?.slot else { return }
+                    open(slot)
+                }
+            }
+            MDSquareAction(systemImage: "bookmark.fill", label: "Remove from library; hold to edit status and categories", active: true,
+                           action: { confirmRemove = true }, onHold: { categoryEntry = MCID(id: entryID) })
+            MDSquareAction(systemImage: "arrow.down.to.line", label: "Download unread chapters") {
+                download(slotIDs: Set(slots.filter { !store.library.isRead($0) }.map(\.id)))
+            }
+            MDSquareAction(systemImage: "arrow.clockwise", label: "Refresh entry", spinning: store.isRefreshing) {
+                Task { await store.refresh(entryID: entryID) }
+            }
         }
     }
 
@@ -619,10 +695,10 @@ struct MCEntryView: View {
         return store.sourceName(listing.identity.connectionID)
     }
 
-    @ViewBuilder private func contentRow(_ item: MCEntryContent, grid: Bool) -> some View {
+    @ViewBuilder private func contentRow(_ item: MCEntryContent, grid: Bool, current: UUID? = nil) -> some View {
         switch item {
         case .chapter(let id):
-            if let slot = cachedRows.slots[id] { chapterRow(slot, grid: grid) }
+            if let slot = cachedRows.slots[id] { chapterRow(slot, grid: grid, current: slot.id == current) }
         case .title(let id):
             if let child = store.library.entry(id) {
                 NavigationLink(destination: MCEntryView(entryID: id)) {
@@ -669,12 +745,12 @@ struct MCEntryView: View {
         }
     }
 
-    private func chapterRow(_ slot: MCChapterSlot, grid: Bool) -> some View {
+    private func chapterRow(_ slot: MCChapterSlot, grid: Bool, current: Bool = false) -> some View {
         Button {
             if selecting { if !selected.insert(slot.id).inserted { selected.remove(slot.id) } }
             else { open(slot) }
         } label: {
-            chapterLabel(slot, grid: grid).frame(maxWidth: .infinity, alignment: .leading).clipped()
+            chapterLabel(slot, grid: grid, current: current).frame(maxWidth: .infinity, alignment: .leading).clipped()
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 0))
@@ -723,15 +799,16 @@ struct MCEntryView: View {
                 }
                 Button("Remove from entry", role: .destructive) { store.perform { try $0.library.removeSlots(entryID: entryID, slotIDs: [slot.id]) } }
         } preview: {
-            chapterLabel(slot, grid: grid).padding(12).frame(width: 220).background(Color(uiColor: .systemBackground))
+            chapterLabel(slot, grid: grid).padding(12).frame(width: 260).background(Color.mdBg)
         }
     }
 
-    @ViewBuilder private func chapterLabel(_ slot: MCChapterSlot, grid: Bool) -> some View {
+    @ViewBuilder private func chapterLabel(_ slot: MCChapterSlot, grid: Bool, current: Bool = false) -> some View {
         if grid {
             VStack(alignment: .leading, spacing: 6) {
                 MCChapterThumbnail(variant: slot.preferred).aspectRatio(2/3, contentMode: .fit)
                     .id("\(slot.preferredID.uuidString)-\(thumbnailRevision)")
+                    .opacity(store.library.isRead(slot) && !selecting ? 0.4 : 1)
                     .overlay(alignment: .bottomLeading) {
                         if gridStyle == .compact, let variant = slot.preferred {
                             Text(store.library.chapterDisplayTitle(variant)).font(.mdCaption.weight(.semibold)).lineLimit(1)
@@ -745,7 +822,12 @@ struct MCEntryView: View {
                     .overlay(alignment: .bottomLeading) {
                         if store.library.isRead(slot) && !selecting { readMark.padding(6) }
                     }
-                    .overlay(alignment: .topTrailing) { if selecting { selectionMark(slot).padding(6) } }
+                    .overlay(alignment: .bottomTrailing) { if selecting { MDCheck(on: selected.contains(slot.id)).padding(6) } }
+                    .overlay {
+                        if current || selected.contains(slot.id) {
+                            Rectangle().strokeBorder(selected.contains(slot.id) ? Color.mdText : Color.mdAccent, lineWidth: 2).padding(-4)
+                        }
+                    }
                     .overlay(alignment: .topLeading) {
                         if bookmarkedSlotIDs.contains(slot.id) { bookmarkMark.padding(6) }
                     }
@@ -756,22 +838,33 @@ struct MCEntryView: View {
                     + (bookmarkedSlotIDs.contains(slot.id) ? ", Bookmarked" : ""))
                 .accessibilityAddTraits(selected.contains(slot.id) ? .isSelected : [])
         } else {
-            HStack(spacing: 12) {
-                if let entry {
-                    MCChapterListArtwork(entry: entry, variant: slot.preferred)
-                        .frame(width: 48, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 0))
-                        .id("\(slot.preferredID.uuidString)-\(thumbnailRevision)")
+            let read = store.library.isRead(slot)
+            let variant = slot.preferred
+            let chapter = variant.flatMap { store.library.chapter($0.chapterID) }
+            let label = variant.map { store.library.chapterDisplayTitle($0) } ?? "Chapter"
+            let subtitle: String = {
+                guard let variant, let chapter else { return "" }
+                return variant.edits.title == nil && chapter.record.title != label ? chapter.record.title : ""
+            }()
+            let date = chapter.flatMap { store.chapterReleaseDate($0.id) }
+            let isNew = !read && (date.map { $0 > Date.now.addingTimeInterval(-7 * 86_400) } ?? false)
+            let meta = ([read ? "Read" : nil, subtitle.isEmpty ? nil : subtitle,
+                         chapter.map { store.sourceName($0.identity.listing.connectionID) },
+                         date?.formatted(.dateTime.day().month(.abbreviated))].compactMap { $0 }).joined(separator: " · ")
+            MDChapterRow(label: label, meta: meta, read: read && !selecting, current: current, selected: selected.contains(slot.id)) {
+                if isNew { MDRowBadge(text: "New") }
+                if variant?.pageSelection?.ranges.isEmpty == false { MDRowBadge(text: "Part", glass: true) }
+            } trailing: {
+                if slot.variants.count > 1 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.stack.3d.up").font(.system(size: 10, weight: .bold))
+                        Text("\(slot.variants.count)").font(.mdMono(10, weight: .bold))
+                    }
+                    .padding(.horizontal, 5).frame(height: 18).background(Color.white.opacity(0.12))
                 }
-                chapterText(slot, compact: false)
-                Spacer(minLength: 0)
-                if bookmarkedSlotIDs.contains(slot.id) {
-                    Image(systemName: "bookmark.fill").font(.mdSubheadline).foregroundStyle(Color.accentColor)
-                        .accessibilityLabel("Bookmarked chapter")
-                }
-                if selecting { selectionMark(slot) }
-                else if store.library.isRead(slot) { Image(systemName: "checkmark.circle.fill").font(.mdCaption).foregroundStyle(.secondary) }
-            }.opacity(store.library.isRead(slot) && !selecting ? 0.65 : 1)
+                if bookmarkedSlotIDs.contains(slot.id) { MDFlag(systemImage: "bookmark.fill", accent: true) }
+                if selecting { MDCheck(on: selected.contains(slot.id)) }
+            }
         }
     }
 
@@ -781,29 +874,32 @@ struct MCEntryView: View {
             .background(Circle().fill(Color.accentColor)).accessibilityLabel(selected.contains(slot.id) ? "Selected" : "Not selected")
     }
 
+    /// `.badge--glass` "✓ Read" in the bottom-left corner of a thumbnail.
     private var readMark: some View {
-        Image(systemName: "checkmark")
-            .font(.mdSystem(size: 9, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 18, height: 18)
-            .background(.black.opacity(0.58), in: Circle())
-            .overlay(Circle().stroke(.white.opacity(0.28), lineWidth: 0.5))
-            .accessibilityLabel("Read")
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy))
+            Text("Read").font(.mdMono(10, weight: .bold)).textCase(.uppercase)
+        }
+        .foregroundStyle(Color.mdText)
+        .padding(.horizontal, 5)
+        .frame(height: 18)
+        .background(.black.opacity(0.6))
+        .accessibilityLabel("Read")
     }
 
     private var bookmarkMark: some View {
         Image(systemName: "bookmark.fill")
-            .font(.mdSystem(size: 12, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 26, height: 30)
-            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 0))
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Color.mdAccent)
+            .frame(width: 24, height: 24)
+            .background(.black.opacity(0.6))
             .accessibilityLabel("Bookmarked chapter")
     }
 
     private func chapterText(_ slot: MCChapterSlot, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let variant = slot.preferred, let chapter = store.library.chapter(variant.chapterID) {
-                Text(store.library.chapterDisplayTitle(variant)).font(compact ? .caption.weight(.semibold) : .subheadline.weight(.medium)).lineLimit(1)
+                Text(store.library.chapterDisplayTitle(variant)).font(.mdSystem(size: compact ? 13 : 15, weight: .semibold)).foregroundStyle(Color.mdText).lineLimit(1)
                 let subtitle = variant.edits.title == nil && chapter.record.title != store.library.chapterDisplayTitle(variant) ? chapter.record.title : ""
                 if compact || !subtitle.isEmpty {
                     Text(subtitle.isEmpty ? " " : subtitle).font(.mdCaption).foregroundStyle(.secondary).lineLimit(1)
@@ -958,4 +1054,16 @@ final class MCEntryRowsCache {
 struct MCBatchSelection: Identifiable {
     let id = UUID()
     let slotIDs: [UUID]
+}
+
+enum MCEntryChapterFilter: CaseIterable {
+    case all, unread, bookmarked
+
+    var title: String {
+        switch self {
+            case .all: "All"
+            case .unread: "Unread"
+            case .bookmarked: "Bookmarked"
+        }
+    }
 }

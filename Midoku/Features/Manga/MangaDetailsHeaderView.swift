@@ -42,6 +42,11 @@ struct MangaDetailsHeaderView: View {
     var onCreatorPressed: ((String) -> Void)?
     var onTrackerButtonPressed: (() -> Void)?
     var onReadButtonPressed: (() -> Void)?
+    var readCount = 0
+    var downloadedCount = 0
+    var refreshing = false
+    var onRefresh: (() -> Void)?
+    var onDownloadUnread: (() -> Void)?
 
     @EnvironmentObject private var path: NavigationCoordinator
 
@@ -123,8 +128,18 @@ struct MangaDetailsHeaderView: View {
         onTitlePressed: (() -> Void)? = nil,
         onCreatorPressed: ((String) -> Void)? = nil,
         onTrackerButtonPressed: (() -> Void)? = nil,
-        onReadButtonPressed: (() -> Void)? = nil
+        onReadButtonPressed: (() -> Void)? = nil,
+        readCount: Int = 0,
+        downloadedCount: Int = 0,
+        refreshing: Bool = false,
+        onRefresh: (() -> Void)? = nil,
+        onDownloadUnread: (() -> Void)? = nil
     ) {
+        self.readCount = readCount
+        self.downloadedCount = downloadedCount
+        self.refreshing = refreshing
+        self.onRefresh = onRefresh
+        self.onDownloadUnread = onDownloadUnread
         self._source = source
         self._manga = manga
         self._chapters = chapters
@@ -155,139 +170,104 @@ struct MangaDetailsHeaderView: View {
         ))
     }
 
+    private var total: Int { (manga.chapters ?? chapters).count }
+    private var unread: Int { max(0, total - readCount) }
+    private var readPercent: Int { total == 0 ? 0 : Int((Double(readCount) / Double(total) * 100).rounded()) }
+
+    private var statusDot: Color {
+        switch manga.status {
+            case .completed: Color(red: 0.5, green: 0.65, blue: 1)
+            case .hiatus, .cancelled: Color(uiColor: MDColor.amber)
+            default: Color(uiColor: MDColor.mint)
+        }
+    }
+
+    /// The Resume button's two lines.
+    private var readButtonLines: (String, String?) {
+        if allChaptersLocked { return (NSLocalizedString("ALL_CHAPTERS_LOCKED"), nil) }
+        if allChaptersRead { return ("All caught up", "\(total) chapters read") }
+        if source == nil { return (NSLocalizedString("UNAVAILABLE"), nil) }
+        guard let chapter = nextChapter else { return (initialDataLoaded ? NSLocalizedString("NO_CHAPTERS_AVAILABLE") : NSLocalizedString("LOADING_ELLIPSIS"), nil) }
+        return (readingInProgress ? "Resume" : "Start reading", chapter.formattedTitle(forceMode: chapterTitleDisplayMode))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-
-                    Button {
-                        coverPressed = true
-                    } label: {
-                        // 2:3 aspect ratio
-                        MangaCoverView(
-                            source: source,
-                            coverImage: manga.cover ?? "",
-                            width: Self.coverWidth,
-                            height: Self.coverWidth * 3/2
-                        )
-                        .id(manga.cover ?? "")
-                    }
-                    .buttonStyle(DarkOverlayButtonStyle())
-                    .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
+            MDEntryHero(
+                title: manga.title,
+                onCover: { coverPressed = true },
+                onTitleHold: { onTitlePressed?() }
+            ) {
+                MangaCoverView(source: source, coverImage: manga.cover ?? "", width: 156, height: 234)
+                    .id(manga.cover ?? "")
                     .matchedTransitionSourcePlease(id: manga.identifier, in: transitionNamespace)
+            } byline: {
+                if let creators = creatorNames, !creators.isEmpty {
+                    let value = creators.joined(separator: ", ")
+                    Text(value)
+                        .lineLimit(2)
+                        .onTapGesture { copy(value) }
+                        .onLongPressGesture { onCreatorPressed?(value) }
                 }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    Spacer(minLength: 0)
-
-                    Button {
-                        if longHeldTitle {
-                            longHeldTitle = false
-                        } else {
-                            copy(manga.title)
-                        }
-                    } label: {
-                        // The full title shows; the header grows to fit it.
-                        Text(manga.title)
-                            .font(.mdSystem(.title2).weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .contentTransitionDisabledPlease()
-                            .multilineTextAlignment(.leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.bottom, 4)
-                    .simultaneousGesture(LongPressGesture().onEnded { _ in
-                        longHeldTitle = true
-                        onTitlePressed?()
-                    })
-
-                    if let creators = creatorNames, !creators.isEmpty {
-                        let value = creators.joined(separator: ", ")
-                        let label = Text(value)
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
-                            .font(.mdCallout)
-                            .padding(.bottom, 6)
-                            .textSelection(.enabled)
-                            .transition(.opacity)
-
-                        Button {
-                            if longHeldCreator {
-                                longHeldCreator = false
-                            } else {
-                                copy(value)
-                            }
-                        } label: {
-                            label
-                        }
-                        .buttonStyle(.borderless)
-                        .simultaneousGesture(LongPressGesture().onEnded { _ in
-                            longHeldCreator = true
-                            onCreatorPressed?(value)
-                        })
-                    }
-
-                    labelsView
-
-                    buttonsView
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(minHeight: 174)
-            .padding(.bottom, 14)
-            .padding(.horizontal, 20)
-
-            if let description = manga.description, !description.isEmpty {
-                ExpandableTextView(text: description, expanded: $descriptionExpanded)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
-                    .padding(.horizontal, 20)
-                    .foregroundStyle(.secondary)
             }
 
-            tagsView
+            HStack(spacing: 8) {
+                let lines = readButtonLines
+                MDResumeButton(
+                    title: lines.0,
+                    subtitle: lines.1,
+                    systemImage: allChaptersRead ? "checkmark" : "play.fill",
+                    disabled: readButtonDisabled || nextChapter == nil
+                ) { onReadButtonPressed?() }
+                MDSquareAction(systemImage: saveSymbol, label: saveTitle, active: isSaved, action: savePressed, onHold: showLibraryEditor)
+                    .allowsHitTesting(isSaved || source != nil)
+                if source != nil, !manga.isLocal() {
+                    MDSquareAction(systemImage: "arrow.down.to.line", label: "Download unread chapters") { onDownloadUnread?() }
+                }
+                MDSquareAction(systemImage: "arrow.clockwise", label: "Refresh title", spinning: refreshing) { onRefresh?() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
 
-            HStack(spacing: 10) {
+            MDFactGrid(facts: [
+                MDFact(label: "Chapters", value: initialDataLoaded ? "\(total)" : "…"),
+                MDFact(label: "Unread", value: initialDataLoaded ? "\(unread)" : "…", valueColor: unread > 0 ? .mdAccent : .mdText),
+                MDFact(label: "Read", value: "\(readPercent)%", progress: Double(readPercent) / 100),
+                MDFact(label: "Source", value: source?.name ?? "—", note: hasAvailableTrackers ? (isTracking ? "tracking" : "track…") : nil,
+                       action: hasAvailableTrackers ? { onTrackerButtonPressed?() } : nil),
+                MDFact(label: "Status", value: manga.status == .unknown ? "Unknown" : manga.status.title, dot: manga.status == .unknown ? nil : statusDot),
+                MDFact(label: "Library", value: isSaved ? saveTitle : "Not saved", note: isSaved ? "hold to edit" : "tap to save",
+                       action: { if isSaved { showLibraryEditor() } else { savePressed() } })
+            ])
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+
+            if (manga.description?.isEmpty == false) || !(manga.tags ?? []).isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let description = manga.description, !description.isEmpty {
+                        MDDescription(text: description)
+                    }
+                    tagsView
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+            }
+
+            if let url = manga.url, url.scheme == "http" || url.scheme == "https" {
                 Button {
-                    onReadButtonPressed?()
+                    path.present(SFSafariViewController(url: url))
                 } label: {
-                    Text(readButtonText)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
+                    Label("Open on the source's website", systemImage: "globe")
+                        .font(.mdSystem(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.mdText2)
                 }
                 .buttonStyle(.plain)
-                .font(.mdSystem(size: 14, weight: .medium))
-                .padding(11)
-                .foregroundStyle(.white)
-                .background(Color.accentColor)
-                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
-                .allowsHitTesting(!readButtonDisabled)
-
-                Button {
-                    savePressed()
-                } label: {
-                    Label(saveTitle, systemImage: saveSymbol)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                    showLibraryEditor()
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .simultaneousGesture(LongPressGesture().onEnded { finished in
+                    if finished { UIPasteboard.general.string = url.absoluteString; longHeldSafari = true }
                 })
-                .font(.mdSystem(size: 14, weight: .medium))
-                .padding(10)
-                .foregroundStyle(Color.accentColor)
-                .background(Color(UIColor.secondarySystemFill))
-                .overlay(RoundedRectangle(cornerRadius: 0, style: .continuous).stroke(Color.accentColor.opacity(0.28)))
-                .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
-                .allowsHitTesting(isSaved || source != nil)
             }
-            .padding(.bottom, 20)
-            .padding(.horizontal, 20)
 
             // hide the chapter list header if there are no chapters and the other downloads header is shown
             if !(manga.chapters ?? chapters).isEmpty || !hasOtherDownloads {
@@ -300,22 +280,39 @@ struct MangaDetailsHeaderView: View {
                     langFilter: $langFilter,
                     scanlatorFilter: $scanlatorFilter,
                     displayMode: $chapterTitleDisplayMode,
-                    mangaId: manga.identifier
+                    mangaId: manga.identifier,
+                    unreadCount: unread,
+                    downloadedCount: downloadedCount
                 )
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 16)
+                .padding(.top, 28)
+                .padding(.bottom, 4)
             }
-
-            // separator
-            if !chapters.isEmpty {
-                ListDivider()
+        }
+        .background(alignment: .top) {
+            MDEntryBackdrop {
+                MangaCoverView(source: source, coverImage: manga.cover ?? "", width: 320, height: 470)
             }
+            .padding(.top, -200)
+        }
+        .alert(NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM"), isPresented: $showLibraryRemoveConfirm) {
+            Button(NSLocalizedString("CANCEL"), role: .cancel) {}
+            Button(NSLocalizedString("REMOVE"), role: .destructive) {
+                guard bookmarked else { return }
+                Task { await toggleBookmarked() }
+            }
+        } message: {
+            Text(NSLocalizedString("REMOVE_FROM_LIBRARY_CONFIRM_TEXT"))
+        }
+        .alert(NSLocalizedString("LINK_COPIED"), isPresented: $longHeldSafari) {
+            Button(NSLocalizedString("OK"), role: .cancel) {}
+        } message: {
+            Text(NSLocalizedString("LINK_COPIED_TEXT"))
         }
         .animation(.default, value: animationTrigger)
         .animation(.default, value: descriptionExpanded)
         .foregroundStyle(.primary)
         .textCase(.none)
-        .padding(.top, 10)
         .background { MCEntryCategoryPresenter(entry: $categoryEntry, includeStatus: true).frame(width: 0, height: 0) }
         .onChange(of: manga) { _ in
             animationTrigger.toggle()
@@ -473,29 +470,26 @@ struct MangaDetailsHeaderView: View {
     var tagsView: some View {
         if let tags = manga.tags, !tags.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(manga.tags ?? [], id: \.self) { tag in
-                        let label = TagView(text: tag)
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.self) { tag in
                         if let source, let filter = source.matchingGenreFilter(for: tag) {
                             Button {
                                 let viewController = MangaListViewController(source: source, title: tag)
                                 viewController.getEntries = { page in
-                                    try await source.getSearchMangaList(query: nil, page: page, filters: [
-                                        filter
-                                    ])
+                                    try await source.getSearchMangaList(query: nil, page: page, filters: [filter])
                                 }
                                 path.push(viewController)
                             } label: {
-                                label
+                                MDTag(text: tag)
                             }
+                            .buttonStyle(.plain)
                         } else {
-                            label
+                            MDTag(text: tag)
                         }
                     }
                 }
-                .padding(.horizontal, 20)
             }
-            .padding(.bottom, 16)
+            .scrollClipDisabled()
         }
     }
 
