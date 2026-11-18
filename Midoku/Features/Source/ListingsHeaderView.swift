@@ -19,17 +19,9 @@ struct ListingsHeaderView: View {
     var body: some View {
         Group {
             if let error {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.mdHeadline)
-                        .foregroundStyle(.secondary)
-
-                    Group {
-                        let text = error.midokuDescription()
-                        Text(text)
-                    }
-                    .foregroundStyle(.secondary)
-                }
+                MDEmpty(systemImage: "exclamationmark.triangle", title: "Couldn’t load listings",
+                        detail: Text(error.midokuDescription()), tone: .error, compact: true)
+                    .padding(.horizontal, 16)
             } else if !listings.isEmpty || listingsLoaded {
                 headerScrollView
                     .transition(.opacity)
@@ -67,7 +59,7 @@ struct ListingsHeaderView: View {
 
     var headerScrollView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 let options = if source.features.providesHome {
                     [NSLocalizedString("HOME")] + listings.map { $0.name }
                 } else {
@@ -79,29 +71,9 @@ struct ListingsHeaderView: View {
                     Button {
                         selectedListing = offset
                     } label: {
-                        let label = Text(option)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 8)
-                            .font(.mdFootnote.weight(.medium))
-                            .foregroundStyle(active ? Color.white : Color.primary)
-
-                        if #available(iOS 26.0, *) {
-                            label
-                                .glassEffect(active ? .regular.tint(.accentColor) : .regular)
-                        } else {
-                            label
-                                .background(
-                                    RoundedRectangle(cornerRadius: 0)
-                                        .fill(
-                                            Color(
-                                                uiColor: active
-                                                    ? .tintColor
-                                                    : .secondarySystemFill
-                                            )
-                                        )
-                                )
-                        }
+                        MDChip(title: option, active: active, large: false)
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal)
@@ -112,25 +84,9 @@ struct ListingsHeaderView: View {
 
     static var placeholder: some View {
         // skeleton loading
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             ForEach(0..<3) { _ in
-                Text("Loading")
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .font(.mdFootnote.weight(.medium))
-                    .background(
-                        RoundedRectangle(cornerRadius: 0)
-                            .foregroundColor(.init(uiColor: .secondarySystemFill))
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 0)
-                            .stroke(
-                                Color(uiColor: .tertiarySystemFill),
-                                style: .init(lineWidth: 1)
-                            )
-                    }
-                    .redacted(reason: .placeholder)
-                    .shimmering()
+                MDSkeleton().frame(width: 84, height: 34)
             }
             Spacer()
         }
