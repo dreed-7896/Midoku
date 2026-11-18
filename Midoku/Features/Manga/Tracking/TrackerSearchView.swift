@@ -89,12 +89,14 @@ struct TrackerSearchView: View {
                         }
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     DoneButton {
                         track()
                     }
                     .disabled(selectedItem == nil)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .sheet(isPresented: $showSearchOptions) {
                 let view = TrackerSearchOptionsView(showNsfw: $includeNsfw)
@@ -253,6 +255,7 @@ private struct TrackerSearchOptionsView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

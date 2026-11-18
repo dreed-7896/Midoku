@@ -104,6 +104,7 @@ struct DictionaryListView: View {
                 }
                 .disabled(dictionaryManager.isImporting || dictionaryManager.isUpdating)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .overlay {
             if dictionaryManager.isImporting {
@@ -301,6 +302,7 @@ private struct DictionaryInfoView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .task(id: dictionary.info.path) {
                 let path = dictionary.info.path
@@ -401,6 +403,7 @@ private struct DictionaryRecommendedListView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .sheet(isPresented: .init(get: { safariUrl != nil }, set: { _ in })) {
                 SafariView(url: $safariUrl)

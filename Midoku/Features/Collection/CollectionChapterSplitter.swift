@@ -38,7 +38,9 @@ struct MCChapterSplitter: View {
                 .navigationTitle("Split chapter").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(loading || pages.isEmpty) }
+                    .sharedBackgroundVisibility(.hidden)
                 }
                 .confirmationDialog("Remove all splits?", isPresented: $confirmClear) {
                     Button("Rejoin chapter", role: .destructive) { starts = []; excluded = []; trailingExcluded = [] }

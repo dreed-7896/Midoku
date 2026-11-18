@@ -104,6 +104,7 @@ extension LocalFileImportView.ContentView {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
 
                 ToolbarItem(placement: .topBarTrailing) {
                     if fullyPresented {
@@ -125,6 +126,7 @@ extension LocalFileImportView.ContentView {
                         .disabled(!volumeChapterValid || volumeChapterEmpty)
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .navigationBarTitleDisplayMode(.inline)
             .alert(NSLocalizedString("IMPORT_FAIL"), isPresented: $showImportFailAlert) {
@@ -557,6 +559,7 @@ extension LocalFileImportView.ContentView {
                 }
                 .disabled(!nameValid || !volumeChapterValid || nameEmpty || volumeChapterEmpty)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .navigationTitle(NSLocalizedString("NEW_SERIES"))
         .navigationBarTitleDisplayMode(.inline)

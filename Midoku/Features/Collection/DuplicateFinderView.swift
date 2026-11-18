@@ -54,10 +54,12 @@ struct MCDuplicateFinderView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 if !ignored.isEmpty {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Show hidden") { ignoredData = Data() }
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
             }
         }

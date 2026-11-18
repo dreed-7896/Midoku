@@ -94,6 +94,7 @@ struct DownloadsView: View {
                     }
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.isLoading)
         .animation(.easeInOut(duration: 0.3), value: viewModel.downloadedManga.isEmpty)

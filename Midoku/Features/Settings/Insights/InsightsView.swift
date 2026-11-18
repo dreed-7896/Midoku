@@ -162,6 +162,7 @@ struct InsightsView: View {
                         Image(systemName: "chevron.left")
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
     }
 }

@@ -12,22 +12,18 @@ import SwiftUI
 struct MDEntryBackdrop<Cover: View>: View {
     @ViewBuilder var cover: Cover
 
+    /// The cover across the full screen width behind the hero, softly blurred and fading into the page.
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .topTrailing) {
+            ZStack(alignment: .top) {
                 Color.mdBg
-                cover
-                    .frame(width: 320, height: 320)
-                    .clipShape(Circle())
-                    .blur(radius: 90)
-                    .opacity(0.45)
-                    .offset(x: 90, y: -60)
                 cover
                     .frame(width: geometry.size.width, height: 470)
                     .clipped()
-                    .blur(radius: 60)
-                    .opacity(0.35)
-                LinearGradient(colors: [Color.mdBg.opacity(0), Color.mdBg], startPoint: UnitPoint(x: 0.5, y: 0.4), endPoint: .bottom)
+                    .blur(radius: 14)
+                    .opacity(0.6)
+                LinearGradient(colors: [Color.mdBg.opacity(0.15), Color.mdBg.opacity(0.55), Color.mdBg],
+                               startPoint: .top, endPoint: .bottom)
             }
             .frame(width: geometry.size.width, height: 470, alignment: .top)
             .clipped()

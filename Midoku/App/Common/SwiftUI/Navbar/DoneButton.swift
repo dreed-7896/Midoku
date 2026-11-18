@@ -11,16 +11,14 @@ struct DoneButton: View {
     let action: () -> Void
 
     var body: some View {
-        if #available(iOS 26.0, *) {
-            Button(role: .confirm) {
-                action()
-            }
-        } else {
-            Button {
-                action()
-            } label: {
-                Text(NSLocalizedString("DONE")).bold()
-            }
+        Button(action: action) {
+            Text(NSLocalizedString("DONE"))
+                .font(.mdSystem(size: 14, weight: .semibold))
+                .foregroundStyle(Color(uiColor: MDColor.onAccent))
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .background(Color.mdAccent)
         }
+        .buttonStyle(.plain)
     }
 }

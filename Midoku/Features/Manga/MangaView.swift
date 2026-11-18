@@ -172,7 +172,7 @@ struct MangaView: View {
             .scrollBackgroundHiddenPlease()
             .background(Color.mdBg)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .navigationBarBackButtonHidden(editMode == .active)
+            .navigationBarBackButtonHidden(true)
             .fullScreenCover(isPresented: $showingCoverView) {
                 MangaCoverPageView(
                     source: viewModel.source,
@@ -658,9 +658,21 @@ extension MangaView {
         ToolbarItem(placement: .topBarTrailing) {
             MCSourceActions(manga: viewModel.manga, chapters: viewModel.listedChapters, selected: selectedChapters)
         }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .topBarTrailing) {
             rightNavbarButton
         }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarItem(placement: .topBarLeading) {
+            if editMode != .active {
+                // `.entry__top` back square instead of the system glass back button
+                MDIconButton(systemImage: "chevron.left", label: "Back", glass: true) {
+                    path.navigationController?.popViewController(animated: true)
+                }
+            }
+        }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarItem(placement: .topBarLeading) {
             if editMode == .active {
@@ -683,6 +695,7 @@ extension MangaView {
                 .disabled(selectableCount == 0)
             }
         }
+        .sharedBackgroundVisibility(.hidden)
     }
 
     @available(iOS 26.0, *)

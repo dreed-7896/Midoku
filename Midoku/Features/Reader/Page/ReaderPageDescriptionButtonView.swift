@@ -73,6 +73,7 @@ struct PageDescriptionView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .navigationBarTitleDisplayMode(.inline)
         }

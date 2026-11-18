@@ -59,6 +59,7 @@ struct CategoriesView: View {
                     Image(systemName: "plus")
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .alert(NSLocalizedString("RENAME_CATEGORY_FAIL"), isPresented: $showRenameFailedAlert) {
             Button(NSLocalizedString("OK"), role: .cancel) {}

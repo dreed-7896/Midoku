@@ -63,6 +63,7 @@ struct MCEntryStatusEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         if store.perform({ state in
@@ -74,6 +75,7 @@ struct MCEntryStatusEditor: View {
                         }) { dismiss() }
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .onAppear {
                 guard !loaded else { return }
@@ -249,41 +251,15 @@ struct MCEntryView: View {
         }
     }
 
-    var body: some View {
-        Group {
-            if let entry {
-                let next = nextSlot
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        header(entry, next: next)
-                        chapterActions.padding(.top, 28)
-                        let visible = contents.filter(passes)
-                        if visible.isEmpty {
-                            emptyChapters.padding(.horizontal, 16).padding(.top, 12)
-                        }
-                        if grid {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
-                                count: viewportSize.width > viewportSize.height ? min(10, max(2, landscapeColumns)) : min(6, max(2, portraitColumns))), alignment: .leading, spacing: 18) {
-                                ForEach(visible) { contentRow($0, grid: true, current: next?.id) }
-                            }.padding(.horizontal, 16).padding(.top, 16)
-                        } else {
-                            Color.clear.frame(height: 8)
-                            ForEach(visible) { item in
-                                contentRow(item, grid: false, current: next?.id).padding(.horizontal, 16)
-                            }
-                        }
-                    }.padding(.bottom, 28)
-                }
-                .background(alignment: .top) {
-                    MDEntryBackdrop { MCEntryCover(entry: entry) }.ignoresSafeArea(edges: .top)
-                }
-                .background(Color.mdBg)
-                .toolbarBackground(.hidden, for: .navigationBar)
-                .mcRefreshable { await store.refresh(entryID: entryID) }
-                .navigationTitle("").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
+    /// `.entry__top`: flat glass squares over the backdrop (back, website, options) instead of the system bar.
+    private func entryTopBar(_ entry: MCPersonalEntry) -> some View {
+        HStack(spacing: 8) {
+            MDIconButton(systemImage: "chevron.left", label: "Back", glass: true) { dismiss() }
+            Spacer(minLength: 0)
+            if let url = entryWebURL(entry) {
+                MDIconButton(systemImage: "globe", label: "Open source website", glass: true) { webPage = MCWebPage(url: url) }
+            }
+            Menu {
                             Button("Edit entry", systemImage: "square.and.pencil") { showEdit = true }
                             Button("Add title", systemImage: "plus.rectangle.on.rectangle") { showAddNested = true }
                             Button("Add to entry", systemImage: "text.badge.plus") { movingEntry = MCID(id: entryID) }
@@ -310,16 +286,48 @@ struct MCEntryView: View {
                             }
                             Divider()
                             Button("Remove title", systemImage: "trash", role: .destructive) { confirmRemove = true }
-                        } label: { Image(systemName: "ellipsis") }.accessibilityLabel("Entry options")
-                    }
-                    if let url = entryWebURL(entry) {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button { webPage = MCWebPage(url: url) } label: { Image(systemName: "globe") }
-                                .accessibilityLabel("Open source website")
+                        } label: { MDIconBox(systemImage: "ellipsis", glass: true) }
+                .accessibilityLabel("Entry options")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+    }
+
+    var body: some View {
+        Group {
+            if let entry {
+                let next = nextSlot
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        entryTopBar(entry)
+                        header(entry, next: next)
+                        chapterActions.padding(.top, 28)
+                        let visible = contents.filter(passes)
+                        if visible.isEmpty {
+                            emptyChapters.padding(.horizontal, 16).padding(.top, 12)
                         }
-                    }
+                        if grid {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
+                                count: viewportSize.width > viewportSize.height ? min(10, max(2, landscapeColumns)) : min(6, max(2, portraitColumns))), alignment: .leading, spacing: 18) {
+                                ForEach(visible) { contentRow($0, grid: true, current: next?.id) }
+                            }.padding(.horizontal, 16).padding(.top, 16)
+                        } else {
+                            Color.clear.frame(height: 8)
+                            ForEach(visible) { item in
+                                contentRow(item, grid: false, current: next?.id).padding(.horizontal, 16)
+                            }
+                        }
+                    }.padding(.bottom, 28)
                 }
-            } else { UnavailableView("Entry unavailable", systemImage: "book.closed") }
+                .background(alignment: .top) {
+                    MDEntryBackdrop { MCEntryCover(entry: entry) }.ignoresSafeArea(edges: .top)
+                }
+                .background(Color.mdBg)
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .mcRefreshable { await store.refresh(entryID: entryID) }
+                .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+                .toolbar(.hidden, for: .navigationBar)
+                        } else { UnavailableView("Entry unavailable", systemImage: "book.closed") }
         }
         .sheet(isPresented: $showAddNested) { MCEntryPlacementView(mode: .addInside(entryID)) }
         .sheet(item: $movingEntry) { MCEntryPlacementView(mode: .move($0.id)) }
@@ -808,18 +816,17 @@ struct MCEntryView: View {
             VStack(alignment: .leading, spacing: 6) {
                 MCChapterThumbnail(variant: slot.preferred).aspectRatio(2/3, contentMode: .fit)
                     .id("\(slot.preferredID.uuidString)-\(thumbnailRevision)")
-                    .opacity(store.library.isRead(slot) && !selecting ? 0.4 : 1)
                     .overlay(alignment: .bottomLeading) {
                         if gridStyle == .compact, let variant = slot.preferred {
                             Text(store.library.chapterDisplayTitle(variant)).font(.mdCaption.weight(.semibold)).lineLimit(1)
                                 .foregroundStyle(.white).padding(.horizontal, 8).padding(.top, 24).padding(.bottom, 8)
-                                .padding(.leading, store.library.isRead(slot) && !selecting ? 20 : 0)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom))
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 0))
-                    .overlay(alignment: .bottomLeading) {
+                    // the read mark sits top-right so it never covers the title along the bottom
+                    .overlay(alignment: .topTrailing) {
                         if store.library.isRead(slot) && !selecting { readMark.padding(6) }
                     }
                     .overlay(alignment: .bottomTrailing) { if selecting { MDCheck(on: selected.contains(slot.id)).padding(6) } }
@@ -874,7 +881,7 @@ struct MCEntryView: View {
             .background(Circle().fill(Color.accentColor)).accessibilityLabel(selected.contains(slot.id) ? "Selected" : "Not selected")
     }
 
-    /// `.badge--glass` "✓ Read" in the bottom-left corner of a thumbnail.
+    /// `.badge--glass` "✓ Read" in the top-right corner of a thumbnail.
     private var readMark: some View {
         HStack(spacing: 3) {
             Image(systemName: "checkmark").font(.system(size: 9, weight: .heavy))
@@ -994,7 +1001,8 @@ struct MCChapterOrderView: View {
                 }
             }.environment(\.editMode, .constant(.active))
                 .navigationTitle("Chapters and titles").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
                 .mcErrors(store)
         }
     }

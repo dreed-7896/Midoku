@@ -88,6 +88,7 @@ struct MangaCoverPageView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .sheet(isPresented: $showImagePicker) {
                 ImagePicker(image: $uploadedCover)

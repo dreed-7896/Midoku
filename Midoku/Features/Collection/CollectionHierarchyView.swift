@@ -66,7 +66,8 @@ struct MCEntryPlacementView: View {
             .searchable(text: $query, prompt: "Search titles")
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
             .mcErrors(store)
         }
         .midokuAccent()

@@ -67,6 +67,7 @@ struct DownloadedMangaView: View {
                     MoreIcon()
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .task {
             await viewModel.loadChapters()

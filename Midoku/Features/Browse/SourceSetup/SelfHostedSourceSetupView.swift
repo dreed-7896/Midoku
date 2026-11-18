@@ -349,6 +349,7 @@ struct SelfHostedSourceSetupView: View {
                 }
                 .disabled(submitDisabled)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

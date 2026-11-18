@@ -121,6 +121,7 @@ struct DownloadQueueView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -161,6 +162,7 @@ struct DownloadQueueView: View {
                         MoreIcon()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .task {
                 isPaused = await DownloadManager.shared.isQueuePaused()

@@ -177,11 +177,13 @@ struct AddSourceView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
                     if !allExternalSources.isEmpty {
                         AddSourceFilterMenu()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .navigationTitle(NSLocalizedString("ADD_SOURCE"))
             .navigationBarTitleDisplayMode(.inline)

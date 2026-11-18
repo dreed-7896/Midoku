@@ -138,10 +138,12 @@ struct MCEntryEditor: View {
             .navigationTitle(entryID == nil ? "Group into new title" : "Edit entry").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button(entryID == nil ? "Create" : "Save") { save() }
                         .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || loadingCoverURL)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .onAppear {
                 guard !loaded else { return }; loaded = true
@@ -273,7 +275,9 @@ struct MCChapterEditor: View {
             }.navigationTitle("Edit chapter").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .confirmationAction) { Button("Save") { save(reset: false) }.disabled(loadingCoverURL) }
+                    .sharedBackgroundVisibility(.hidden)
                 }
                 .onAppear {
                     guard !loaded, let variant else { return }; loaded = true
@@ -330,7 +334,8 @@ struct MCCategoriesView: View {
     var body: some View {
         NavigationStack {
             MCCategoriesPage()
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
         }
     }
 }
@@ -440,7 +445,9 @@ struct MCAddSourceView: View {
             }.navigationTitle("Add to library").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .confirmationAction) { Button("Add") { save() }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+                    .sharedBackgroundVisibility(.hidden)
                 }
                 .task {
                     guard !loaded else { return }; loaded = true
@@ -551,6 +558,7 @@ struct MCBatchChapterEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") {
                         guard let edit else { return }
@@ -558,6 +566,7 @@ struct MCBatchChapterEditor: View {
                     }
                     .disabled(edit == nil || (!renames && !renumbers && !setsVolume))
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .mcErrors(store)
         }

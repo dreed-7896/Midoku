@@ -79,6 +79,7 @@ struct BackupContentView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .alert(NSLocalizedString("RESTORE_BACKUP"), isPresented: $showRestoreAlert) {
                 Button(NSLocalizedString("CANCEL"), role: .cancel) {}

@@ -72,6 +72,7 @@ struct MigrateSelectSeriesView: View {
             }
             .disabled(selectedKeys.isEmpty)
         }
+        .sharedBackgroundVisibility(.hidden)
     }
 
     @ViewBuilder

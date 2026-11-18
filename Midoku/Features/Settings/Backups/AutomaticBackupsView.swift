@@ -46,6 +46,7 @@ struct AutomaticBackupsView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

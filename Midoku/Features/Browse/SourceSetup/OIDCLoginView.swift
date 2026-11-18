@@ -31,6 +31,7 @@ struct OIDCLoginView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

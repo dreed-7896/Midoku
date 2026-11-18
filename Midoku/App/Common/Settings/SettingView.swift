@@ -994,6 +994,7 @@ extension SettingView {
                         showLoginWebView = false
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         loginReload = true
@@ -1001,6 +1002,7 @@ extension SettingView {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .navigationTitle(setting.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -1406,6 +1408,7 @@ extension SettingView {
                         ToolbarItem(placement: .topBarLeading) {
                             EditButton()
                         }
+                        .sharedBackgroundVisibility(.hidden)
 
                         ToolbarItem(placement: .topBarTrailing) {
                             Button {
@@ -1414,6 +1417,7 @@ extension SettingView {
                                 Image(systemName: "plus")
                             }
                         }
+                        .sharedBackgroundVisibility(.hidden)
                     }
                 } label: {
                     Text(setting.title)

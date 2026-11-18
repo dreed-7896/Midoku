@@ -84,7 +84,8 @@ struct ReaderTranslationListView: View {
             }
             .navigationTitle("Visible page dialogue")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
         }
         .presentationDetents([.medium, .large])
     }
@@ -122,7 +123,8 @@ struct ReaderTranslationOptionsView: View {
             }
             .navigationTitle("Translation")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
         }
         .presentationDetents([.medium, .large])
     }

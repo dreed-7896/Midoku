@@ -161,6 +161,7 @@ struct FilterGroupCreateView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     DoneButton {
                         Task {
@@ -170,6 +171,7 @@ struct FilterGroupCreateView: View {
                     }
                     .disabled(!isValid)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .onChange(of: title) { _ in
                 checkValidity()

@@ -8,13 +8,8 @@
 import SwiftUI
 
 struct MoreIcon: View {
+    /// Flat square (Midoku Web `.icon-btn--glass`), not a liquid glass circle.
     var body: some View {
-        Image(systemName: {
-            if #available(iOS 26.0, *) {
-                "ellipsis"
-            } else {
-                "ellipsis.circle"
-            }
-        }())
+        MDIconBox(systemImage: "ellipsis", size: 38, glass: true)
     }
 }

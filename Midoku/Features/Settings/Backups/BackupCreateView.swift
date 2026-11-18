@@ -71,6 +71,7 @@ struct BackupCreateView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     DoneButton {
                         guard !isSaving else { return }
@@ -101,6 +102,7 @@ struct BackupCreateView: View {
                         }
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

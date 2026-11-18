@@ -231,13 +231,11 @@ struct MCDiscoverView: View {
         let installed = installedSources
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
-                MDPageHeader(kicker: "\(installed.count) extensions", title: "Home") {
+                MDPageHeader(kicker: "\(model.feeds.count) shelves · \(installed.count) extensions", title: "Home") {
                     MDIconButton(systemImage: "puzzlepiece.extension", label: "Manage extensions",
                                  badge: extensionUpdates > 0 ? extensionUpdates : nil, action: openExtensions)
                 }
-                if !installed.isEmpty {
-                    extensionStrip(installed)
-                } else if sources.hasLoaded {
+                if installed.isEmpty && sources.hasLoaded {
                     welcomeCard
                 }
                 // Shelves stay visible while sources load at launch; they fill in once sources arrive.
@@ -676,7 +674,9 @@ struct MCDiscoverConfiguration: View {
             }.navigationTitle("Shelves").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { EditButton() }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    .sharedBackgroundVisibility(.hidden)
                 }
                 .sheet(isPresented: $showFilters) {
                     FilterListSheetView(filters: searchFilters, search: $query, enabledFilters: $enabledFilters)

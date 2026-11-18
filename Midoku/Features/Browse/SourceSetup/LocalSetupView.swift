@@ -38,6 +38,7 @@ struct LocalSetupView: View {
                     }
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .navigationTitle(NSLocalizedString("LOCAL_FILES_SETUP"))
         .navigationBarTitleDisplayMode(.inline)

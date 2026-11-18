@@ -88,6 +88,7 @@ struct MigrateSelectDestinationView: View {
                 }
                 .disabled(selectedSources.isEmpty)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .task {
             guard availableSources.isEmpty && pinnedSources.isEmpty else { return }

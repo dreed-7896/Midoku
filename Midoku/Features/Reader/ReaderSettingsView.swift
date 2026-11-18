@@ -153,6 +153,7 @@ struct ReaderSettingsView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .onReceive(NotificationCenter.default.publisher(for: .readerReadingMode)) { _ in
                 readingMode = UserDefaults.standard.string(forKey: "Reader.readingMode.\(mangaId)").flatMap(ReadingMode.init)

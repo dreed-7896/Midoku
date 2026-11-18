@@ -49,7 +49,8 @@ struct MCFollowedTitlesView: View {
             .searchable(text: $query, prompt: "Search followed titles")
             .navigationTitle("Get new chapters")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
             .mcErrors(store)
         }
         .midokuAccent()

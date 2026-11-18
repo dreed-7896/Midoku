@@ -74,6 +74,7 @@ struct FilterGroupsView: View {
                 }
                 .matchedTransitionSourcePlease(id: SheetID.create, in: transitionNamespace)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .sheet(isPresented: $showCreateSheet) {
             FilterGroupCreateView()

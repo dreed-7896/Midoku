@@ -36,6 +36,7 @@ private struct ModelWrapper<Content: View>: View {
                             path.dismiss()
                         }
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
         } else {
             view

@@ -291,7 +291,7 @@ struct MangaDetailsHeaderView: View {
         }
         .background(alignment: .top) {
             MDEntryBackdrop {
-                MangaCoverView(source: source, coverImage: manga.cover ?? "", width: 320, height: 470)
+                MangaCoverView(source: source, coverImage: manga.cover ?? "", width: UIScreen.main.bounds.width, height: 470)
             }
             .padding(.top, -200)
         }

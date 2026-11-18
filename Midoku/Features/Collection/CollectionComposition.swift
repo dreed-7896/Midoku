@@ -66,6 +66,7 @@ struct MCAddChapterToEntryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
             }
             .safeAreaInset(edge: .bottom) {
                 Button("Add chapter", systemImage: "plus") { add() }
@@ -156,6 +157,7 @@ struct MCRemovedChaptersView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 if !chapters.isEmpty {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Restore all") {
@@ -165,6 +167,7 @@ struct MCRemovedChaptersView: View {
                             }) { dismiss() }
                         }
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
             }
             .mcErrors(store)
@@ -250,7 +253,8 @@ struct MCEntrySourcesView: View {
                     }
                 }
             }.navigationTitle("Sources").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
                 .sheet(item: $listing) { item in
                     if let manga = store.snapshot.manga.first(where: { $0.listingID == item.id })?.manga { MCOriginalListingView(manga: manga) }
                 }.mcErrors(store)
@@ -283,7 +287,7 @@ struct MCSourceActions: View {
             } else {
                 Button("Add to library", systemImage: "plus") { add = true }
             }
-        } label: { Image(systemName: "books.vertical") }
+        } label: { MDIconBox(systemImage: "books.vertical", size: 38, glass: true) }
             .accessibilityLabel("Library actions")
             .sheet(isPresented: $add) { MCAddSourceView(manga: manga, chapters: chapters) }
             .sheet(item: $openEntry) { item in NavigationStack { MCEntryView(entryID: item.id) } }

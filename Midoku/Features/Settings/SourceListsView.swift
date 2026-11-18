@@ -55,6 +55,7 @@ struct SourceListsView: View {
                     Image(systemName: "plus")
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .alert(NSLocalizedString("SOURCE_LIST_ADD_FAIL"), isPresented: $showAddListFailAlert) {
             Button(NSLocalizedString("OK"), role: .cancel) {}

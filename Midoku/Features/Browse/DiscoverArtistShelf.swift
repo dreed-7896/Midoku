@@ -658,6 +658,7 @@ struct MCArtistReleasesView: View {
                 }
                 .disabled(model.loading.contains(feedID))
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .navigationTitle(feed?.listingName ?? "Artists")
         .navigationBarTitleDisplayMode(.large)

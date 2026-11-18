@@ -119,7 +119,8 @@ struct MCPanelBookmarksView: View {
             .searchable(text: $query, prompt: "Search bookmarks")
             .navigationTitle("Bookmarks")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
             .onAppear { reload() }
             .onReceive(NotificationCenter.default.publisher(for: MCPanelBookmarks.changed)) { _ in reload() }
         }

@@ -61,7 +61,8 @@ struct MCReadingStatsView: View {
             }
             .navigationTitle("Reading stats")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
             .task { sessions = await MCReadingStatSession.load() }
         }
         .midokuAccent()

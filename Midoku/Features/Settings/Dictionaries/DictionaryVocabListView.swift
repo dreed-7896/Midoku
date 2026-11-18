@@ -95,6 +95,7 @@ struct DictionaryVocabListView: View {
                     Image(systemName: "ellipsis")
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .alert(NSLocalizedString("CLEAR_VOCABULARY_LIST"), isPresented: $showingClearConfirmation) {
             Button(NSLocalizedString("CANCEL"), role: .cancel) {}

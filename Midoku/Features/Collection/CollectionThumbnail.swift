@@ -31,18 +31,32 @@ final class MCThumbnailCache {
     static let shared = MCThumbnailCache()
     private let cache = NSCache<NSString, UIImage>()
     private var active = 0
-    private var tasks: [UUID: (id: UUID, task: Task<UIImage?, Never>)] = [:]
+    private var tasks: [String: (id: UUID, task: Task<UIImage?, Never>)] = [:]
     private let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("MidokuChapterThumbnails")
 
     init() {
         cache.totalCostLimit = 16 * 1024 * 1024
     }
 
+    /// A split part (a page range of a chapter) gets its own thumbnail from its first page.
+    nonisolated static func partSelection(_ variant: MCChapterVariant?) -> MCChapterPageSelection? {
+        guard let selection = variant?.pageSelection, !selection.ranges.isEmpty else { return nil }
+        return selection
+    }
+
+    private func cacheName(chapterID: UUID, selection: MCChapterPageSelection?) -> String {
+        guard let selection else { return chapterID.uuidString }
+        var hash: UInt64 = 5381
+        for byte in selection.signature.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
+        return chapterID.uuidString + "-p" + String(hash, radix: 16)
+    }
+
     /// Returns an existing generated thumbnail without starting any source or image requests.
-    func cachedImage(chapterID: UUID) -> UIImage? {
-        let key = chapterID.uuidString as NSString
+    func cachedImage(chapterID: UUID, selection: MCChapterPageSelection? = nil) -> UIImage? {
+        let name = cacheName(chapterID: chapterID, selection: selection)
+        let key = name as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        let file = directory.appendingPathComponent(chapterID.uuidString + ".jpg")
+        let file = directory.appendingPathComponent(name + ".jpg")
         guard let data = try? Data(contentsOf: file), let image = UIImage(data: data) else { return nil }
         cache.setObject(image, forKey: key, cost: Int(image.size.width * image.size.height * 4))
         return image
@@ -61,19 +75,28 @@ final class MCThumbnailCache {
     }
 
     func reset(chapterIDs: Set<UUID>) {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         for chapterID in chapterIDs {
-            tasks[chapterID]?.task.cancel()
-            tasks[chapterID] = nil
-            cache.removeObject(forKey: chapterID.uuidString as NSString)
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(chapterID.uuidString + ".jpg"))
+            let prefix = chapterID.uuidString
+            for (key, work) in tasks where key.hasPrefix(prefix) {
+                work.task.cancel()
+                tasks[key] = nil
+            }
+            // the whole chapter and each of its split parts
+            for file in files where file.hasPrefix(prefix) {
+                cache.removeObject(forKey: String(file.dropLast(4)) as NSString)
+                try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
+            }
+            cache.removeObject(forKey: prefix as NSString)
         }
     }
 
-    func image(chapter: MCLibraryChapter, store: MCCollectionStore) async -> UIImage? {
-        if let cached = cachedImage(chapterID: chapter.id) { return cached }
-        let key = chapter.id.uuidString as NSString
-        let file = directory.appendingPathComponent(chapter.id.uuidString + ".jpg")
-        if let task = tasks[chapter.id]?.task { return await task.value }
+    func image(chapter: MCLibraryChapter, store: MCCollectionStore, selection: MCChapterPageSelection? = nil) async -> UIImage? {
+        if let cached = cachedImage(chapterID: chapter.id, selection: selection) { return cached }
+        let name = cacheName(chapterID: chapter.id, selection: selection)
+        let key = name as NSString
+        let file = directory.appendingPathComponent(name + ".jpg")
+        if let task = tasks[name]?.task { return await task.value }
         let taskID = UUID()
         guard let physical = store.physical(chapter.identity) else { return nil }
         let task = Task<UIImage?, Never> { [self] in
@@ -91,7 +114,8 @@ final class MCThumbnailCache {
                     pages = try await MCRequestPurpose.$thumbnail.withValue(true) { try await source.getPageList(manga: physical.manga, chapter: physical.chapter) }
                 } else { return nil }
                 try Task.checkCancellation()
-                guard let page = pages.first else { return nil }
+                let pageIndex = (selection?.sourcePage(for: 1) ?? 1) - 1
+                guard let page = pages.indices.contains(pageIndex) ? pages[pageIndex] : pages.first else { return nil }
                 let image: UIImage
                 switch page.content {
                 case .url(let url, let context):
@@ -114,10 +138,10 @@ final class MCThumbnailCache {
                 return thumbnail
             } catch { return nil }
         }
-        tasks[chapter.id] = (taskID, task)
+        tasks[name] = (taskID, task)
         // A disappearing grid cell must not cancel work shared by other cells or category pages.
         let image = await task.value
-        if tasks[chapter.id]?.id == taskID { tasks[chapter.id] = nil }
+        if tasks[name]?.id == taskID { tasks[name] = nil }
         return image
     }
 }
@@ -136,7 +160,7 @@ struct MCChapterListArtwork: View {
         return store.library.covers.first { $0.id == id }
     }
     private var generatedImage: UIImage? {
-        chapter.flatMap { MCThumbnailCache.shared.cachedImage(chapterID: $0.id) }
+        chapter.flatMap { MCThumbnailCache.shared.cachedImage(chapterID: $0.id, selection: MCThumbnailCache.partSelection(variant)) }
     }
 
     var body: some View {
@@ -152,7 +176,7 @@ struct MCChapterListArtwork: View {
         .clipped()
         .task(id: variant?.chapterID) {
             cachedSourceImage = nil
-            guard customCover == nil, generatedImage == nil, let chapter,
+            guard customCover == nil, generatedImage == nil, MCThumbnailCache.partSelection(variant) == nil, let chapter,
                   let thumbnail = store.storedChapter(chapter.id)?.thumbnail else { return }
             cachedSourceImage = await existingSourceImage(thumbnail, chapter: chapter)
         }
@@ -189,6 +213,7 @@ struct MCChapterThumbnail: View {
     @State private var image: UIImage?
     @State private var visible = false
     private var chapter: MCLibraryChapter? { variant.flatMap { store.library.chapter($0.chapterID) } }
+    private var part: MCChapterPageSelection? { MCThumbnailCache.partSelection(variant) }
     private var customCover: MCLibraryCover? {
         guard let id = variant?.edits.coverID else { return nil }
         return store.library.covers.first { $0.id == id }
@@ -198,9 +223,9 @@ struct MCChapterThumbnail: View {
             Group {
                 if let customCover {
                     MCCustomCoverImage(cover: customCover, size: geometry.size)
-                } else if let image = image ?? chapter.flatMap({ MCThumbnailCache.shared.cachedImage(chapterID: $0.id) }) {
+                } else if let image = image ?? chapter.flatMap({ MCThumbnailCache.shared.cachedImage(chapterID: $0.id, selection: part) }) {
                     Image(uiImage: image).resizable().scaledToFill()
-                } else if let chapter, let thumbnail = store.storedChapter(chapter.id)?.thumbnail {
+                } else if part == nil, let chapter, let thumbnail = store.storedChapter(chapter.id)?.thumbnail {
                     SourceImageView(source: store.source(chapter.identity.listing.connectionID), imageUrl: thumbnail,
                         width: geometry.size.width, height: geometry.size.height, placeholder: "MidokuChapterPlaceholder")
                 } else {
@@ -209,13 +234,14 @@ struct MCChapterThumbnail: View {
             }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .top).clipped()
         }
         .onScrollVisibilityChange(threshold: 0.1) { visible = $0 }
-        .task(id: "\(variant?.chapterID.uuidString ?? "")-\(visible)") {
+        .task(id: "\(variant?.chapterID.uuidString ?? "")-\(part?.signature ?? "")-\(visible)") {
+            image = nil
             guard customCover == nil, let chapter else { return }
-            if let cached = MCThumbnailCache.shared.cachedImage(chapterID: chapter.id) { image = cached; return }
+            if let cached = MCThumbnailCache.shared.cachedImage(chapterID: chapter.id, selection: part) { image = cached; return }
             guard visible,
-                  store.storedChapter(chapter.id)?.thumbnail == nil else { return }
+                  part != nil || store.storedChapter(chapter.id)?.thumbnail == nil else { return }
             do { try await Task.sleep(nanoseconds: 300_000_000); try Task.checkCancellation() } catch { return }
-            image = await MCThumbnailCache.shared.image(chapter: chapter, store: store)
+            image = await MCThumbnailCache.shared.image(chapter: chapter, store: store, selection: part)
         }.accessibilityHidden(true)
     }
 }

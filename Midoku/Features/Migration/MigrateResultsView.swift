@@ -81,6 +81,7 @@ struct MigrateResultsView: View {
                     }
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .interactiveDismissDisabled(forceMigrate)
         .alert(

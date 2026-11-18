@@ -1367,12 +1367,14 @@ private struct MCReadingAddSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add \(selected.count)") {
                         if store.addToReading(selected) { dismiss() }
                     }
                     .disabled(selected.isEmpty)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .mcErrors(store)
         }
@@ -1425,10 +1427,12 @@ private struct MCBatchCategoryEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply") { apply() }
                         .disabled(mode != .replace && categories.isEmpty)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .mcErrors(store)
@@ -1475,7 +1479,9 @@ private struct MCBatchArtistEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .confirmationAction) { Button("Apply") { apply() } }
+                .sharedBackgroundVisibility(.hidden)
             }
             .onAppear {
                 guard !loaded else { return }
@@ -1559,7 +1565,8 @@ struct MCImportCollectionView: View {
                         }
                     }
                 }
-            }.navigationTitle("Import library").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            }.navigationTitle("Import library").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+.sharedBackgroundVisibility(.hidden) }
                 .fileImporter(isPresented: $picking, allowedContentTypes: [.json]) { result in
                     do {
                         let url = try result.get(); let access = url.startAccessingSecurityScopedResource()

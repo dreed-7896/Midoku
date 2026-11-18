@@ -84,6 +84,7 @@ struct SourceSettingsView: View {
                     path.dismiss()
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .animation(.default, value: settings)
         .task {

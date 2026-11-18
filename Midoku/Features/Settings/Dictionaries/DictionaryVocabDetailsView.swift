@@ -143,6 +143,7 @@ struct DictionaryVocabDetailsView: View {
                         }
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
                     if isEditing {
                         DoneButton {
@@ -175,6 +176,7 @@ struct DictionaryVocabDetailsView: View {
                         }
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .interactiveDismissDisabled(isEditing)
             .fullScreenCover(isPresented: $chapterOpened) {

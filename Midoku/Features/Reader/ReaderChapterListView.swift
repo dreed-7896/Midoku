@@ -55,6 +55,7 @@ struct ReaderChapterListView: View {
                         dismiss()
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
     }

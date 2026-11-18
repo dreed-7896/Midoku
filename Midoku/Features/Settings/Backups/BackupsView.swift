@@ -155,12 +155,14 @@ struct BackupsView: View {
         ToolbarItem(placement: .topBarTrailing) {
             autoBackupButton
         }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarSpacer(placement: .topBarTrailing)
 
         ToolbarItem(placement: .topBarTrailing) {
             createBackupButton
         }
+        .sharedBackgroundVisibility(.hidden)
     }
 
     func backupCell(backup: BackupInfo) -> some View {
