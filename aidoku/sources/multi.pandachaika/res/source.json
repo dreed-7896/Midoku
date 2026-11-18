@@ -1,0 +1,17 @@
+{
+	"info": {
+		"id": "multi.pandachaika",
+		"name": "PandaChaika",
+		"version": 3,
+		"url": "https://panda.chaika.moe",
+		"contentRating": 2,
+		"languages": ["multi"]
+	},
+	"listings": [
+		{"id": "popular", "name": "Popular"},
+		{"id": "latest", "name": "Latest"}
+	],
+	"config": {
+		"hidesFiltersWhileSearching": true
+	}
+}

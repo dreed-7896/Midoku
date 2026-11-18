@@ -1,24 +1,22 @@
-# extensions
+# Aidoku extensions
 
-Midoku/Aidoku source list.
+This branch contains Aidoku source conversions for:
 
-Add this URL in Midoku → Settings → Source Lists:
+- PandaChaika
+- AllPornComic
+- Doujins
+- HentaiNexus
+- HentaiRead
+- NovelCrow
+- HiperDex
 
-```
-https://raw.githubusercontent.com/dreed-7896/extensions/main/index.min.json
-```
+Add this URL in Aidoku under Settings → Source Lists:
 
-## Sources
+`https://raw.githubusercontent.com/dreed-7896/extensions/aidoku-extensions/aidoku/public/index.min.json`
 
-- **nhentai** (`multi.nhentai`, v100): based on the Aidoku-Community source (MIT/Apache-2.0).
-  - The Artist filter matches the artist tag only (it used to search titles). Separate several artists with `|`; names with no artist tag are retried as a group/circle.
-  - Language filter (Default / Any / English / Japanese / Chinese).
-  - "Hide artist & tags in titles" filter and setting: `[Circle (Artist)] Title [English]` shows as `Title`.
-  - Rate limited to 2 requests/second, retries on HTTP 429/503, caches search pages for 5 minutes, loads Home shelves one at a time.
+The generated `.aix` packages and index are stored in `aidoku/public`. Source code is in
+`aidoku/sources`, with shared parsing code in `aidoku/templates`.
 
-## Building
-
-```
-rustup target add wasm32-unknown-unknown
-python3 scripts/build.py
-```
+These are unofficial community integrations. They do not host content and are not affiliated
+with Aidoku or the source websites. Content referring to sexualized minors is intentionally
+excluded from search results and title details.

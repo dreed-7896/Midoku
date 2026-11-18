@@ -1,0 +1,17 @@
+{
+	"info": {
+		"id": "en.hentai2read",
+		"name": "Hentai2Read",
+		"version": 2,
+		"url": "https://hentai2read.com",
+		"contentRating": 2,
+		"languages": ["en"]
+	},
+	"listings": [
+		{"id": "popular", "name": "Popular"},
+		{"id": "latest", "name": "Latest"}
+	],
+	"config": {
+		"hidesFiltersWhileSearching": true
+	}
+}

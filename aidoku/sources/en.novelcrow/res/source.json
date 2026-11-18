@@ -1,0 +1,21 @@
+{
+	"info": {
+		"id": "en.novelcrow",
+		"name": "NovelCrow",
+		"version": 5,
+		"url": "https://novelcrow.com",
+		"contentRating": 2,
+		"languages": ["en"],
+		"minAppVersion": "0.7"
+	},
+	"listings": [
+		{
+			"id": "popular",
+			"name": "Popular"
+		},
+		{
+			"id": "recent",
+			"name": "Latest"
+		}
+	]
+}
