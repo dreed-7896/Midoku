@@ -8,7 +8,7 @@ import { Banner, Empty, Loading } from '../components/Status'
 import { TLink as Link, useNav } from '../components/Nav'
 import { useStore } from '../data/store'
 import {
-  artFor, assetUrl, browseSource, byLanguage, changeExtension, getExtensions, getExtensionSources, getRepos, getSources, refreshExtensions, setRepos,
+  artFor, assetUrl, browseSource, onDevice, byLanguage, changeExtension, getExtensions, getExtensionSources, getRepos, getSources, refreshExtensions, setRepos,
   SExtension, SMangaCard, SSource, webviewUrl, type FilterChange, type SFilter,
 } from '../data/suwayomi'
 import { SourceFilters } from '../components/SourceFilters'
@@ -114,7 +114,7 @@ export function RemoteSources() {
 
   return (
     <div className="page">
-      <PageHead kicker={`${installed.length} installed · Suwayomi`} title="Sources">
+      <PageHead kicker={`${installed.length} installed · ${onDevice() ? 'On this device' : 'Suwayomi'}`} title="Sources">
         <IconButton icon="database" label="Extension repositories" onClick={() => setReposOpen(true)} />
         <IconButton icon="refresh" label="Check repositories for new extensions" onClick={async () => { await load(true); store.toast('Extension list refreshed') }} />
       </PageHead>
@@ -156,7 +156,7 @@ export function RemoteSources() {
         {!exts && !error && <Loading label="Loading extensions" />}
         {exts && list.length === 0 && (tab === 'installed'
           ? <Empty icon="sources" title="No extensions yet" detail="Open Available to install sources." />
-          : <Empty icon="search" title="Nothing matches" detail="Try another language or name, or add an extension repository in Suwayomi." />)}
+          : <Empty icon="search" title="Nothing matches" detail={onDevice() ? 'Try another language or name, or add an Aidoku source list with the repositories button.' : 'Try another language or name, or add an extension repository in Suwayomi.'} />)}
         <div className="grid3">
           {list.slice(0, limit).map((e) => {
             const icon = <SourceIcon letter={e.name[0] ?? '?'} color={ICON_BG} size={42} url={assetUrl(e.iconUrl)} />
@@ -236,7 +236,7 @@ export function RemoteBrowse() {
     setExt(undefined); setExtError(undefined); setSourceId(undefined); setItems([]); setPage(1); setFilterSet(null); setChanges([])
     getExtensionSources(pkg).then((e) => {
       const sources = byLanguage(e?.source?.nodes ?? [])
-      if (!e || !e.isInstalled || !sources.length) { setExtError('This extension is not installed on the server.'); return }
+      if (!e || !e.isInstalled || !sources.length) { setExtError(onDevice() ? 'This extension is not installed on this device.' : 'This extension is not installed on the server.'); return }
       setExt(e)
       setSourceId(sources[0].id)
     }).catch((e: Error) => setExtError(e.message))
@@ -548,7 +548,7 @@ function ReposSheet({ onClose, onChanged }: { onClose: () => void; onChanged: ()
     if (!url || !list) return
     // A GitHub repo page ("github.com/owner/repo") becomes its index the way Mihon-style repos publish it.
     const gh = url.match(/^(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+?)\/?$/)
-    if (gh) url = `https://github.com/${gh[1]}/${gh[2]}/raw/repo/index.min.json`
+    if (gh && !onDevice()) url = `https://github.com/${gh[1]}/${gh[2]}/raw/repo/index.min.json`
     if (!/^https?:\/\//.test(url)) url = `https://${url}`
     if (list.includes(url)) { store.toast('Already added'); return }
     setInput('')
@@ -558,7 +558,9 @@ function ReposSheet({ onClose, onChanged }: { onClose: () => void; onChanged: ()
 
   return (
     <Sheet open title="Extension repositories" onClose={onClose}>
-      <p className="hint">The server installs extensions from these. Add a repository's index address (or its GitHub page).</p>
+      <p className="hint">{onDevice()
+        ? 'Aidoku source lists the app installs extensions from. Add a list\'s address (its index JSON, or the folder with index.min.json).'
+        : 'The server installs extensions from these. Add a repository\'s index address (or its GitHub page).'}</p>
       {error && <Empty compact tone="error" icon="alert" title="Couldn't load repositories" detail={error} />}
       {!list && !error && <Loading label="Loading repositories" shape="rows" count={2} />}
       {list && !list.length && <Empty compact icon="database" title="No repositories" detail="Add one to see extensions to install." />}

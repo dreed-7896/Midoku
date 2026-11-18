@@ -6,6 +6,7 @@ import { useNav } from '../components/Nav'
 import { createLock, lockSupported, unlock } from '../data/lock'
 import { Settings, updateSettings, useSettings } from '../data/settings'
 import { useStore } from '../data/store'
+import { DEVICE, deviceAvailable } from '../data/deviceServer'
 import { clearData } from '../data/cache'
 import { changePassword, lockApp, usePendingWrites } from '../data/db'
 import { savedBytes, useDownloads } from '../data/downloads'
@@ -157,6 +158,9 @@ function ServerSection() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const connected = !!settings.serverUrl
+  const device = settings.serverUrl === DEVICE
+  const canDevice = deviceAvailable()
+  const useDevice = () => updateSettings({ serverUrl: DEVICE, serverUser: '', serverPass: '' })
 
   const connect = async () => {
     let address = url.trim()
@@ -175,7 +179,9 @@ function ServerSection() {
     }
   }
   const disconnect = () => {
-    if (!window.confirm('Disconnect from this server? The app goes back to sample data. Your library stays in your account.')) return
+    if (!window.confirm(device
+      ? 'Stop using extensions on this device? You can then connect a Suwayomi server. Your library stays in your account.'
+      : 'Disconnect from this server? The app goes back to sample data. Your library stays in your account.')) return
     updateSettings({ serverUrl: '', serverUser: '', serverPass: '' })
     setUrl(''); setUser(''); setPass('')
   }
@@ -183,7 +189,18 @@ function ServerSection() {
   return (
     <section className="section pad-x">
       <div className="label label--flush">Server</div>
-      {connected ? (
+      {device ? (
+        <>
+          <div className="setting">
+            <span className="setting__icon"><Icon name="sources" size={22} /></span>
+            <div className="setting__text">
+              <strong>This device</strong>
+              <span className="card-meta card-meta--wrap">Aidoku extensions run in the app. Add a repository in Sources to install them.</span>
+            </div>
+          </div>
+          <button type="button" className="btn btn--ghost btn--block" onClick={disconnect}>Use a Suwayomi server instead</button>
+        </>
+      ) : connected ? (
         <>
           <div className="setting">
             <span className="setting__icon"><Icon name="database" size={22} /></span>
@@ -199,7 +216,8 @@ function ServerSection() {
         </>
       ) : (
         <>
-          <p className="hint">Connect your Suwayomi server to use your real library, sources and chapters. Until then the app shows sample data.</p>
+          {canDevice && <button type="button" className="btn btn--accent btn--block btn--flush" onClick={useDevice}>Use extensions on this device</button>}
+          <p className="hint">{canDevice ? 'Or connect' : 'Connect'} your Suwayomi server to use your real library, sources and chapters. Until then the app shows sample data.</p>
           <div className="form">
             <label className="form__row"><span>Address</span>
               <input className="field-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-server:4567" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} />

@@ -1,6 +1,7 @@
 // Talks to a Suwayomi server straight from the browser. Suwayomi allows any origin (without cookies),
 // so no proxy sits in between; the address and optional basic-auth login are kept on this device.
 import { getSettings } from './settings'
+import * as dev from './deviceServer'
 import type { Chapter, CoverArt, Entry } from './types'
 
 export interface SExtension {
@@ -69,17 +70,20 @@ const CHAPTER = 'id url name chapterNumber uploadDate scanlator pageCount source
 
 const normalise = (url: string) => url.trim().replace(/\/+$/, '')
 const serverBase = () => normalise(getSettings().serverUrl)
+/** Aidoku extensions on this device (iOS app) instead of a Suwayomi server. */
+export const onDevice = () => getSettings().serverUrl === dev.DEVICE
 export const serverKey = () => serverBase()
 
 export function authHeaders(user = getSettings().serverUser, pass = getSettings().serverPass): Record<string, string> {
   return user ? { Authorization: `Basic ${btoa(`${user}:${pass}`)}` } : {}
 }
 
-export const needsAuthForImages = () => !!getSettings().serverUser
+export const needsAuthForImages = () => !!getSettings().serverUser || onDevice()
 
 /** Server paths (covers, pages, icons) become absolute URLs on the server. */
 export function assetUrl(path?: string | null): string {
   if (!path) return ''
+  if (onDevice() || path.startsWith('data:')) return path
   return /^https?:\/\//.test(path) ? path : `${serverBase()}${path.startsWith('/') ? '' : '/'}${path}`
 }
 
@@ -87,10 +91,11 @@ export function assetUrl(path?: string | null): string {
  * Suwayomi's own WebView page for an address. The page runs in the server's browser, so a Cloudflare
  * check solved there leaves its cookies on the server, where the source uses them.
  */
-export const webviewUrl = (url: string) => `${serverBase()}/api/v1/webview#${encodeURIComponent(url)}`
+export const webviewUrl = (url: string) => onDevice() ? url : `${serverBase()}/api/v1/webview#${encodeURIComponent(url)}`
 
 /** Fetches an image with the login attached (for servers with basic auth). */
 export async function fetchImage(url: string, signal?: AbortSignal): Promise<Blob> {
+  if (url.startsWith('data:') || dev.isDeviceImage(url)) return dev.fetchDeviceImage(url)
   const res = await fetch(url, { headers: authHeaders(), signal })
   if (!res.ok) throw new Error(`Image failed (${res.status})`)
   return res.blob()
@@ -127,10 +132,10 @@ export async function testServer(url: string, user: string, pass: string) {
 
 // Extensions and sources
 
-export const getExtensions = () =>
+export const getExtensions = (): Promise<SExtension[]> => onDevice() ? dev.devGetExtensions() :
   gql<{ extensions: { nodes: SExtension[] } }>(`{ extensions { nodes { ${EXT} } } }`).then((d) => d.extensions.nodes)
 
-export const refreshExtensions = () =>
+export const refreshExtensions = (): Promise<SExtension[]> => onDevice() ? dev.devRefreshExtensions() :
   gql<{ fetchExtensions: { extensions: SExtension[] } }>(`mutation { fetchExtensions(input: {}) { extensions { ${EXT} } } }`)
     .then((d) => d.fetchExtensions.extensions)
 
@@ -146,7 +151,7 @@ const PREF = `type: __typename
   ... on ListPreference { key title summary visible enabled entries entryValues value: currentValue valueDefault: default }
   ... on MultiSelectListPreference { key title summary visible enabled entries entryValues values: currentValue valuesDefault: default }
   ... on EditTextPreference { key title summary visible enabled text: currentValue textDefault: default dialogMessage }`
-export const getSourcePreferences = (source: string) =>
+export const getSourcePreferences = (source: string): Promise<SPreference[]> => onDevice() ? Promise.resolve([]) :
   gql<{ source: { preferences: SPreference[] } }>(`query($id: LongString!) { source(id: $id) { preferences { ${PREF} } } }`, { id: source })
     .then((d) => d.source.preferences)
 export interface PreferenceChange { position: number; checkBoxState?: boolean; switchState?: boolean; listState?: string; multiSelectState?: string[]; editTextState?: string }
@@ -157,17 +162,17 @@ export const setSourcePreference = (source: string, change: PreferenceChange) =>
   ).then((d) => d.updateSourcePreference.source.preferences)
 
 /** Extension repositories the server installs extensions from. */
-export const getRepos = () => gql<{ settings: { extensionRepos: string[] } }>('{ settings { extensionRepos } }').then((d) => d.settings.extensionRepos)
-export const setRepos = (repos: string[]) =>
+export const getRepos = (): Promise<string[]> => onDevice() ? dev.devGetRepos() : gql<{ settings: { extensionRepos: string[] } }>('{ settings { extensionRepos } }').then((d) => d.settings.extensionRepos)
+export const setRepos = (repos: string[]): Promise<string[]> => onDevice() ? dev.devSetRepos(repos) :
   gql<{ setSettings: { settings: { extensionRepos: string[] } } }>(
     'mutation($repos: [String!]!) { setSettings(input: { settings: { extensionRepos: $repos } }) { settings { extensionRepos } } }', { repos },
   ).then((d) => d.setSettings.settings.extensionRepos)
 
-export const changeExtension = (pkgName: string, action: 'install' | 'uninstall' | 'update') =>
+export const changeExtension = (pkgName: string, action: 'install' | 'uninstall' | 'update'): Promise<unknown> => onDevice() ? dev.devChangeExtension(pkgName, action) :
   gql(`mutation($id: String!) { updateExtension(input: { id: $id, patch: { ${action}: true } }) { extension { pkgName } } }`, { id: pkgName })
 
 // Suwayomi's extensions(condition:) ignores pkgName, so one extension is read with extension(pkgName:).
-export const getExtensionSources = (pkgName: string) =>
+export const getExtensionSources = (pkgName: string): Promise<SExtension | null> => onDevice() ? dev.devGetExtensionSources(pkgName) :
   gql<{ extension: SExtension | null }>(
     `query($pkg: String!) { extension(pkgName: $pkg) { ${EXT} source { nodes { ${SRC} } } } }`, { pkg: pkgName },
   ).then((d) => d.extension)
@@ -179,7 +184,7 @@ export function byLanguage<T extends { lang: string }>(list: T[]): T[] {
 }
 
 /** Installed sources, without Suwayomi's built-in "Local source". */
-export const getSources = () =>
+export const getSources = (): Promise<(SSource & { extension: { pkgName: string } | null })[]> => onDevice() ? dev.devGetSources() :
   gql<{ sources: { nodes: (SSource & { extension: { pkgName: string } | null })[] } }>(`{ sources { nodes { ${SRC} extension { pkgName } } } }`)
     .then((d) => d.sources.nodes.filter((s) => s.id !== '0'))
 
@@ -210,6 +215,7 @@ const LEAF = `type: __typename ... on CheckBoxFilter { name checked: default } .
   ... on SortFilter { name values sort: default { index ascending } } ... on HeaderFilter { name } ... on SeparatorFilter { name }`
 const filterCache = new Map<string, Promise<SFilter[]>>()
 export function getSourceFilters(source: string): Promise<SFilter[]> {
+  if (onDevice()) return Promise.resolve([])
   let p = filterCache.get(source)
   if (!p) {
     p = gql<{ source: { filters: SFilter[] } }>(
@@ -221,7 +227,7 @@ export function getSourceFilters(source: string): Promise<SFilter[]> {
   return p
 }
 
-export const browseSource = (source: string, type: 'POPULAR' | 'LATEST' | 'SEARCH', page: number, query?: string, filters?: FilterChange[]) =>
+export const browseSource = (source: string, type: 'POPULAR' | 'LATEST' | 'SEARCH', page: number, query?: string, filters?: FilterChange[]): Promise<{ hasNextPage: boolean; mangas: SMangaCard[] }> => onDevice() ? dev.devBrowse(source, type, page, query) :
   gql<{ fetchSourceManga: { hasNextPage: boolean; mangas: SMangaCard[] } }>(
     `mutation($source: LongString!, $type: FetchSourceMangaType!, $page: Int!, $query: String, $filters: [FilterChangeInput!]) {
       fetchSourceManga(input: { source: $source, type: $type, page: $page, query: $query, filters: $filters }) { hasNextPage mangas { ${CARD} } }
@@ -233,6 +239,7 @@ export const browseSource = (source: string, type: 'POPULAR' | 'LATEST' | 'SEARC
 
 /** Stored details, refreshed from the source when the server has not fetched them yet. */
 export async function getManga(id: number, refresh = false): Promise<SManga> {
+  if (onDevice()) return dev.devGetManga(id, refresh)
   if (!refresh) {
     const { manga } = await gql<{ manga: SManga }>(`query($id: Int!) { manga(id: $id) { ${SUMMARY} } }`, { id })
     if (manga.initialized) return manga
@@ -242,6 +249,7 @@ export async function getManga(id: number, refresh = false): Promise<SManga> {
 }
 
 export async function getChapters(mangaId: number, refresh = false): Promise<SChapter[]> {
+  if (onDevice()) return dev.devGetChapters(mangaId, refresh)
   if (!refresh) {
     const { manga } = await gql<{ manga: { chapters: { nodes: SChapter[] } } }>(
       `query($id: Int!) { manga(id: $id) { chapters { nodes { ${CHAPTER} } } } }`, { id: mangaId },
@@ -255,14 +263,14 @@ export async function getChapters(mangaId: number, refresh = false): Promise<SCh
 }
 
 /** Chapter totals and newest upload for titles in the library, by server id. */
-export const getMangaSummaries = (ids: number[]) =>
+export const getMangaSummaries = (ids: number[]): Promise<SManga[]> => onDevice() ? dev.devGetMangaSummaries(ids) :
   ids.length
     ? gql<{ mangas: { nodes: SManga[] } }>(`query($ids: [Int!]) { mangas(filter: { id: { in: $ids } }) { nodes { ${SUMMARY} } } }`, { ids })
       .then((d) => d.mangas.nodes)
     : Promise.resolve([])
 
 /** The server's copy of a source title, found by the source and the title's address on it. */
-export const findManga = (sourceId: string, url: string) =>
+export const findManga = (sourceId: string, url: string): Promise<SManga | undefined> => onDevice() ? dev.devFindManga(sourceId, url) :
   gql<{ mangas: { nodes: SManga[] } }>(
     `query($s: LongString!, $u: String!) { mangas(filter: { sourceId: { equalTo: $s }, url: { equalTo: $u } }) { nodes { ${SUMMARY} } } }`,
     { s: sourceId, u: url },
@@ -274,14 +282,14 @@ export const findManga = (sourceId: string, url: string) =>
  */
 export async function resolveManga(sourceId: string, url: string, title: string): Promise<SManga | undefined> {
   const found = await findManga(sourceId, url)
-  if (found) return found
+  if (found || onDevice()) return found
   await browseSource(sourceId, 'SEARCH', 1, title)
   return findManga(sourceId, url)
 }
 
 export type SRecentChapter = SChapter & { mangaId: number }
 /** The newest chapters of these titles, across all of them. */
-export const getRecentChapters = (mangaIds: number[], first = 150) =>
+export const getRecentChapters = (mangaIds: number[], first = 150): Promise<SRecentChapter[]> => onDevice() ? dev.devRecentChapters(mangaIds, first) :
   mangaIds.length
     ? gql<{ chapters: { nodes: SRecentChapter[] } }>(
       `query($ids: [Int!], $first: Int) { chapters(filter: { mangaId: { in: $ids } }, orderBy: UPLOAD_DATE, orderByType: DESC, first: $first) { nodes { ${CHAPTER} mangaId } } }`,
@@ -290,7 +298,7 @@ export const getRecentChapters = (mangaIds: number[], first = 150) =>
     : Promise.resolve([])
 
 /** Page image URLs for a chapter. */
-export const getPages = (chapterId: number) =>
+export const getPages = (chapterId: number): Promise<string[]> => onDevice() ? dev.devGetPages(chapterId) :
   gql<{ fetchChapterPages: { pages: string[] } }>(
     `mutation($id: Int!) { fetchChapterPages(input: { chapterId: $id }) { pages } }`, { id: chapterId },
   ).then((d) => d.fetchChapterPages.pages.map(assetUrl))

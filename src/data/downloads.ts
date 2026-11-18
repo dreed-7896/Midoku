@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { authHeaders, getPages } from './suwayomi'
+import { fetchImage, getPages } from './suwayomi'
 
 /**
  * Chapters saved on this device for offline reading. Page images go into Cache Storage keyed by their
@@ -113,11 +113,9 @@ async function saveChapter(job: DownloadJob) {
     while (next.length) {
       const url = next.shift()!
       if (!(await cache.match(url))) {
-        const res = await fetch(url, { headers: authHeaders() })
-        if (!res.ok) throw new Error(`Page failed (${res.status})`)
-        const blob = await res.blob()
+        const blob = await fetchImage(url)
         bytes += blob.size
-        await cache.put(url, new Response(blob, { headers: { 'content-type': res.headers.get('content-type') ?? 'image/jpeg' } }))
+        await cache.put(url, new Response(blob, { headers: { 'content-type': blob.type || 'image/jpeg' } }))
       }
       done++
       active = { key: job.key, progress: done / pages.length }

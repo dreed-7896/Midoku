@@ -8,7 +8,7 @@ export interface Settings {
   lockCredential: string
   /** Seconds in the background before the app locks again. */
   lockDelay: 0 | 60 | 300
-  /** Suwayomi server address, entered on this device. Empty shows sample data. */
+  /** Suwayomi server address, entered on this device, or 'device' for extensions on this device (iOS app). Empty shows sample data. */
   serverUrl: string
   /** Optional basic-auth login when the server has AUTH_MODE=basic_auth. */
   serverUser: string
@@ -20,9 +20,13 @@ export interface Settings {
 const KEY = 'midoku.settings'
 const DEFAULTS: Settings = { readerMode: 'webtoon', lockCredential: '', lockDelay: 0, serverUrl: '', serverUser: '', serverPass: '', pageCacheMB: 300 }
 
+/** In the iOS app, extensions run on the device unless a Suwayomi server is set up instead. */
+const inApp = () => !!(window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+
 function read(): Settings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Settings>
+    return { ...DEFAULTS, ...(inApp() && saved.serverUrl === undefined ? { serverUrl: 'device' } : {}), ...saved }
   } catch {
     return DEFAULTS
   }
