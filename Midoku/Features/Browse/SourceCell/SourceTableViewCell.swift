@@ -19,7 +19,7 @@ class SourceTableViewCell: UITableViewCell {
     var section: BrowseViewController.Section?
     weak var delegate: SourceCellDelegate?
 
-    private var iconSize: CGFloat = 48 {
+    private var iconSize: CGFloat = 42 {
         didSet {
             iconView.layer.cornerRadius = 0
         }
@@ -61,14 +61,14 @@ class SourceTableViewCell: UITableViewCell {
 
     func configure() {
         // TODO: use contentConfiguration
-        backgroundColor = .systemBackground
+        backgroundColor = MDColor.bg
         accessoryType = .disclosureIndicator
 
         iconView.image = UIImage(named: "MangaPlaceholder")
         iconView.clipsToBounds = true
         iconView.layer.cornerRadius = 0
         iconView.layer.cornerCurve = .continuous
-        iconView.layer.borderColor = UIColor.quaternarySystemFill.cgColor
+        iconView.layer.borderColor = MDColor.line.cgColor
         iconView.layer.borderWidth = 1
         iconView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(iconView)
@@ -85,34 +85,35 @@ class SourceTableViewCell: UITableViewCell {
         titleStack.spacing = 5
         labelStack.addArrangedSubview(titleStack)
 
-        titleLabel.font = UIFont.systemFont(ofSize: 16)
+        titleLabel.font = MDFont.ui(15, .semibold) ?? UIFont.systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = MDColor.text
         titleStack.addArrangedSubview(titleLabel)
 
-        versionLabel.font = titleLabel.font
-        versionLabel.textColor = .secondaryLabel
+        versionLabel.font = MDFont.mono(11, .medium) ?? .monospacedSystemFont(ofSize: 11, weight: .medium)
+        versionLabel.textColor = MDColor.text3
         titleStack.addArrangedSubview(versionLabel)
 
-        badgeView.backgroundColor = .systemRed.withAlphaComponent(0.3)
+        badgeView.backgroundColor = MDColor.accentSoft
         badgeView.layer.cornerRadius = 0
         badgeView.layer.cornerCurve = .continuous
 
         badgeLabel.text = "18+"
-        badgeLabel.textColor = .secondaryLabel
-        badgeLabel.font = .systemFont(ofSize: 10)
+        badgeLabel.textColor = MDColor.accent
+        badgeLabel.font = MDFont.mono(10, .bold) ?? .systemFont(ofSize: 10, weight: .bold)
         badgeLabel.textAlignment = .center
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
         badgeView.addSubview(badgeLabel)
         titleStack.addArrangedSubview(badgeView)
 
-        subtitleLabel.font = titleLabel.font
-        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.font = MDFont.ui(12) ?? .systemFont(ofSize: 12)
+        subtitleLabel.textColor = MDColor.text3
         labelStack.addArrangedSubview(subtitleLabel)
 
         let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)
         let image = UIImage(systemName: "exclamationmark.triangle", withConfiguration: config)
         warningButton.setImage(image, for: .normal)
         warningButton.addTarget(self, action: #selector(warningPressed), for: .touchUpInside)
-        warningButton.tintColor = .systemGray3
+        warningButton.tintColor = MDColor.amber
         warningButton.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(warningButton)
 
@@ -126,7 +127,7 @@ class SourceTableViewCell: UITableViewCell {
         getButton.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(getButton)
 
-        separator.backgroundColor = .separator
+        separator.backgroundColor = MDColor.line
         separator.translatesAutoresizingMaskIntoConstraints = false
         addSubview(separator)
     }

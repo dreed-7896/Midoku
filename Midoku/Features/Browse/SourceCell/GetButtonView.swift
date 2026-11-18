@@ -58,7 +58,10 @@ class GetButtonView: UIView {
         super.init(frame: frame)
 
         backgroundView.clipsToBounds = true
-        backgroundView.backgroundColor = .tertiarySystemFill
+        // web `.btn--ghost.btn--sm`
+        backgroundView.backgroundColor = .clear
+        backgroundView.layer.borderColor = MDColor.line2.cgColor
+        backgroundView.layer.borderWidth = 1
         backgroundView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(backgroundView)
 
@@ -68,9 +71,9 @@ class GetButtonView: UIView {
         addSubview(activityIndicator)
 
         button.setTitle(title, for: .normal)
-        button.setTitleColor(tintColor, for: .normal)
+        button.setTitleColor(MDColor.text, for: .normal)
 
-        button.titleLabel?.font = .systemFont(ofSize: 15, weight: .bold)
+        button.titleLabel?.font = MDFont.ui(13, .semibold) ?? .systemFont(ofSize: 13, weight: .semibold)
 
         button.addTarget(self, action: #selector(touchDown), for: .touchDown)
         button.addTarget(self, action: #selector(touchUp), for: .touchDragExit)
