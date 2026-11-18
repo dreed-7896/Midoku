@@ -126,18 +126,10 @@ struct CheckFilterGroupView: View {
             }
         } label: {
             HStack {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 0)
-                        .fill(state == 0 ? Color(uiColor: .secondarySystemFill) : Color.accentColor)
-                        .aspectRatio(1, contentMode: .fill)
-                        .frame(width: 24)
-                    if state == 1 || state == 2 {
-                        Image(systemName: state == 1 ? "checkmark" : "xmark")
-                            .foregroundStyle(.white)
-                            .font(.mdSystem(size: 14).weight(.semibold))
-                    }
-                }
+                MDCheckBox(state: state == 1 ? .on : state == 2 ? .excluded : .off)
                 Text(name ?? filter.title ?? "")
+                    .font(.mdSystem(size: 15))
+                    .foregroundStyle(Color.mdText)
                     .padding(.leading, 1)
                     .lineLimit(1)
                 Spacer()

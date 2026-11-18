@@ -9,7 +9,7 @@ import AidokuRunner
 import SafariServices
 import SwiftUI
 
-class BrowseViewController: BaseTableViewController {
+class BrowseViewController: BaseTableViewController, MDBarlessScreen {
     let viewModel = BrowseViewModel()
 
     private lazy var dataSource = makeDataSource()
@@ -18,6 +18,8 @@ class BrowseViewController: BaseTableViewController {
     private lazy var emptyStackView = EmptyPageStackView()
 
     private var hasAppliedInitialSnapshot = false
+    private var searchText = ""
+    private lazy var headerHost = UIHostingController(rootView: headerView(editing: false))
 
     override var tableViewStyle: UITableView.Style {
         .grouped
@@ -28,15 +30,14 @@ class BrowseViewController: BaseTableViewController {
 
         title = "Extensions"
 
-        navigationController?.navigationBar.prefersLargeTitles = false
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.hidesSearchBarWhenScrolling = false
 
-        // search controller
-        let searchController = UISearchController(searchResultsController: nil)
-        searchController.searchResultsUpdater = self
-        searchController.obscuresBackgroundDuringPresentation = false
-        navigationItem.searchController = searchController
+        // web page head: back, title, actions and the search field
+        headerHost.view.backgroundColor = .clear
+        headerHost.safeAreaRegions = []
+        addChild(headerHost)
+        tableView.tableHeaderView = headerHost.view
+        headerHost.didMove(toParent: self)
 
         // toolbar buttons
         let deleteButton = UIBarButtonItem(
@@ -125,7 +126,8 @@ class BrowseViewController: BaseTableViewController {
                 await self.viewModel.loadInstalledSources()
                 await self.viewModel.loadPinnedSources()
                 self.viewModel.loadUpdates()
-                if let query = self.navigationItem.searchController?.searchBar.text, !query.isEmpty {
+                if !self.searchText.isEmpty {
+                    let query = self.searchText
                     self.viewModel.search(query: query)
                 }
                 self.updateDataSource()
@@ -169,9 +171,16 @@ class BrowseViewController: BaseTableViewController {
         // fix refresh control snapping height
         refreshControl.didMoveToSuperview()
 
-        // hack to show search bar on initial presentation
-        if !navigationItem.hidesSearchBarWhenScrolling {
-            navigationItem.hidesSearchBarWhenScrolling = true
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = tableView.bounds.width
+        guard width > 0 else { return }
+        let height = headerHost.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        if abs(headerHost.view.frame.height - height) > 0.5 || abs(headerHost.view.frame.width - width) > 0.5 {
+            headerHost.view.frame = CGRect(x: 0, y: 0, width: width, height: height)
+            tableView.tableHeaderView = headerHost.view
         }
     }
 
@@ -280,11 +289,6 @@ extension BrowseViewController {
 
     @objc func openMigrateSourcePage() {
         let viewController = SwiftUINavigationViewController(rootView: MigrateSourcesView())
-        if #available(iOS 26.0, *) {
-            viewController.preferredTransition = .zoom { _ in
-                self.navigationItem.rightBarButtonItems?.last
-            }
-        }
         viewController.modalPresentationStyle = .pageSheet
         present(viewController, animated: true)
     }
@@ -297,11 +301,6 @@ extension BrowseViewController {
                 .environmentObject(path)
         )
         path.rootViewController = hostingController
-        if #available(iOS 26.0, *) {
-            hostingController.preferredTransition = .zoom { _ in
-                self.navigationItem.rightBarButtonItems?.first
-            }
-        }
         hostingController.modalPresentationStyle = .pageSheet
         present(hostingController, animated: true)
     }
@@ -611,10 +610,11 @@ extension BrowseViewController {
         }
 
         Task { @MainActor in
-            if navigationItem.searchController?.searchBar.text?.isEmpty ?? true {
+            if searchText.isEmpty {
                 emptyStackView.isHidden = !snapshot.itemIdentifiers.isEmpty
             }
             checkUpdateCount()
+            updateNavbar()
         }
     }
 
@@ -647,51 +647,29 @@ extension BrowseViewController {
     }
 }
 
-// MARK: - Search Results
-extension BrowseViewController: UISearchResultsUpdating {
-    func updateSearchResults(for searchController: UISearchController) {
-        viewModel.search(query: searchController.searchBar.text)
-        updateDataSource()
-    }
-}
-
 extension BrowseViewController {
     func updateNavbar(isEditing: Bool? = nil) {
-        let isEditing = isEditing ?? self.isEditing
-        if isEditing {
-            navigationItem.rightBarButtonItems = [UIBarButtonItem(
-                barButtonSystemItem: .done,
-                target: self,
-                action: #selector(stopEditing)
-            )]
-        } else {
-            let addSourceBarButton = UIBarButtonItem(
-                image: UIImage(systemName: "plus"),
-                style: .plain,
-                target: self,
-                action: #selector(openAddSourcePage)
-            )
-            addSourceBarButton.title = NSLocalizedString("ADD_SOURCE")
-            if #available(iOS 26.0, *) {
-                addSourceBarButton.sharesBackground = false
-            }
+        headerHost.rootView = headerView(editing: isEditing ?? self.isEditing)
+    }
 
-            let migrateSourcesBarButton = UIBarButtonItem(
-                image: UIImage(systemName: "arrow.left.arrow.right"),
-                style: .plain,
-                target: self,
-                action: #selector(openMigrateSourcePage)
-            )
-            migrateSourcesBarButton.title = NSLocalizedString("MIGRATE_SOURCES")
-            if #available(iOS 26.0, *) {
-                migrateSourcesBarButton.sharesBackground = false
-            }
-
-            navigationItem.rightBarButtonItems = [
-                addSourceBarButton,
-                migrateSourcesBarButton
-            ]
-        }
+    private func headerView(editing: Bool) -> BrowseHeaderView {
+        BrowseHeaderView(
+            installedCount: viewModel.installedSources.count + viewModel.pinnedSources.count,
+            editing: editing,
+            search: .init(
+                get: { [weak self] in self?.searchText ?? "" },
+                set: { [weak self] in
+                    guard let self else { return }
+                    self.searchText = $0
+                    self.viewModel.search(query: $0)
+                    self.updateDataSource()
+                }
+            ),
+            onBack: { [weak self] in self?.navigationController?.popViewController(animated: true) },
+            onAdd: { [weak self] in self?.openAddSourcePage() },
+            onMigrate: { [weak self] in self?.openMigrateSourcePage() },
+            onDone: { [weak self] in self?.stopEditing() }
+        )
     }
 
     func updateToolbar(isEditing: Bool? = nil) {

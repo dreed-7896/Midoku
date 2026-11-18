@@ -195,26 +195,10 @@ struct SortButtonStyle: ButtonStyle {
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        let foregroundColor = state == .normal ? Color.primary : Color.white
-        let backgroundColor = switch state {
-            case .normal:
-                Color(uiColor: .secondarySystemBackground)
-            case .descending, .ascending:
-                Color.accentColor
-        }
-        return HStack(spacing: 5) {
-            configuration.label
-                .font(.mdCallout)
-            if state != .normal {
-                Image(systemName: state == .descending ? "chevron.down" : "chevron.up")
-                    .font(.mdCallout.weight(.medium))
-                    .padding(state == .descending ? .top : .bottom, 1)
-            }
-        }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 12)
-        .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.7 : 1))
-        .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 0))
+        MDFilterChipStyle(
+            state: state == .normal ? .off : .on,
+            trailingSymbol: state == .normal ? nil : state == .descending ? "chevron.down" : "chevron.up"
+        )
+        .makeBody(configuration: configuration)
     }
 }

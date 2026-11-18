@@ -188,17 +188,11 @@ struct SelectFilterGroupView: View {
                     HStack {
                         ZStack {
                             let selected = selectedOption == option.value
-                            RoundedRectangle(cornerRadius: 0)
-                                .fill(selected ? Color.accentColor : Color(uiColor: .secondarySystemFill))
-                                .aspectRatio(1, contentMode: .fill)
-                                .frame(width: 24)
-                            if selected {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.white)
-                                    .font(.mdSystem(size: 14).weight(.semibold))
-                            }
+                            MDCheckBox(state: selected ? .on : .off)
                         }
                         Text(option.title)
+                            .font(.mdSystem(size: 15))
+                            .foregroundStyle(Color.mdText)
                             .padding(.leading, 1)
                             .lineLimit(1)
                         Spacer()
@@ -217,20 +211,6 @@ private struct SelectButtonStyle: ButtonStyle {
     var selected: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        let foregroundColor = selected ? Color.white : Color.primary
-        let backgroundColor = selected ? Color.accentColor : Color(uiColor: .secondarySystemBackground)
-        return // HStack(spacing: 5) {
-            configuration.label
-                .font(.mdCallout)
-//            if selected {
-//                Image(systemName: "checkmark")
-//                    .font(.mdCallout.weight(.medium))
-//            }
-//        }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 12)
-        .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.7 : 1))
-        .background(backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 0))
+        MDFilterChipStyle(state: selected ? .on : .off).makeBody(configuration: configuration)
     }
 }

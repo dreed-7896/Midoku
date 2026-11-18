@@ -15,16 +15,9 @@ struct TextFieldWrapper<Content: View>: View {
         HStack(spacing: 4) {
             content
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 0)
-            .fill(Color(uiColor: .secondarySystemBackground)))
-        .clipShape(RoundedRectangle(cornerRadius: 0))
-        .overlay {
-            if hasError {
-                RoundedRectangle(cornerRadius: 0)
-                    .strokeBorder(Color.red, lineWidth: 1)
-            }
-        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 46)
+        .background(Color.mdS1)
+        .overlay(Rectangle().strokeBorder(hasError ? Color.mdAccent : Color.mdLine, lineWidth: 1))
     }
 }

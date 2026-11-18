@@ -46,13 +46,41 @@ struct FilterListSheetView: View {
         }
     }
 
+    private var changeCount: Int {
+        newEnabledFilters.count
+    }
+
+    /// `.sheet--tall`: "Filters" head with a close square, the filters, then sticky Reset / Apply.
     var body: some View {
-        PlatformNavigationStack {
-            let scrollView = ScrollView(.vertical) {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text(NSLocalizedString("FILTERS"))
+                    .font(.mdDisplay(21, weight: .bold))
+                    .tracking(-0.3)
+                    .foregroundStyle(Color.mdText)
+                Spacer(minLength: 0)
+                if sourceKey != nil {
+                    MDIconButton(systemImage: "bookmark", label: NSLocalizedString("SAVE")) { promptSearchSave() }
+                }
+                MDIconButton(systemImage: "xmark", label: NSLocalizedString("CANCEL")) {
+                    if newEnabledFilters == enabledFilters {
+                        dismiss()
+                    } else {
+                        showConfirm = true
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+
+            ScrollView(.vertical) {
                 VStack(spacing: 22) {
                     if incognitoMode.value {
                         Text(NSLocalizedString("INCOGNITO_FILTERS_NOTICE"))
-                            .foregroundStyle(.secondary)
+                            .font(.mdSystem(size: 13))
+                            .foregroundStyle(Color.mdText3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
                     }
 
                     FilterListView(
@@ -62,109 +90,63 @@ struct FilterListSheetView: View {
                         savedSearches: $savedSearches
                     )
                 }
+                .padding(.bottom, 20)
             }
             .scrollDismissesKeyboardInteractively()
-            .navigationTitle(NSLocalizedString("FILTERS"))
-            .navigationBarTitleDisplayMode(.inline)
-            .confirmationDialogOrAlert(
-                NSLocalizedString("CANCEL_CONFIRM"),
-                isPresented: $showConfirm,
-                titleVisibility: .visible
-            ) {
-                Button(NSLocalizedString("DISCARD_CHANGES"), role: .destructive) {
-                    discardChanges = true
-                    dismiss()
-                }
-            } message: {
-                Text(NSLocalizedString("CANCEL_CONFIRM_TEXT"))
-            }
-            .alert(NSLocalizedString("SAVE_SEARCH_FAIL"), isPresented: $showSaveErrorAlert) {
-                Button(NSLocalizedString("OK"), role: .cancel) {}
-            } message: {
-                Text(NSLocalizedString("SAVE_SEARCH_FAIL_INFO"))
-            }
-            .onDisappear {
-                saveSavedSearches()
-                guard !discardChanges, newEnabledFilters != enabledFilters || newSearch != nil else { return }
-                if let newSearch {
-                    search = newSearch
-                }
-                enabledFilters = newEnabledFilters
-            }
 
-            if #available(iOS 26.0, *) {
-                scrollView
-                    .toolbar {
-                        toolbarContentiOS26
-                    }
-            } else {
-                scrollView
-                    .toolbar {
-                        toolbarContentiOS18
-                    }
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    var commonToolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button(NSLocalizedString("CANCEL")) {
-                if newEnabledFilters == enabledFilters {
-                    dismiss()
-                } else {
-                    showConfirm = true
-                }
-            }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button(NSLocalizedString("APPLY")) {
-                dismiss()
-            }
-            .font(.mdBody.weight(.medium))
-        }
-    }
-
-    @available(iOS 26.0, *)
-    @ToolbarContentBuilder
-    var toolbarContentiOS26: some ToolbarContent {
-        commonToolbarContent
-
-        ToolbarItem(placement: .bottomBar) {
-            Button(NSLocalizedString("RESET")) {
-                newEnabledFilters = []
-                dismiss()
-            }
-        }
-
-        ToolbarSpacer(.flexible, placement: .bottomBar)
-
-        if sourceKey != nil {
-            ToolbarItem(placement: .bottomBar) {
-                Button(NSLocalizedString("SAVE")) {
-                    promptSearchSave()
-                }
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    var toolbarContentiOS18: some ToolbarContent {
-        commonToolbarContent
-
-        ToolbarItem(placement: .bottomBar) {
-            HStack {
-                Button(NSLocalizedString("RESET")) {
+            // `.sheet__actions--sticky`
+            HStack(spacing: 10) {
+                Button {
                     newEnabledFilters = []
                     dismiss()
+                } label: {
+                    Text(NSLocalizedString("RESET")).frame(maxWidth: .infinity)
                 }
-                Spacer()
-                if sourceKey != nil {
-                    Button(NSLocalizedString("SAVE")) {
-                        promptSearchSave()
-                    }
+                .buttonStyle(MDGhostButtonStyle(small: false))
+                Button {
+                    dismiss()
+                } label: {
+                    Text(changeCount > 0 ? "\(NSLocalizedString("APPLY")) · \(changeCount)" : NSLocalizedString("APPLY"))
+                        .font(.mdSystem(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(uiColor: MDColor.onAccent))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(Color.mdAccent)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(Color.mdS2)
+            .overlay(alignment: .top) { Rectangle().fill(Color.mdLine2).frame(height: 1) }
+        }
+        .background(Color.mdS2.ignoresSafeArea())
+        .confirmationDialogOrAlert(
+            NSLocalizedString("CANCEL_CONFIRM"),
+            isPresented: $showConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("DISCARD_CHANGES"), role: .destructive) {
+                discardChanges = true
+                dismiss()
+            }
+        } message: {
+            Text(NSLocalizedString("CANCEL_CONFIRM_TEXT"))
+        }
+        .alert(NSLocalizedString("SAVE_SEARCH_FAIL"), isPresented: $showSaveErrorAlert) {
+            Button(NSLocalizedString("OK"), role: .cancel) {}
+        } message: {
+            Text(NSLocalizedString("SAVE_SEARCH_FAIL_INFO"))
+        }
+        .onDisappear {
+            saveSavedSearches()
+            guard !discardChanges, newEnabledFilters != enabledFilters || newSearch != nil else { return }
+            if let newSearch {
+                search = newSearch
+            }
+            enabledFilters = newEnabledFilters
         }
     }
 
@@ -448,10 +430,14 @@ private struct FilterListView: View {
         }
     }
 
+    /// `.label`: mono uppercase filter name.
     private func titleView(_ title: String?, searchId: String? = nil) -> some View {
         HStack {
             Text(title ?? "")
-                .font(.mdTitle3.weight(.semibold))
+                .font(.mdMono(11, weight: .semibold))
+                .textCase(.uppercase)
+                .tracking(1)
+                .foregroundStyle(Color.mdText3)
             Spacer()
             if let searchId {
                 let isSearching = search[searchId] != nil
@@ -466,7 +452,12 @@ private struct FilterListView: View {
                     }
                 } label: {
                     Image(systemName: isSearching ? "xmark" : "magnifyingglass")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.mdText2)
+                        .frame(width: 30, height: 30)
+                        .background(Color.mdS3)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal)
@@ -495,11 +486,10 @@ private struct FilterListView: View {
         Group {
             content()
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 0, style: .continuous)
-                .fill(Color(uiColor: .tertiarySystemFill))
-        )
+        .padding(.horizontal, 14)
+        .frame(minHeight: 46)
+        .background(Color.mdS1)
+        .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
     }
 
     private func rangeFilterView(filter: AidokuRunner.Filter, min: Float?, max: Float?, decimal: Bool) -> some View {

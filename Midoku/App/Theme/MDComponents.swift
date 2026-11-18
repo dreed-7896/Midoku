@@ -268,3 +268,44 @@ struct MDUnderlineTab: View {
     }
 }
 
+
+/// `.chip` as a filter option: off (hairline), on (white fill), excluded (accent, struck through).
+struct MDFilterChipStyle: ButtonStyle {
+    enum State { case off, on, excluded }
+    var state: State = .off
+    var trailingSymbol: String?
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.label
+                .strikethrough(state == .excluded)
+            if let trailingSymbol {
+                Image(systemName: trailingSymbol).font(.system(size: 11, weight: .bold))
+            }
+        }
+        .font(.mdSystem(size: 13, weight: state == .off ? .medium : .semibold))
+        .lineLimit(1)
+        .foregroundStyle(state == .on ? Color(uiColor: MDColor.onAccent) : state == .excluded ? Color.mdAccent : Color.mdText2)
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(state == .on ? Color.mdText : state == .excluded ? Color.mdAccentSoft : Color.clear)
+        .overlay(Rectangle().strokeBorder(state == .on ? Color.mdText : state == .excluded ? Color.mdAccent : Color.mdLine2, lineWidth: 1))
+        .contentShape(Rectangle())
+        .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// Square check / cross box for filter lists.
+struct MDCheckBox: View {
+    enum State { case off, on, excluded }
+    var state: State = .off
+
+    var body: some View {
+        Image(systemName: state == .excluded ? "xmark" : "checkmark")
+            .font(.system(size: 12, weight: .heavy))
+            .foregroundStyle(state == .off ? Color.clear : Color(uiColor: MDColor.onAccent))
+            .frame(width: 22, height: 22)
+            .background(state == .on ? Color.mdText : state == .excluded ? Color.mdAccent : Color.clear)
+            .overlay(Rectangle().strokeBorder(state == .on ? Color.mdText : state == .excluded ? Color.mdAccent : Color.mdLine2, lineWidth: 1.5))
+    }
+}

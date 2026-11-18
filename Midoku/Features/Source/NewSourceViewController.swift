@@ -15,7 +15,7 @@ import NukeUI
 import SafariServices
 import SwiftUI
 
-class NewSourceViewController: UIViewController {
+class NewSourceViewController: UIViewController, MDBarlessScreen {
     let source: AidokuRunner.Source
     // if the listings/home should be hidden and the search view shown by default
     private let onlySearch: Bool
@@ -285,24 +285,6 @@ class NewSourceViewController: UIViewController {
             statusBarCover.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ]
         NSLayoutConstraint.activate(constraints)
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.setNavigationBarHidden(true, animated: animated)
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        guard let navigationController else { return }
-        // Screens pushed on top keep their bar; going back to a tab root that hides it leaves it hidden.
-        let backToBarlessRoot = isMovingFromParent
-            && navigationController.viewControllers.count <= 1
-            && (navigationController as? NavigationController)?.hidesBarAtRoot == true
-        let backToBarlessSource = isMovingFromParent && navigationController.viewControllers.last is NewSourceViewController
-        if !backToBarlessRoot && !backToBarlessSource {
-            navigationController.setNavigationBarHidden(false, animated: animated)
-        }
     }
 
     override func viewSafeAreaInsetsDidChange() {

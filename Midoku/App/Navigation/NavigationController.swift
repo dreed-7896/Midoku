@@ -7,7 +7,10 @@
 
 import UIKit
 
-class NavigationController: UINavigationController {
+/// A screen that draws its own web-style top bar (back button and actions) instead of the navigation bar.
+protocol MDBarlessScreen: UIViewController {}
+
+class NavigationController: UINavigationController, UINavigationControllerDelegate {
     override var childForStatusBarHidden: UIViewController? {
         topViewController is ReaderViewController ? topViewController : super.childForStatusBarHidden
     }
@@ -16,45 +19,32 @@ class NavigationController: UINavigationController {
     }
     override func viewDidLoad() {
         super.viewDidLoad()
+        delegate = self
         interactivePopGestureRecognizer?.isEnabled = true
         if #available(iOS 26.0, *) { interactiveContentPopGestureRecognizer?.isEnabled = true }
     }
-    /// Tab roots that draw the web page header themselves hide the navigation bar; pushed screens show it.
+    /// Tab roots that draw the web page header themselves hide the navigation bar; pushed screens show it
+    /// unless they adopt `MDBarlessScreen`.
     var hidesBarAtRoot = false {
-        didSet { if isViewLoaded { syncRootBar(animated: false) } }
+        didSet { if isViewLoaded, let top = topViewController { setNavigationBarHidden(wantsBarHidden(top), animated: false) } }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        syncRootBar(animated: false)
+        if let top = topViewController { setNavigationBarHidden(wantsBarHidden(top), animated: false) }
     }
 
-    private func syncRootBar(animated: Bool) {
-        guard hidesBarAtRoot else { return }
-        setNavigationBarHidden(viewControllers.count <= 1, animated: animated)
+    private func wantsBarHidden(_ viewController: UIViewController) -> Bool {
+        if viewController is ReaderViewController { return isNavigationBarHidden }
+        return viewController is MDBarlessScreen || (hidesBarAtRoot && viewController === viewControllers.first)
     }
 
-    @discardableResult
-    override func popViewController(animated: Bool) -> UIViewController? {
-        let popped = super.popViewController(animated: animated)
-        afterPop(animated: animated)
-        return popped
-    }
-
-    @discardableResult
-    override func popToRootViewController(animated: Bool) -> [UIViewController]? {
-        let popped = super.popToRootViewController(animated: animated)
-        afterPop(animated: animated)
-        return popped
-    }
-
-    private func afterPop(animated: Bool) {
-        guard hidesBarAtRoot, viewControllers.count <= 1 else { return }
-        setNavigationBarHidden(true, animated: animated)
-        // A cancelled swipe back stays on the pushed screen: show its bar again.
+    func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
+        setNavigationBarHidden(wantsBarHidden(viewController), animated: animated)
+        // A cancelled swipe back stays on the screen it started from.
         transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
-            guard let self, context.isCancelled else { return }
-            self.setNavigationBarHidden(false, animated: true)
+            guard context.isCancelled, let self, let top = self.topViewController else { return }
+            self.setNavigationBarHidden(self.wantsBarHidden(top), animated: true)
         }
     }
 
@@ -64,7 +54,6 @@ class NavigationController: UINavigationController {
             viewController.navigationItem.largeTitleDisplayMode = .never
         }
         super.pushViewController(viewController, animated: animated)
-        if hidesBarAtRoot, viewControllers.count > 1 { setNavigationBarHidden(false, animated: animated) }
     }
 
     // This is a workaround to fix an iOS bug that occurs when mixing UIKit with SwiftUI,

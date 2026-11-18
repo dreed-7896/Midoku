@@ -34,15 +34,17 @@ class SmallSectionHeaderContentView: UIView, UIContentView {
         self.configuration = configuration
         super.init(frame: .zero)
 
-        titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        // `.label`: mono uppercase section label
+        titleLabel.font = MDFont.mono(11, .semibold) ?? .monospacedSystemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = MDColor.text3
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: topAnchor),
-            titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
-            titleLabel.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: layoutMarginsGuide.trailingAnchor, constant: -12)
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 18),
+            titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16)
         ])
 
         configure()
@@ -54,6 +56,9 @@ class SmallSectionHeaderContentView: UIView, UIContentView {
 
     func configure() {
         guard let configuration = configuration as? SmallSectionHeaderConfiguration else { return }
-        titleLabel.text = configuration.title
+        titleLabel.attributedText = NSAttributedString(
+            string: (configuration.title ?? "").uppercased(),
+            attributes: [.kern: 1.0]
+        )
     }
 }

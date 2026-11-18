@@ -260,17 +260,11 @@ struct MultiSelectFilterGroupView: View {
                             } else {
                                 .normal
                             }
-                            RoundedRectangle(cornerRadius: 0)
-                                .fill(state == .normal ? Color(uiColor: .secondarySystemFill) : Color.accentColor)
-                                .aspectRatio(1, contentMode: .fill)
-                                .frame(width: 24)
-                            if state != .normal {
-                                Image(systemName: state == .included ? "checkmark" : "xmark")
-                                    .foregroundStyle(.white)
-                                    .font(.mdSystem(size: 14).weight(.semibold))
-                            }
+                            MDCheckBox(state: state == .included ? .on : state == .excluded ? .excluded : .off)
                         }
                         Text(option.title)
+                            .font(.mdSystem(size: 15))
+                            .foregroundStyle(Color.mdText)
                             .padding(.leading, 1)
                             .lineLimit(1)
                         Spacer()
@@ -309,23 +303,7 @@ private struct GenreButtonStyle: ButtonStyle {
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        let foregroundColor = state == .normal ? Color.primary : Color.white
-        let backgroundColor = switch state {
-            case .normal:
-                Color(uiColor: .secondarySystemBackground)
-            case .enabled:
-                Color.accentColor
-            case .included:
-                Color.green
-            case .excluded:
-                Color.red
-        }
-        return configuration.label
-            .font(.mdCallout)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 12)
-            .foregroundStyle(foregroundColor.opacity(configuration.isPressed ? 0.7 : 1))
-            .background(backgroundColor)
-            .clipShape(RoundedRectangle(cornerRadius: 0))
+        MDFilterChipStyle(state: state == .normal ? .off : state == .excluded ? .excluded : .on)
+            .makeBody(configuration: configuration)
     }
 }
