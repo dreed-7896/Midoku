@@ -62,7 +62,7 @@ struct DownloadsView: View {
                 }
             } else {
                 ForEach(viewModel.groupedManga, id: \.source) { group in
-                    Section(header: Text(group.source)) {
+                    Section(header: MDSettingsHeader(title: group.source)) {
                         ForEach(group.manga) { manga in
                             NavigationLink(destination: DownloadedMangaView(manga: manga).environmentObject(path)) {
                                 DownloadedMangaRow(manga: manga)

@@ -78,3 +78,32 @@ struct MangaGridItem: View {
             .aspectRatio(2/3, contentMode: .fill)
     }
 }
+
+/// Midoku Web `.card`: the cover (2:3, hairline, "✓ Saved" badge) with a two-line title under it.
+struct MDMangaCard: View {
+    var source: AidokuRunner.Source?
+    let title: String
+    let coverImage: String
+    var saved = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle()
+                .fill(Color.mdS2)
+                .aspectRatio(2/3, contentMode: .fill)
+                .overlay {
+                    SourceImageView(source: source, imageUrl: coverImage, downsampleWidth: 400)
+                }
+                .clipped()
+                .overlay(alignment: .topLeading) { if saved { MangaCoverView.savedBadge } }
+                .overlay(Rectangle().strokeBorder(Color.mdLine, lineWidth: 1))
+                .contentShape(Rectangle())
+            Text(title)
+                .font(.mdSystem(size: 13, weight: .semibold))
+                .foregroundStyle(Color.mdText)
+                .lineLimit(2, reservesSpace: true)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}

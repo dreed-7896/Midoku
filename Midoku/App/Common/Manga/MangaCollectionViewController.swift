@@ -11,6 +11,8 @@ import SwiftUI
 
 class MangaCollectionViewController: BaseCollectionViewController {
     var usesListLayout = false
+    /// Midoku Web `.grid3` of `.card`s (titles under the covers) instead of titles over the covers.
+    var usesCardLayout = false
 
     lazy var dataSource = makeDataSource()
     lazy var refreshControl = UIRefreshControl()
@@ -124,6 +126,8 @@ class MangaCollectionViewController: BaseCollectionViewController {
                 case .regular:
                     if self.usesListLayout {
                         return OldMangaCollectionViewController.makeListLayoutSection(environment: environment)
+                    } else if self.usesCardLayout {
+                        return Self.makeCardLayoutSection(environment: environment)
                     } else {
                         return OldMangaCollectionViewController.makeGridLayoutSection(environment: environment)
                     }
@@ -135,6 +139,29 @@ class MangaCollectionViewController: BaseCollectionViewController {
 }
 
 extension MangaCollectionViewController {
+    /// `.grid3`: three columns on a phone (more on wider screens), 10pt apart, rows 18pt apart.
+    static func makeCardLayoutSection(environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
+        let containerWidth = environment.container.contentSize.width
+        let usable = containerWidth - 32
+        let columns = max(3, Int(floor((usable + 10) / 140)))
+        let itemWidth = (usable - CGFloat(columns - 1) * 10) / CGFloat(columns)
+        let itemHeight = (itemWidth * 1.5 + 8 + 34).rounded(.up)
+        let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(
+            widthDimension: .absolute(itemWidth),
+            heightDimension: .absolute(itemHeight)
+        ))
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(itemHeight)),
+            subitem: item,
+            count: columns
+        )
+        group.interItemSpacing = .fixed(10)
+        let section = NSCollectionLayoutSection(group: group)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 16, bottom: 0, trailing: 16)
+        section.interGroupSpacing = 18
+        return section
+    }
+
     @objc func refresh(_ control: UIRefreshControl) {
         control.endRefreshing()
     }
@@ -157,6 +184,7 @@ extension MangaCollectionViewController {
     func makeGridCellRegistration() -> GridCellRegistration {
         GridCellRegistration { [weak self] cell, _, manga in
             cell.identifier = MangaIdentifier(sourceKey: manga.sourceKey, mangaKey: manga.key)
+            cell.titleBelow = self?.usesCardLayout ?? false
             cell.title = manga.title
             cell.showsBookmark = self?.bookmarkedItems.contains(manga.key) ?? false
             Task {

@@ -67,6 +67,29 @@ class MangaGridCell: UICollectionViewCell {
     private lazy var selectionView = SelectionCheckView(style: .bordered)
 
     private var badgeConstraints: [NSLayoutConstraint] = []
+    private var overlayConstraints: [NSLayoutConstraint] = []
+    private var cardConstraints: [NSLayoutConstraint] = []
+
+    /// Midoku Web `.card`: the cover alone (2:3, hairline border) with a two-line title under it.
+    var titleBelow = false {
+        didSet {
+            guard titleBelow != oldValue else { return }
+            applyTitlePlacement()
+        }
+    }
+
+    private func applyTitlePlacement() {
+        NSLayoutConstraint.deactivate(titleBelow ? overlayConstraints : cardConstraints)
+        NSLayoutConstraint.activate(titleBelow ? cardConstraints : overlayConstraints)
+        overlayView.isHidden = titleBelow
+        contentView.layer.borderWidth = titleBelow ? 0 : 1
+        imageView.layer.borderWidth = titleBelow ? 1 : 0
+        imageView.layer.borderColor = MDColor.line.cgColor
+        imageView.clipsToBounds = true
+        titleLabel.textColor = titleBelow ? MDColor.text : .white
+        titleLabel.numberOfLines = titleBelow ? 2 : 5
+        titleLabel.layer.shadowOpacity = titleBelow ? 0 : 0.6
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -158,21 +181,31 @@ class MangaGridCell: UICollectionViewCell {
         highlightView.translatesAutoresizingMaskIntoConstraints = false
         selectionView.translatesAutoresizingMaskIntoConstraints = false
 
+        overlayConstraints = [
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 28)
+        ]
+        cardConstraints = [
+            imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor, multiplier: 1.5),
+            titleLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor)
+        ]
+        NSLayoutConstraint.activate(overlayConstraints)
+
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
             overlayView.topAnchor.constraint(equalTo: contentView.topAnchor),
             overlayView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             overlayView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             overlayView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: 28),
 
             badgeView.heightAnchor.constraint(equalToConstant: 20),
             badgeView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),

@@ -37,50 +37,17 @@ struct HomeGridView: View {
         self._columns = State(initialValue: Self.getColumns())
     }
 
+    /// `.grid3`: three columns on a phone, more on wider screens; 10pt between columns.
     static func getColumns() -> [GridItem] {
-        let layout = AppSettings.appearance.layout.get()
-
-        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-        let orientation =
-            if #available(iOS 16.0, *) {
-                scene?.effectiveGeometry.interfaceOrientation
-            } else {
-                scene?.interfaceOrientation
-            }
-        let isLandscape = orientation?.isLandscape ?? false
-
-        let itemsPerRow: Int
-        switch layout {
-            case .standard:
-                itemsPerRow = if UIDevice.current.userInterfaceIdiom == .pad {
-                    isLandscape ? 6 : 4
-                } else {
-                    isLandscape ? 4 : 2
-                }
-            case .compact:
-                itemsPerRow = if UIDevice.current.userInterfaceIdiom == .pad {
-                    isLandscape ? 8 : 5
-                } else {
-                    isLandscape ? 7 : 3
-                }
-            case .custom:
-                itemsPerRow = if isLandscape {
-                    AppSettings.appearance.customLandscapeRows.get()
-                } else {
-                    AppSettings.appearance.customPortraitRows.get()
-                }
-        }
-
-        let idealWidth = UIScreen.main.bounds.size.width / CGFloat(itemsPerRow)
-        return (0..<itemsPerRow).map { _ in
-            GridItem(.flexible(minimum: idealWidth / 2), spacing: spacing)
-        }
+        let width = UIScreen.main.bounds.width - 32
+        let count = max(3, Int(floor((width + 10) / 140)))
+        return (0..<count).map { _ in GridItem(.flexible(), spacing: 10, alignment: .top) }
     }
 
     var body: some View {
         LazyVGrid(
             columns: columns,
-            spacing: Self.spacing
+            spacing: 18
         ) {
             ForEach(entries.indices, id: \.self) { index in
                 mangaGridItem(entry: entries[index])
@@ -114,12 +81,7 @@ struct HomeGridView: View {
                 path.push(MangaViewController(source: source, manga: entry, parent: path.rootViewController))
             }
         } label: {
-            MangaGridItem(
-                source: source,
-                title: entry.title,
-                coverImage: entry.cover ?? "",
-                bookmarked: inLibrary
-            )
+            MDMangaCard(source: source, title: entry.title, coverImage: entry.cover ?? "", saved: inLibrary)
         }
         .buttonStyle(MangaGridButtonStyle())
         .contextMenu {
@@ -182,9 +144,13 @@ struct HomeGridView: View {
     }
 
     static var placeholder: some View {
-        LazyVGrid(columns: Self.getColumns(), spacing: Self.spacing) {
+        LazyVGrid(columns: Self.getColumns(), spacing: 18) {
             ForEach(0..<30) { _ in
-                MangaGridItem.placeholder
+                VStack(alignment: .leading, spacing: 8) {
+                    MangaGridItem.placeholder
+                    MDSkeleton().frame(height: 12)
+                    MDSkeleton().frame(width: 60, height: 12)
+                }
             }
         }
         .shimmering()

@@ -37,6 +37,7 @@ class SourceSearchViewController: MangaCollectionViewController {
     init(source: AidokuRunner.Source) {
         self.viewModel = .init(source: source)
         super.init()
+        usesCardLayout = true
     }
 
     override func configure() {

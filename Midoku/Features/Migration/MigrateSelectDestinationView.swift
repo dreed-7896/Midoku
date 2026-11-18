@@ -40,7 +40,7 @@ struct MigrateSelectDestinationView: View {
             }
 
             if !selectedSources.isEmpty {
-                Section(header: Text(NSLocalizedString("SELECTED"))) {
+                Section(header: MDSettingsHeader(title: "SELECTED")) {
                     ForEach(selectedSources, id: \.sourceId) { source in
                         Text(source.name)
                     }
@@ -48,7 +48,7 @@ struct MigrateSelectDestinationView: View {
                     .onDelete(perform: delete)
                 }
             }
-            Section(header: Text(NSLocalizedString("AVAILABLE"))) {
+            Section(header: MDSettingsHeader(title: "AVAILABLE")) {
                 ForEach(availableSources, id: \.sourceId) { source in
                     Button {
                         select(source: source)

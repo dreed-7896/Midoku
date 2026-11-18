@@ -41,6 +41,7 @@ class NavigationController: UINavigationController, UINavigationControllerDelega
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         setNavigationBarHidden(wantsBarHidden(viewController), animated: animated)
+        Self.flattenBarItems(of: viewController.navigationItem)
         // A cancelled swipe back stays on the screen it started from.
         transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
             guard context.isCancelled, let self, let top = self.topViewController else { return }
@@ -53,7 +54,22 @@ class NavigationController: UINavigationController, UINavigationControllerDelega
         if !viewControllers.isEmpty, viewController.navigationItem.largeTitleDisplayMode == .automatic {
             viewController.navigationItem.largeTitleDisplayMode = .never
         }
+        // The back button comes from the screen underneath: a plain chevron with no glass capsule.
+        if let top = topViewController, top.navigationItem.backBarButtonItem == nil {
+            let back = UIBarButtonItem(title: "", style: .plain, target: nil, action: nil)
+            back.hidesSharedBackground = true
+            top.navigationItem.backBarButtonItem = back
+            top.navigationItem.backButtonDisplayMode = .minimal
+        }
         super.pushViewController(viewController, animated: animated)
+    }
+
+    /// Midoku Web bars are flat: no shared glass background behind bar buttons.
+    static func flattenBarItems(of item: UINavigationItem) {
+        for button in (item.leftBarButtonItems ?? []) + (item.rightBarButtonItems ?? []) {
+            button.hidesSharedBackground = true
+        }
+        item.backBarButtonItem?.hidesSharedBackground = true
     }
 
     // This is a workaround to fix an iOS bug that occurs when mixing UIKit with SwiftUI,
