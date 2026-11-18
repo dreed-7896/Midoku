@@ -1,13 +1,19 @@
 import SwiftUI
 
 struct UpdatesHistoryView: View {
-    private enum Page: String, CaseIterable {
+    enum Page: String, CaseIterable {
         case updates = "Updates"
         case history = "History"
     }
 
-    @State private var page = Page.updates
+    @State private var page: Page
     @EnvironmentObject private var path: NavigationCoordinator
+    var onBack: (() -> Void)?
+
+    init(page: Page = .updates, onBack: (() -> Void)? = nil) {
+        _page = State(initialValue: page)
+        self.onBack = onBack
+    }
 
     private var weekday: String {
         Date.now.formatted(.dateTime.weekday(.wide))
@@ -15,7 +21,13 @@ struct UpdatesHistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MDPageHeader(kicker: weekday, title: "Updates") {
+            if let onBack {
+                MDIconButton(systemImage: "chevron.left", label: "Back", action: onBack)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+            }
+            MDPageHeader(kicker: weekday, title: page.rawValue) {
                 if page == .updates {
                     MDIconButton(systemImage: "bell", label: "Manage titles getting new chapters", action: showFollowedTitles)
                 }
@@ -48,4 +60,19 @@ struct UpdatesHistoryView: View {
         guard let presenter = path.rootViewController, presenter.presentedViewController == nil else { return }
         presenter.present(UIHostingController(rootView: MCFollowedTitlesView()), animated: true)
     }
+}
+
+/// Updates and History pushed from Home, with the web's back square instead of a navigation bar.
+final class UpdatesHistoryController: UIHostingController<AnyView>, MDBarlessScreen {
+    init(page: UpdatesHistoryView.Page) {
+        let path = NavigationCoordinator(rootViewController: nil)
+        super.init(rootView: AnyView(EmptyView()))
+        path.rootViewController = self
+        rootView = AnyView(UpdatesHistoryView(page: page, onBack: { [weak self] in
+            self?.navigationController?.popViewController(animated: true)
+        }).environmentObject(path).midokuStyle())
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

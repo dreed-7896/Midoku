@@ -992,79 +992,13 @@ private struct RightNavbarButton: View, Equatable {
         self._editMode = editMode
     }
 
+    @State private var showOptions = false
+
     var body: some View {
         if editMode == .inactive {
-            Menu {
-                if let url {
-                    Section {
-                        Button {
-                            showShareSheet(url)
-                        } label: {
-                            Label(NSLocalizedString("SHARE"), systemImage: "square.and.arrow.up")
-                        }
-                    }
-                }
-
-                Section {
-                    Menu(NSLocalizedString("MARK_ALL")) {
-                        Button {
-                            markAllRead()
-                        } label: {
-                            Label(NSLocalizedString("READ"), systemImage: "checkmark.circle")
-                        }
-                        Button {
-                            markAllUnread()
-                        } label: {
-                            Label(NSLocalizedString("UNREAD"), systemImage: "minus.circle")
-                        }
-                    }
-                    Button {
-                        withAnimation {
-                            editMode = .active
-                        }
-                    } label: {
-                        Label(NSLocalizedString("SELECT_CHAPTERS"), systemImage: "checkmark.circle")
-                    }
-                    if bookmarked {
-                        if hasCategories {
-                            Button {
-                                editCategories()
-                            } label: {
-                                Label(NSLocalizedString("EDIT_CATEGORIES"), systemImage: "folder.badge.gearshape")
-                            }
-                        }
-                        Button {
-                            migrate()
-                        } label: {
-                            Label(NSLocalizedString("MIGRATE"), systemImage: "arrow.left.arrow.right")
-                        }
-                        if #available(iOS 18.0, *) { // only for system versions supporting swipe down to dismiss
-                            Button {
-                                Task {
-                                    await refresh()
-                                }
-                            } label: {
-                                Label(NSLocalizedString("REFRESH_DETAILS"), systemImage: "arrow.clockwise")
-                            }
-                        }
-                    }
-                }
-
-                if hasDownloads {
-                    Section {
-                        Button(role: .destructive) {
-                            removeDownloads()
-                        } label: {
-                            Label(
-                                NSLocalizedString("REMOVE_ALL_DOWNLOADS"),
-                                systemImage: "trash"
-                            )
-                        }
-                    }
-                }
-            } label: {
-                MoreIcon()
-            }
+            Button { showOptions = true } label: { MoreIcon() }
+                .accessibilityLabel("Options")
+                .mdActionSheet(isPresented: $showOptions, title: "Options") { optionRows() }
         } else {
             DoneButton {
                 withAnimation {
@@ -1072,7 +1006,30 @@ private struct RightNavbarButton: View, Equatable {
                 }
             }
         }
+    }
 
+    /// Midoku Web's entry options sheet.
+    private func optionRows() -> [MDActionRow] {
+        var rows: [MDActionRow] = []
+        if let url {
+            rows.append(MDActionRow(systemImage: "square.and.arrow.up", title: NSLocalizedString("SHARE"), detail: url.host) { showShareSheet(url) })
+        }
+        rows.append(MDActionRow(systemImage: "checkmark.circle", title: NSLocalizedString("SELECT_CHAPTERS")) {
+            withAnimation { editMode = .active }
+        })
+        rows.append(MDActionRow(systemImage: "checkmark.circle.fill", title: "Mark all read") { markAllRead() })
+        rows.append(MDActionRow(systemImage: "minus.circle", title: "Mark all unread") { markAllUnread() })
+        if bookmarked {
+            if hasCategories {
+                rows.append(MDActionRow(systemImage: "folder.badge.gearshape", title: NSLocalizedString("EDIT_CATEGORIES")) { editCategories() })
+            }
+            rows.append(MDActionRow(systemImage: "arrow.left.arrow.right", title: NSLocalizedString("MIGRATE"), detail: "Move to another extension") { migrate() })
+            rows.append(MDActionRow(systemImage: "arrow.clockwise", title: NSLocalizedString("REFRESH_DETAILS")) { Task { await refresh() } })
+        }
+        if hasDownloads {
+            rows.append(MDActionRow(systemImage: "trash", title: NSLocalizedString("REMOVE_ALL_DOWNLOADS"), destructive: true) { removeDownloads() })
+        }
+        return rows
     }
 
     static nonisolated func == (lhs: RightNavbarButton, rhs: RightNavbarButton) -> Bool {

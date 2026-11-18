@@ -33,13 +33,13 @@ class TabBarController: UITabBarController {
     private lazy var customTabBar = MDTabBar(items: [
         .init(title: "Home", image: "MDTabHome"),
         .init(title: NSLocalizedString("LIBRARY"), image: "MDTabLibrary"),
-        .init(title: "Updates", image: "MDTabUpdates"),
         .init(title: "Search", image: "MDTabSearch"),
+        .init(title: "Sources", image: "MDTabSources"),
         .init(title: NSLocalizedString("SETTINGS"), image: "MDTabSettings")
     ])
     private var customTabBarHeight: NSLayoutConstraint?
     private let visibleReaders = NSHashTable<UIViewController>.weakObjects()
-    private static let sourcesTabIndex = 0
+    private static let sourcesTabIndex = 3
 
     private lazy var libraryProgressView = CircularProgressView(frame: CGRect(x: 0, y: 0, width: 20, height: 20))
 
@@ -106,13 +106,7 @@ class TabBarController: UITabBarController {
         let searchViewController = NavigationController(rootViewController: searchController)
         searchNavigationController = searchViewController
 
-        let historyPath = NavigationCoordinator(rootViewController: nil)
-        let historyHostingController = UIHostingController(rootView: UpdatesHistoryView()
-            .environmentObject(historyPath)
-            .midokuStyle())
-        historyPath.rootViewController = historyHostingController
-        let historyViewController = NavigationController(rootViewController: historyHostingController)
-        historyNavigationController = historyViewController
+        let sourcesViewController = NavigationController(rootViewController: BrowseViewController())
 
         let settingsPath = NavigationCoordinator(rootViewController: nil)
         let settingsViewController: UIViewController
@@ -142,27 +136,27 @@ class TabBarController: UITabBarController {
         // The collection hosts its native SwiftUI navigation stack.
         // Root screens get the web's big display-face page titles.
         browseViewController.navigationBar.prefersLargeTitles = false
-        historyViewController.navigationBar.prefersLargeTitles = false
+        sourcesViewController.navigationBar.prefersLargeTitles = false
         browseViewController.hidesBarAtRoot = true
-        historyViewController.hidesBarAtRoot = true
+        sourcesViewController.hidesBarAtRoot = true
         searchViewController.hidesBarAtRoot = true
         searchViewController.navigationBar.prefersLargeTitles = true
 
-        // Home (feed shelves and extensions), Library, Updates (new chapters and history), Search, Settings.
+        // Home (feed shelves, updates and history), Library, Search, Sources (extensions), Settings.
         browseViewController.tabBarItem = UITabBarItem(title: "Home", image: UIImage(named: "MDTabHome"), tag: 0)
         libraryViewController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("LIBRARY"), image: UIImage(named: "MDTabLibrary"), tag: 1
         )
-        historyViewController.tabBarItem = UITabBarItem(title: "Updates", image: UIImage(named: "MDTabUpdates"), tag: 2)
-        searchViewController.tabBarItem = UITabBarItem(title: "Search", image: UIImage(named: "MDTabSearch"), tag: 3)
+        searchViewController.tabBarItem = UITabBarItem(title: "Search", image: UIImage(named: "MDTabSearch"), tag: 2)
+        sourcesViewController.tabBarItem = UITabBarItem(title: "Sources", image: UIImage(named: "MDTabSources"), tag: 3)
         settingsViewController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("SETTINGS"), image: UIImage(named: "MDTabSettings"), tag: 4
         )
         viewControllers = [
             browseViewController,
             libraryViewController,
-            historyViewController,
             searchViewController,
+            sourcesViewController,
             settingsViewController
         ]
         installCustomTabBar()
@@ -171,7 +165,6 @@ class TabBarController: UITabBarController {
 
         let updateCount = AppSettings.browse.updateCount.get()
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--history-preview") { selectedIndex = 2 }
         if ProcessInfo.processInfo.arguments.contains("--appearance-preview") { selectedIndex = 4 }
         #endif
         setSourcesBadge(updateCount)
@@ -419,8 +412,9 @@ extension TabBarController {
         selectedIndex = switch AppSettings.general.openingTab.get() {
         case .browse: 0
         case .library: 1
-        case .history: 2
-        case .search: 3
+        case .history: 0
+        case .search: 2
+        case .sources: 3
         case .settings: 4
         }
     }

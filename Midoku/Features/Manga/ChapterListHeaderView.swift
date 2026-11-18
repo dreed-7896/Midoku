@@ -21,6 +21,7 @@ struct ChapterListHeaderView: View {
     @Binding var displayMode: ChapterTitleDisplayMode
 
     private var showMenu: Bool = false
+    @State private var showSheet = false
     private var languages: [String] = []
     private var scanlators: [String] = []
     private var mangaId: MangaIdentifier
@@ -55,7 +56,7 @@ struct ChapterListHeaderView: View {
             var languages: Set<String> = []
             var scanlators: Set<String> = []
             for chapter in allChapters {
-                if let chapterScanlators = chapter.scanlators, !scanlators.isEmpty {
+                if let chapterScanlators = chapter.scanlators, !chapterScanlators.isEmpty {
                     for scanlator in chapterScanlators {
                         scanlators.insert(scanlator)
                     }
@@ -111,118 +112,119 @@ struct ChapterListHeaderView: View {
         }
     }
 
+    private var activeFilterCount: Int {
+        filters.count + (langFilter == nil ? 0 : 1) + scanlatorFilter.count
+    }
+
     var menu: some View {
-        Menu {
-            Section(NSLocalizedString("SORT_BY")) {
-                ForEach(ChapterSortOption.allCases, id: \.self) { option in
-                    Button {
-                        if sortOption == option {
-                            sortAscending.toggle()
-                        } else {
-                            sortOption = option
-                            sortAscending = false
-                        }
-                    } label: {
-                        Label {
-                            Text(option.stringValue)
-                        } icon: {
-                            if sortOption == option {
-                                Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
-                            }
-                        }
-                    }
-                }
-            }
-            Section(NSLocalizedString("FILTER_BY")) {
-                ForEach(ChapterFilterMethod.allCases, id: \.self) { option in
-                    let filterIdx = filters.firstIndex(where: { $0.type == option })
-                    Button {
-                        if let filterIdx {
-                            if filters[filterIdx].exclude {
-                                filters.remove(at: filterIdx)
-                            } else {
-                                filters[filterIdx].exclude = true
-                            }
-                        } else {
-                            filters.append(ChapterFilterOption(type: option, exclude: false))
-                        }
-                    } label: {
-                        Label {
-                            Text(option.stringValue)
-                        } icon: {
-                            if let filterIdx, filters[filterIdx].exclude {
-                                Image(systemName: "xmark")
-                            } else if filterIdx != nil {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-                if languages.count > 1 {
-                    Menu(NSLocalizedString("LANGUAGE")) {
-                        ForEach(languages, id: \.self) { lang in
-                            Button {
-                                let langValue = langFilter == lang ? nil : lang
-                                langFilter = langValue
-                            } label: {
-                                Label {
-                                    Text(SourceLanguage.displayName(for: lang))
-                                } icon: {
-                                    if langFilter == lang {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if scanlators.count > 1 {
-                    Menu(NSLocalizedString("SCANLATOR")) {
-                        ForEach(scanlators, id: \.self) { scanlator in
-                            Button {
-                                if let filterIndex = scanlatorFilter.firstIndex(of: scanlator) {
-                                    scanlatorFilter.remove(at: filterIndex)
-                                } else {
-                                    scanlatorFilter.append(scanlator)
-                                }
-                            } label: {
-                                Label {
-                                    Text(scanlator.isEmpty ? NSLocalizedString("NO_SCANLATOR") : scanlator)
-                                } icon: {
-                                    if scanlatorFilter.contains(scanlator) {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .menuActionDismissDisabled()
-            Section(NSLocalizedString("TITLE_DISPLAY_MODE")) {
-                ForEach(ChapterTitleDisplayMode.allCases, id: \.rawValue) { mode in
-                    Button {
-                        displayMode = mode
-                        let key = "Manga.chapterDisplayMode.\(mangaId)"
-                        if mode == .default {
-                            UserDefaults.standard.removeObject(forKey: key)
-                        } else {
-                            UserDefaults.standard.set(mode.rawValue, forKey: key)
-                        }
-                    } label: {
-                        Label {
-                            Text(mode.localizedTitle)
-                        } icon: {
-                            if displayMode == mode {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            MDIconBox(systemImage: "slider.horizontal.3", badge: filters.count + (langFilter == nil ? 0 : 1) + scanlatorFilter.count)
+        Button { showSheet = true } label: {
+            MDIconBox(systemImage: "slider.horizontal.3", active: activeFilterCount > 0,
+                      badge: activeFilterCount > 0 ? activeFilterCount : nil)
         }
-        .accessibilityLabel("Filter and sort chapters")
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sort and filter chapters")
+        .sheet(isPresented: $showSheet) {
+            sheet
+                .presentationDetents([.medium, .large])
+                .midokuAccent()
+        }
+    }
+
+    /// Midoku Web's "Sort and filter" sheet.
+    private var sheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    group(NSLocalizedString("SORT_BY")) {
+                        VStack(spacing: 10) {
+                            MDSegmented(options: ChapterSortOption.allCases, selection: $sortOption) { $0.stringValue }
+                            MDSegmented(options: [false, true], selection: $sortAscending) { $0 ? "Oldest first" : "Newest first" }
+                        }
+                    }
+                    group(NSLocalizedString("FILTER_BY")) {
+                        MDFlow {
+                            ForEach(ChapterFilterMethod.allCases, id: \.self) { option in
+                                let index = filters.firstIndex { $0.type == option }
+                                let excluded = index.map { filters[$0].exclude } ?? false
+                                chip(excluded ? "Not \(option.stringValue.lowercased())" : option.stringValue,
+                                     on: index != nil, systemImage: excluded ? "xmark" : nil) {
+                                    if let index {
+                                        if filters[index].exclude { filters.remove(at: index) } else { filters[index].exclude = true }
+                                    } else {
+                                        filters.append(ChapterFilterOption(type: option, exclude: false))
+                                    }
+                                }
+                            }
+                        }
+                        Text("Tap once to show only, again to hide, again to clear.")
+                            .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
+                    }
+                    if languages.count > 1 {
+                        group(NSLocalizedString("LANGUAGE")) {
+                            MDFlow {
+                                ForEach(languages, id: \.self) { lang in
+                                    chip(SourceLanguage.displayName(for: lang), on: langFilter == lang) {
+                                        langFilter = langFilter == lang ? nil : lang
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if scanlators.count > 1 {
+                        group(NSLocalizedString("SCANLATOR")) {
+                            MDFlow {
+                                ForEach(scanlators, id: \.self) { scanlator in
+                                    chip(scanlator.isEmpty ? NSLocalizedString("NO_SCANLATOR") : scanlator, on: scanlatorFilter.contains(scanlator)) {
+                                        if let index = scanlatorFilter.firstIndex(of: scanlator) {
+                                            scanlatorFilter.remove(at: index)
+                                        } else {
+                                            scanlatorFilter.append(scanlator)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    group(NSLocalizedString("TITLE_DISPLAY_MODE")) {
+                        MDFlow {
+                            ForEach(ChapterTitleDisplayMode.allCases, id: \.rawValue) { mode in
+                                chip(mode.localizedTitle, on: displayMode == mode) { setDisplayMode(mode) }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 20)
+            }
+            .mdSheet("Sort and filter", onClose: { showSheet = false },
+                     secondary: MDSheetAction(title: "Clear filters", disabled: activeFilterCount == 0) {
+                         filters = []; langFilter = nil; scanlatorFilter = []
+                     },
+                     primary: MDSheetAction(title: "Done") { showSheet = false })
+        }
+    }
+
+    private func setDisplayMode(_ mode: ChapterTitleDisplayMode) {
+        displayMode = mode
+        let key = "Manga.chapterDisplayMode.\(mangaId)"
+        if mode == .default {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else {
+            UserDefaults.standard.set(mode.rawValue, forKey: key)
+        }
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).mdLabel()
+            content()
+        }
+    }
+
+    private func chip(_ title: String, on: Bool, systemImage: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) { MDChip(title: title, active: on, systemImage: systemImage, large: false) }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

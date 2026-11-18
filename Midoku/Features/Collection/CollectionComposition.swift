@@ -263,14 +263,12 @@ struct MCSourceActions: View {
     @State private var add = false
     @State private var openEntry: MCID?
     var body: some View {
-        Menu {
-            if let id = store.entryID(for: manga) {
-                Button("Open library entry", systemImage: "books.vertical") { openEntry = MCID(id: id) }
-            } else {
-                Button("Add to library", systemImage: "plus") { add = true }
-            }
-        } label: { MDIconBox(systemImage: "books.vertical", size: 38, glass: true) }
-            .accessibilityLabel("Library actions")
+        let entryID = store.entryID(for: manga)
+        Button {
+            if let entryID { openEntry = MCID(id: entryID) } else { add = true }
+        } label: { MDIconBox(systemImage: entryID == nil ? "plus" : "books.vertical", size: 38, glass: true) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(entryID == nil ? "Add to library" : "Open library entry")
             .sheet(isPresented: $add) { MCAddSourceView(manga: manga, chapters: chapters) }
             .sheet(item: $openEntry) { item in NavigationStack { MCEntryView(entryID: item.id) } }
             .mcErrors(store)

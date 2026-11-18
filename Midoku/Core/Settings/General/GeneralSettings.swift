@@ -13,14 +13,16 @@ struct GeneralSettings: Sendable {
         case browse
         case history
         case search
+        case sources
         case settings
 
         var title: String {
             switch self {
             case .library: "Library"
-            case .browse: "Browse"
+            case .browse: "Home"
             case .history: "History"
             case .search: "Search"
+            case .sources: "Sources"
             case .settings: "Settings"
             }
         }

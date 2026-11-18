@@ -97,13 +97,13 @@ class BrowseViewController: UIViewController, MDBarlessScreen {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Extensions"
+        title = "Sources"
         view.backgroundColor = MDColor.bg
         navigationItem.largeTitleDisplayMode = .never
 
         let page = ExtensionsPageView(
             model: model,
-            onBack: { [weak self] in self?.navigationController?.popViewController(animated: true) },
+            onBack: (navigationController?.viewControllers.first === self) ? nil : { [weak self] in self?.navigationController?.popViewController(animated: true) },
             onAdd: { [weak self] in self?.openAddSourcePage() },
             onMigrate: { [weak self] in self?.openMigrateSourcePage() },
             onOpen: { [weak self] in self?.open($0) },
@@ -276,7 +276,7 @@ private func languageLabel(_ languages: [String]) -> String {
 
 struct ExtensionsPageView: View {
     @Bindable var model: ExtensionsModel
-    var onBack: () -> Void
+    var onBack: (() -> Void)?
     var onAdd: () -> Void
     var onMigrate: () -> Void
     var onOpen: (SourceInfo) -> Void
@@ -304,11 +304,13 @@ struct ExtensionsPageView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                MDIconButton(systemImage: "chevron.left", label: "Back", action: onBack)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
+                if let onBack {
+                    MDIconButton(systemImage: "chevron.left", label: "Back", action: onBack)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 14)
+                }
 
-                MDPageHeader(kicker: "\(model.allInstalled.count) installed · On this device", title: "Extensions") {
+                MDPageHeader(kicker: "\(model.allInstalled.count) installed · On this device", title: "Sources") {
                     MDIconButton(systemImage: "arrow.left.arrow.right", label: NSLocalizedString("MIGRATE_SOURCES"), action: onMigrate)
                     MDIconButton(systemImage: "plus", label: NSLocalizedString("ADD_SOURCE"), action: onAdd)
                 }

@@ -232,6 +232,7 @@ struct MCCollectionRootView: View {
     @State private var saveTabAfterFilters = false
     @State private var pendingMerge: [UUID]?
     @State private var namingTab: MCSmartTab?
+    @State private var renameTabAfterFilters: MCSmartTab?
     @State private var tabName = ""
     @AppStorage("Midoku.collectionGrid") private var grid = true
     @AppStorage("Midoku.chapterGrid") private var chapterGrid = false
@@ -552,7 +553,13 @@ struct MCCollectionRootView: View {
             .sheet(isPresented: $showCategories) { MCCategoriesView() }
             .mdActionSheet(isPresented: $showLibraryOptions, title: "Library") { libraryOptionRows() }
             .sheet(isPresented: $showFilters, onDismiss: {
-                // "Save as tab" names the tab once the sheet has closed.
+                // "Save as tab" and "Rename" name the tab once the sheet has closed.
+                if let tab = renameTabAfterFilters {
+                    renameTabAfterFilters = nil
+                    tabName = tab.name
+                    namingTab = tab
+                    return
+                }
                 guard saveTabAfterFilters else { return }
                 saveTabAfterFilters = false
                 tabName = trimmedQuery.isEmpty ? "Filtered" : trimmedQuery
@@ -1105,6 +1112,12 @@ struct MCCollectionRootView: View {
         .accessibilityLabel(hasActiveFilters ? "Library filters, \(activeFilterCount) active" : "Filter library")
     }
 
+    /// The saved tab the library is showing, if any.
+    private var activeSmartTab: MCSmartTab? {
+        guard let page = activeGroupPage, page.hasPrefix("smart:") else { return nil }
+        return smartTabs.first { "smart:\($0.id)" == page }
+    }
+
     private func clearFilters() {
         statuses.removeAll(); artists.removeAll(); tags.removeAll(); sources.removeAll(); progressFilter = .all
         newChaptersOnly = false
@@ -1115,6 +1128,22 @@ struct MCCollectionRootView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if let tab = activeSmartTab {
+                        filterGroup("This tab · \(tab.name)") {
+                            HStack(spacing: 10) {
+                                Button {
+                                    renameTabAfterFilters = tab
+                                    showFilters = false
+                                } label: { Label("Rename", systemImage: "pencil").frame(maxWidth: .infinity) }
+                                .buttonStyle(MDGhostButtonStyle(small: false))
+                                Button {
+                                    removeSmartTab(tab.id)
+                                } label: { Label("Delete", systemImage: "trash").frame(maxWidth: .infinity) }
+                                .buttonStyle(MDGhostButtonStyle(small: false))
+                                .foregroundStyle(Color.mdAccent)
+                            }
+                        }
+                    }
                     filterGroup("Status") {
                         MDFlow {
                             ForEach(MCPersonalStatus.allCases) { item in
@@ -1139,17 +1168,6 @@ struct MCCollectionRootView: View {
                                 ForEach(availableArtists, id: \.self) { artist in
                                     filterChip(artist, on: artists.contains(artist)) {
                                         if artists.contains(artist) { artists.remove(artist) } else { artists.insert(artist) }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !availableTags.isEmpty {
-                        filterGroup("Tags") {
-                            MDFlow {
-                                ForEach(availableTags, id: \.self) { tag in
-                                    filterChip(tag, on: tags.contains(tag)) {
-                                        if tags.contains(tag) { tags.remove(tag) } else { tags.insert(tag) }
                                     }
                                 }
                             }
