@@ -131,9 +131,9 @@
     {
       "id": "multi.hitomi",
       "name": "Hitomi",
-      "version": 10,
-      "iconURL": "icons/multi.hitomi-v10.png",
-      "downloadURL": "sources/multi.hitomi-v10.aix",
+      "version": 11,
+      "iconURL": "icons/multi.hitomi-v11.png",
+      "downloadURL": "sources/multi.hitomi-v11.aix",
       "languages": [
         "multi"
       ],
@@ -156,9 +156,9 @@
     {
       "id": "multi.nhentai",
       "name": "nhentai",
-      "version": 27,
-      "iconURL": "icons/multi.nhentai-v27.png",
-      "downloadURL": "sources/multi.nhentai-v27.aix",
+      "version": 28,
+      "iconURL": "icons/multi.nhentai-v28.png",
+      "downloadURL": "sources/multi.nhentai-v28.aix",
       "languages": [
         "All",
         "en",
