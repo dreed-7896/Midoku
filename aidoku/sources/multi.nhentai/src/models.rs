@@ -54,6 +54,9 @@ pub struct NHentaiGalleryListItem {
 	pub english_title: String,
 	pub japanese_title: Option<String>,
 	pub tag_ids: Vec<i32>,
+	/// Not in search results; filled in from the gallery for artist feed entries.
+	#[serde(default)]
+	pub upload_date: Option<i64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -222,6 +225,9 @@ impl From<NHentaiGalleryListItem> for Manga {
 			content_rating: ContentRating::NSFW,
 			viewer: Viewer::RightToLeft,
 			update_strategy: UpdateStrategy::Never,
+			// Never updated, so this carries the upload time instead: apps merging results from
+			// several sources (e.g. Midoku's artist shelves) sort by it.
+			next_update_time: value.upload_date,
 			..Default::default()
 		}
 	}

@@ -1,6 +1,7 @@
 use aidoku::{
 	ContentRating, Manga, MangaStatus, UpdateStrategy, Viewer,
 	alloc::{String, Vec},
+	imports::std::parse_date,
 	prelude::*,
 };
 use serde::{Deserialize, Deserializer};
@@ -130,9 +131,16 @@ impl HitomiGallery {
 	}
 }
 
+/// Upload time of a gallery from hitomi's `2024-05-01 12:34:00-05`, or its day alone.
+pub fn upload_time(date: &str) -> Option<i64> {
+	parse_date(date, "yyyy-MM-dd HH:mm:ssx")
+		.or_else(|| parse_date(date.get(..10).unwrap_or(date), "yyyy-MM-dd"))
+}
+
 impl From<HitomiGallery> for Manga {
 	fn from(g: HitomiGallery) -> Self {
 		let cover = g.cover_url();
+		let uploaded = upload_time(&g.date);
 
 		let artists: Vec<String> = g
 			.artists
@@ -272,6 +280,9 @@ impl From<HitomiGallery> for Manga {
 			content_rating: ContentRating::NSFW,
 			viewer,
 			update_strategy: UpdateStrategy::Never,
+			// Never updated, so this carries the upload time instead: apps merging results from
+			// several sources (e.g. Midoku's artist shelves) sort by it.
+			next_update_time: uploaded,
 			..Default::default()
 		}
 	}

@@ -48,6 +48,8 @@ struct NHentai {
 const LANGUAGES: [&str; 3] = ["english", "japanese", "chinese"];
 /// Upper bound on searches for one page when several artists or `|` terms are combined.
 const MAX_SEARCHES: usize = 24;
+/// Newest artist feed entries given an upload time (for apps sorting several sources by date).
+const DATED_ENTRIES: usize = 40;
 
 /// One search to run, and the exact tag its results must carry. nhentai's `artist:"x"`
 /// search also matches tags that merely contain the words (e.g. "jirou" finds
@@ -371,8 +373,37 @@ impl NHentai {
 		}
 
 		state.prune(&requested);
+		self.fill_upload_dates(&mut state, &requested);
 		state.save();
 		Ok(state.entries_for(&requested))
+	}
+
+	/// Look up the upload time of the newest entries that lack one. Each gallery is looked up
+	/// once, since the time is stored with the entry.
+	fn fill_upload_dates(&self, state: &mut artist_feed::FeedState, requested: &[i32]) {
+		let missing: Vec<i32> = state
+			.entries_for(requested)
+			.iter()
+			.take(DATED_ENTRIES)
+			.filter(|item| item.upload_date.is_none())
+			.map(|item| item.id)
+			.collect();
+		for chunk in missing.chunks(BATCH_SIZE) {
+			let requests: Vec<Request> = chunk
+				.iter()
+				.filter_map(|id| api::json_request(&format!("{API_URL}/galleries/{id}")).ok())
+				.collect();
+			if requests.len() != chunk.len() {
+				continue;
+			}
+			for (id, response) in chunk.iter().zip(Request::send_all(requests)) {
+				let Ok(response) = response else { continue };
+				let Ok(gallery) = api::decode_response::<NHentaiGallery>(response) else { continue };
+				if let Some(item) = state.items.iter_mut().find(|item| item.id == *id) {
+					item.upload_date = Some(gallery.upload_date);
+				}
+			}
+		}
 	}
 
 	/// Run planned searches in parallel batches, keeping each result with its tag id.
