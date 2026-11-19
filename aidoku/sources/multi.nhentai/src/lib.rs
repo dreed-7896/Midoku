@@ -13,6 +13,7 @@ use aidoku::{
 };
 
 mod api;
+mod artist_feed;
 mod home;
 mod models;
 mod multi_search;
@@ -214,6 +215,27 @@ impl NHentai {
 			});
 		}
 
+		// Newest galleries of the artists (e.g. a Home shelf): served from the artist feed, which
+		// reads only uploads since the last refresh instead of searching every artist.
+		if page == 1 && sort == "date" && matches!(query_terms.as_slice(), [None]) && !resolved.is_empty() {
+			let items = self.artist_latest(&query_parts.join(" "), &resolved)?;
+			let has_next_page = items.len() >= 25;
+			let entries = items
+				.into_iter()
+				.map(|item| {
+					let mut manga: Manga = item.into();
+					if clean_titles {
+						manga.title = clean_title(&manga.title);
+					}
+					manga
+				})
+				.collect();
+			return Ok(MangaPageResult {
+				entries,
+				has_next_page,
+			});
+		}
+
 		let mut plan: Vec<PlannedSearch> = Vec::new();
 		for term in &query_terms {
 			let mut parts = query_parts.clone();
@@ -266,6 +288,91 @@ impl NHentai {
 			entries,
 			has_next_page,
 		})
+	}
+
+	/// Newest galleries by any of the artist tags, newest first (see `artist_feed`).
+	fn artist_latest(
+		&self,
+		base: &str,
+		resolved: &[(String, &str, i32)],
+	) -> Result<Vec<NHentaiGalleryListItem>> {
+		let mut state = artist_feed::FeedState::load(base);
+		let requested: Vec<i32> = resolved.iter().map(|(_, _, id)| *id).collect();
+
+		// 1. Read latest uploads back to the watermark and keep the followed artists' galleries.
+		let latest_query = if base.trim().is_empty() { " " } else { base };
+		let mut followed = state.covered.clone();
+		followed.extend(requested.iter().filter(|id| !state.covered.contains(id)));
+		let mut newest = state.watermark;
+		let mut reached = state.watermark == 0;
+		let mut page = 1;
+		loop {
+			let response = self.search(latest_query, page, "date")?;
+			if let Some(top) = response.result.first() {
+				newest = newest.max(top.id);
+			}
+			if state.watermark > 0 {
+				let fresh: Vec<NHentaiGalleryListItem> = response
+					.result
+					.iter()
+					.filter(|item| item.id > state.watermark)
+					.cloned()
+					.collect();
+				reached = fresh.len() < response.result.len() || response.result.is_empty();
+				state.merge(fresh, &followed);
+			}
+			if reached || page >= response.num_pages || page >= artist_feed::MAX_SCAN_PAGES {
+				break;
+			}
+			page += 1;
+		}
+		if !reached {
+			// Too long since the last refresh to read through: search the artists again.
+			state.reset();
+		}
+		state.watermark = newest;
+
+		// 2. Search artists not covered yet on their own, a bounded number per refresh.
+		let plan: Vec<PlannedSearch> = resolved
+			.iter()
+			.filter(|(_, _, id)| !state.is_covered(*id))
+			.take(MAX_SEARCHES)
+			.map(|(name, namespace, id)| {
+				let mut parts: Vec<String> = Vec::new();
+				if !base.trim().is_empty() {
+					parts.push(base.into());
+				}
+				parts.push(format!("{namespace}:\"{name}\""));
+				PlannedSearch {
+					query: parts.join(" "),
+					tag_id: Some(*id),
+				}
+			})
+			.collect();
+		if !plan.is_empty() {
+			let responses = match self.run_searches(&plan, 1, "date") {
+				Ok(responses) => responses,
+				// Nothing stored to show either: report the error.
+				Err(error) if state.entries_for(&requested).is_empty() => return Err(error),
+				Err(_) => Vec::new(),
+			};
+			for (tag_id, response) in responses {
+				let Some(id) = tag_id else { continue };
+				let items: Vec<NHentaiGalleryListItem> = response
+					.result
+					.into_iter()
+					.filter(|item| item.tag_ids.contains(&id))
+					.collect();
+				state.mark_covered(id);
+				let mut tags = state.covered.clone();
+				tags.extend(requested.iter().copied());
+				state.merge(items, &tags);
+			}
+		}
+
+		state.prune(&requested);
+		state.save();
+		Ok(state.entries_for(&requested))
 	}
 
 	/// Run planned searches in parallel batches, keeping each result with its tag id.
