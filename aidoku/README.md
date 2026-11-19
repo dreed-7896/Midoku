@@ -2,7 +2,7 @@
 
 Install URL:
 
-`https://raw.githubusercontent.com/dreed-7896/extensions/main/aidoku/public/index.min.json`
+`https://raw.githubusercontent.com/dreed-7896/Midoku/extensions/aidoku/public/index.min.json`
 
 The packages are built with the current Aidoku Rust source API. Every source provides a combined
 Home view, search, title details, chapters, reader pages, popular/latest listings, image request
