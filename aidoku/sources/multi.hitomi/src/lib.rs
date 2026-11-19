@@ -32,6 +32,10 @@ pub const PAGE_SIZE: i32 = 25;
 /// How long, in seconds, a downloaded nozomi ID list is reused.
 const NOZOMI_CACHE_TTL: i64 = 300;
 const NOZOMI_CACHE_SIZE: usize = 24;
+/// Cached list heads (the newest `PAGE_SIZE` ids of a list), which are only 100 bytes each.
+const NOZOMI_HEAD_CACHE_SIZE: usize = 600;
+/// Lists requested at once.
+const NOZOMI_BATCH_SIZE: usize = 16;
 
 struct Hitomi {
 	gg_cache: RefCell<Option<(GgState, i64)>>,
@@ -257,13 +261,21 @@ impl Hitomi {
 			} else {
 				vec![lang.clone()]
 			};
-			positive_results.push(self.artist_union(artists, &langs));
+			// The first page of artists alone (e.g. a Home shelf) only needs each artist's newest
+			// PAGE_SIZE galleries: a 100-byte range of each list instead of the whole list.
+			let head_only = page == 1
+				&& is_default_sort
+				&& positive_terms.is_empty()
+				&& negative_terms.is_empty()
+				&& author_name.is_none()
+				&& type_filter.is_none();
+			positive_results.push(self.artist_union(artists, &langs, head_only));
 		} else if languages.len() > 1 {
 			let urls: Vec<String> = languages
 				.iter()
 				.map(|l| format!("{LTN_URL}/index-{l}.nozomi"))
 				.collect();
-			positive_results.push(union_ids(self.fetch_nozomis(&urls).into_iter().flatten()));
+			positive_results.push(union_ids(self.fetch_nozomis(&urls, false).into_iter().flatten()));
 		}
 
 		// "author" from detail page: union of artist: and group: nozomis (parallel)
@@ -350,7 +362,7 @@ impl Hitomi {
 		negative_ids.dedup();
 
 		let mut result_ids: Vec<i64> = if use_sort_base {
-			match self.fetch_nozomis(core::slice::from_ref(&sort_nozomi_url)).pop().flatten() {
+			match self.fetch_nozomis(core::slice::from_ref(&sort_nozomi_url), false).pop().flatten() {
 				Some(ids) => ids,
 				None => bail!("hitomi.la did not return the gallery list. Please try again."),
 			}
@@ -424,29 +436,44 @@ impl Hitomi {
 }
 
 impl Hitomi {
-	/// Download nozomi ID lists in one parallel batch, reusing lists fetched in the last few
-	/// minutes. `None` for a list that is missing (e.g. an unknown artist) or failed.
-	fn fetch_nozomis(&self, urls: &[String]) -> Vec<Option<Vec<i64>>> {
+	/// Download nozomi ID lists in parallel batches, reusing lists fetched in the last few
+	/// minutes. With `head`, only each list's newest `PAGE_SIZE` ids are requested (a byte range).
+	/// `None` for a list that is missing (e.g. an unknown artist) or failed.
+	fn fetch_nozomis(&self, urls: &[String], head: bool) -> Vec<Option<Vec<i64>>> {
+		const HEAD_SUFFIX: &str = "#head";
 		let now = current_date();
+		let keys: Vec<String> = urls
+			.iter()
+			.map(|url| if head { format!("{url}{HEAD_SUFFIX}") } else { url.clone() })
+			.collect();
 		let mut results: Vec<Option<Option<Vec<i64>>>> = {
 			let mut cache = self.nozomi_cache.borrow_mut();
 			cache.retain(|(_, time, _)| now - *time < NOZOMI_CACHE_TTL);
-			urls.iter()
-				.map(|url| {
+			keys.iter()
+				.map(|key| {
+					// A whole list cached earlier also answers a head request.
+					let whole = key.strip_suffix(HEAD_SUFFIX);
 					cache
 						.iter()
-						.find(|(key, _, _)| key == url)
+						.find(|(cached, _, _)| cached == key || Some(cached.as_str()) == whole)
 						.map(|(_, _, ids)| Some(ids.clone()))
 				})
 				.collect()
 		};
+		let range = format!("bytes=0-{}", PAGE_SIZE * 4 - 1);
 		let missing: Vec<usize> = (0..urls.len()).filter(|&i| results[i].is_none()).collect();
-		let requests: Vec<Request> = missing
-			.iter()
-			.filter_map(|&i| Request::get(&urls[i]).ok().map(|r| r.header("Referer", REFERER)))
-			.collect();
-		if requests.len() == missing.len() && !requests.is_empty() {
-			for (&i, response) in missing.iter().zip(Request::send_all(requests)) {
+		for chunk in missing.chunks(NOZOMI_BATCH_SIZE) {
+			let requests: Vec<Request> = chunk
+				.iter()
+				.filter_map(|&i| {
+					let request = Request::get(&urls[i]).ok()?.header("Referer", REFERER);
+					Some(if head { request.header("Range", &range) } else { request })
+				})
+				.collect();
+			if requests.len() != chunk.len() {
+				continue;
+			}
+			for (&i, response) in chunk.iter().zip(Request::send_all(requests)) {
 				let ids = response.ok().and_then(|response| {
 					if !(200..300).contains(&response.status_code()) {
 						return None;
@@ -455,10 +482,18 @@ impl Hitomi {
 				});
 				if let Some(ids) = &ids {
 					let mut cache = self.nozomi_cache.borrow_mut();
-					if cache.len() >= NOZOMI_CACHE_SIZE {
-						cache.remove(0);
+					let is_head = |key: &String| key.ends_with(HEAD_SUFFIX);
+					let (limit, kind) = if head {
+						(NOZOMI_HEAD_CACHE_SIZE, true)
+					} else {
+						(NOZOMI_CACHE_SIZE, false)
+					};
+					if cache.iter().filter(|(key, _, _)| is_head(key) == kind).count() >= limit
+						&& let Some(oldest) = cache.iter().position(|(key, _, _)| is_head(key) == kind)
+					{
+						cache.remove(oldest);
 					}
-					cache.push((urls[i].clone(), now, ids.clone()));
+					cache.push((keys[i].clone(), now, ids.clone()));
 				}
 				results[i] = Some(ids);
 			}
@@ -467,8 +502,8 @@ impl Hitomi {
 	}
 
 	/// Galleries by any of the artists, in any of the languages. A name with no artist list is
-	/// retried as a group/circle.
-	fn artist_union(&self, artists: &[String], langs: &[String]) -> Vec<i64> {
+	/// retried as a group/circle. With `head`, only each list's newest page of ids is fetched.
+	fn artist_union(&self, artists: &[String], langs: &[String], head: bool) -> Vec<i64> {
 		let urls_for = |namespace: &str, name: &str| -> Vec<String> {
 			langs
 				.iter()
@@ -484,7 +519,7 @@ impl Hitomi {
 			.flat_map(|(i, name)| urls_for("artist", name).into_iter().map(move |url| (i, url)))
 			.collect();
 		let plain: Vec<String> = urls.iter().map(|(_, url)| url.clone()).collect();
-		let fetched = self.fetch_nozomis(&plain);
+		let fetched = self.fetch_nozomis(&plain, head);
 		for (i, name) in artists.iter().enumerate() {
 			let found: Vec<Vec<i64>> = urls
 				.iter()
@@ -501,7 +536,7 @@ impl Hitomi {
 		}
 		if !missing.is_empty() {
 			let group_urls: Vec<String> = missing.iter().flat_map(|name| urls_for("group", name)).collect();
-			lists.extend(self.fetch_nozomis(&group_urls).into_iter().flatten());
+			lists.extend(self.fetch_nozomis(&group_urls, head).into_iter().flatten());
 		}
 		settings::remember_artists(&found_names);
 		union_ids(lists.into_iter())
