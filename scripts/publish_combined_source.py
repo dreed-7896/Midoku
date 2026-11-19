@@ -27,28 +27,56 @@ def fetch_json(url):
         return json.loads(response.read())
 
 
+# Colors AltStore/SideStore use for each app's buttons and banners.
+TINTS = {"com.raahat.Midoku": "FF2F52", "com.dreed7896.IDownloader": "3DD6A3"}
+HISTORY = 10
+
+
+def merge_versions(current, previous):
+    """Newest first: the app source's current versions, then earlier ones kept from the last publish."""
+    versions, seen = [], set()
+    for version in (current or []) + (previous or []):
+        key = (version.get("version"), version.get("buildVersion"), version.get("downloadURL"))
+        if not version.get("downloadURL") or key in seen:
+            continue
+        seen.add(key)
+        versions.append(version)
+    return versions[:HISTORY]
+
+
 def combine(sources, previous, source_url):
     """Merge per-app sources. An app whose source could not be read keeps its previous listing."""
+    previous_apps = {app.get("bundleIdentifier"): app for app in (previous or {}).get("apps", [])}
     apps = {}
     for source in sources:
         for app in (source or {}).get("apps", []):
-            if app.get("bundleIdentifier") and app.get("downloadURL") and app.get("versions"):
-                apps.setdefault(app["bundleIdentifier"], app)
+            bundle = app.get("bundleIdentifier")
+            if bundle and app.get("downloadURL") and app.get("versions") and bundle not in apps:
+                app = dict(app)
+                app["versions"] = merge_versions(app["versions"], previous_apps.get(bundle, {}).get("versions"))
+                app.setdefault("tintColor", TINTS.get(bundle))
+                apps[bundle] = app
     if any(source is None for source in sources):
-        for app in (previous or {}).get("apps", []):
-            apps.setdefault(app.get("bundleIdentifier"), app)
+        for bundle, app in previous_apps.items():
+            apps.setdefault(bundle, app)
     if not apps:
         raise ValueError("No apps available to publish")
-    return {
+    ordered = sorted(apps.values(), key=lambda app: app.get("name", "").lower())
+    source = {
         "name": "Raahat's Apps",
         "identifier": "com.raahat.source",
         "sourceURL": source_url,
-        "subtitle": "Midoku and Pulled testing builds",
+        "subtitle": "Midoku and Stash",
+        "description": "Midoku, the manga and webtoon reader, and Stash, the video, file and torrent downloader. "
+                       "Both update here after every successful build.",
         "website": "https://github.com/dreed-7896",
-        "iconURL": next((app.get("iconURL") for app in apps.values() if app.get("iconURL")), None),
-        "apps": sorted(apps.values(), key=lambda app: app.get("name", "").lower()),
+        "iconURL": next((app.get("iconURL") for app in ordered if app.get("iconURL")), None),
+        "tintColor": "FF2F52",
+        "featuredApps": [app["bundleIdentifier"] for app in ordered],
+        "apps": ordered,
         "news": [],
     }
+    return {key: value for key, value in source.items() if value is not None}
 
 
 def publish(api, repo, commit, output):
