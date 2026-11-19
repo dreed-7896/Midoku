@@ -10,17 +10,73 @@ struct MCDiscoverFeed: Codable, Identifiable {
     /// Search shelves run a query and/or filters instead of a listing tab.
     var query: String?
     var filters: [FilterValue]?
-    /// Left over from the removed artist shelves; such shelves are dropped on load.
+    /// Left over from the removed multi-extension artist shelves; such shelves are dropped on load.
     var artists: [String]?
+    /// Artist shelves: the newest titles by these artists from one extension.
+    var artistNames: [String]?
     /// How the shelf shows its titles; nil uses the default for its position.
     var layout: MCShelfLayout?
 
-    var isArtists: Bool { artists != nil }
+    var isLegacyArtists: Bool { artists != nil }
+    var isArtists: Bool { artistNames != nil }
     var isSearch: Bool { query != nil || filters != nil }
     var subtitle: String {
+        if let artistNames {
+            return "\(sourceName) · \(artistNames.count) artist\(artistNames.count == 1 ? "" : "s")"
+        }
         guard isSearch else { return sourceName }
         let count = filters?.count ?? 0
         return count > 0 ? "\(sourceName) · Search · \(count) filter\(count == 1 ? "" : "s")" : "\(sourceName) · Search"
+    }
+}
+
+/// How an artist shelf asks its extension for the artists' newest titles: the extension's
+/// Artist field with the names joined by `|`, sorted by latest when it offers that.
+enum MCArtistShelfQuery {
+    static func filters(for artists: [String], source: AidokuRunner.Source) async throws -> [FilterValue] {
+        let available = try await source.getSearchFilters()
+        var artistID: String?
+        var authorID: String?
+        var sort: SortFilterValue?
+        for filter in available {
+            let label = "\(filter.id) \(filter.title ?? "")".lowercased()
+            switch filter.value {
+                case .text:
+                    if label.contains("artist") {
+                        artistID = artistID ?? filter.id
+                    } else if label.contains("author") || label.contains("creator") {
+                        authorID = authorID ?? filter.id
+                    }
+                case let .sort(_, options, _):
+                    guard sort == nil else { continue }
+                    let keywords = ["latest", "date added", "newest", "recent", "updated"]
+                    if let index = options.firstIndex(where: { option in keywords.contains { option.lowercased().contains($0) } }) {
+                        sort = SortFilterValue(id: filter.id, index: index, ascending: false)
+                    }
+                default: break
+            }
+        }
+        guard let id = artistID ?? authorID else {
+            throw MCArtistShelfError.noArtistField
+        }
+        var values: [FilterValue] = [.text(id: id, value: artists.joined(separator: "|"))]
+        if let sort { values.append(.sort(sort)) }
+        return values
+    }
+
+    /// Names typed or picked, split on `|`, without blanks or repeats.
+    static func names(from text: String) -> [String] {
+        var seen = Set<String>()
+        return text.split(separator: "|")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    }
+}
+
+enum MCArtistShelfError: LocalizedError {
+    case noArtistField
+    var errorDescription: String? {
+        "This extension has no Artist search. Edit the shelf and pick another extension."
     }
 }
 
@@ -59,7 +115,7 @@ final class MCDiscoverModel: ObservableObject {
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key), let feeds = try? JSONDecoder().decode([MCDiscoverFeed].self, from: data) {
-            self.feeds = feeds.filter { !$0.isArtists }
+            self.feeds = feeds.filter { !$0.isLegacyArtists }
             if self.feeds.count != feeds.count { save() }
         }
         seen = UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: [String]] ?? [:]
@@ -82,6 +138,7 @@ final class MCDiscoverModel: ObservableObject {
         feeds[index] = feed
         save()
         if old.sourceKey != feed.sourceKey || old.listingID != feed.listingID || old.query != feed.query
+            || old.artistNames != feed.artistNames
             || (try? JSONEncoder().encode(old.filters)) != (try? JSONEncoder().encode(feed.filters)) {
             entries[feed.id] = nil; errors[feed.id] = nil; newKeys[feed.id] = nil
             seen[feed.id.uuidString] = nil
@@ -139,7 +196,10 @@ final class MCDiscoverModel: ObservableObject {
         defer { loading.remove(feed.id) }
         do {
             let result: AidokuRunner.MangaPageResult
-            if feed.isSearch {
+            if let artists = feed.artistNames {
+                let filters = try await MCArtistShelfQuery.filters(for: artists, source: source)
+                result = try await source.getSearchMangaList(query: nil, page: 1, filters: filters)
+            } else if feed.isSearch {
                 let query = feed.query ?? ""
                 result = try await source.getSearchMangaList(query: query.isEmpty ? nil : query, page: 1, filters: feed.filters ?? [])
             } else {
@@ -151,7 +211,7 @@ final class MCDiscoverModel: ObservableObject {
             var unique = Set<String>()
             let items = result.entries.filter { unique.insert($0.key).inserted }
             entries[feed.id] = items
-            if feed.isSearch { recordSeen(feed, keys: items.map(\.key)) }
+            if feed.isSearch || feed.isArtists { recordSeen(feed, keys: items.map(\.key)) }
         } catch is CancellationError { }
         catch { errors[feed.id] = error.midokuDescription() }
     }
@@ -188,6 +248,13 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
             guard let self else { return }
             guard let source = SourceStore.shared.source(for: feed.sourceKey) else { return }
             // Opens the extension's own page: on the shelf's tab, or searching with the shelf's term and filters.
+            if let artists = feed.artistNames {
+                Task { @MainActor in
+                    let filters = (try? await MCArtistShelfQuery.filters(for: artists, source: source)) ?? []
+                    self.navigationController?.pushViewController(NewSourceViewController(source: source, initialFilters: filters), animated: true)
+                }
+                return
+            }
             if feed.isSearch {
                 let controller = NewSourceViewController(source: source, searchQuery: feed.query, initialFilters: feed.filters ?? [])
                 navigationController?.pushViewController(controller, animated: true)
@@ -359,7 +426,7 @@ struct MCDiscoverView: View {
         promptCard(
             symbol: "rectangle.stack.badge.plus",
             title: "Build your feed",
-            message: "Shelves show a tab from an extension, like Popular or Latest, or rerun a search with filters to catch new results. Add a few to see everything new in one place.",
+            message: "Shelves show a tab from an extension, like Popular or Latest, rerun a search with filters, or follow artists from your library. Add a few to see everything new in one place.",
             button: "Add a shelf",
             action: openShelves
         )
@@ -509,7 +576,7 @@ private struct MCDiscoverHero: View {
 }
 
 struct MCDiscoverConfiguration: View {
-    enum Kind: String, CaseIterable { case tab = "Tab", search = "Search" }
+    enum Kind: String, CaseIterable { case tab = "Tab", search = "Search", artists = "Artists" }
 
     @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
@@ -526,6 +593,8 @@ struct MCDiscoverConfiguration: View {
     @State private var query = ""
     @State private var enabledFilters: [FilterValue] = []
     @State private var shelfName = ""
+    /// Artist shelves: names joined by `|`, typed or picked from the library.
+    @State private var artistText = ""
     @State private var layout: MCShelfLayout?
     @State private var showFilters = false
     @State private var loading = false
@@ -540,9 +609,10 @@ struct MCDiscoverConfiguration: View {
         if let editing {
             _editingID = State(initialValue: editing.id)
             _sourceKey = State(initialValue: editing.sourceKey)
-            _kind = State(initialValue: editing.isSearch ? .search : .tab)
+            _kind = State(initialValue: Self.kind(of: editing))
             _listingID = State(initialValue: editing.listingID)
             _query = State(initialValue: editing.query ?? "")
+            _artistText = State(initialValue: (editing.artistNames ?? []).joined(separator: "|"))
             _enabledFilters = State(initialValue: editing.filters ?? [])
             _shelfName = State(initialValue: editing.listingName)
             _layout = State(initialValue: editing.layout)
@@ -550,13 +620,18 @@ struct MCDiscoverConfiguration: View {
         _keepSelection = State(initialValue: editing != nil)
     }
 
+    private static func kind(of feed: MCDiscoverFeed) -> Kind {
+        feed.isArtists ? .artists : feed.isSearch ? .search : .tab
+    }
+
     private func startEditing(_ feed: MCDiscoverFeed) {
         keepSelection = true
         editingID = feed.id
         sourceKey = feed.sourceKey
-        kind = feed.isSearch ? .search : .tab
+        kind = Self.kind(of: feed)
         listingID = feed.listingID
         query = feed.query ?? ""
+        artistText = (feed.artistNames ?? []).joined(separator: "|")
         enabledFilters = feed.filters ?? []
         shelfName = feed.listingName
         layout = feed.layout
@@ -564,7 +639,7 @@ struct MCDiscoverConfiguration: View {
 
     private func resetForm() {
         editingID = nil
-        query = ""; enabledFilters = []; shelfName = ""; layout = nil
+        query = ""; enabledFilters = []; shelfName = ""; artistText = ""; layout = nil
         listingID = listings.first?.id ?? ""
     }
 
@@ -577,9 +652,11 @@ struct MCDiscoverConfiguration: View {
         switch kind {
         case .tab:
             guard listings.contains(where: { $0.id == listingID }) else { return false }
-            return editingID != nil || !model.feeds.contains { $0.sourceKey == sourceKey && $0.listingID == listingID && !$0.isSearch }
+            return editingID != nil || !model.feeds.contains { $0.sourceKey == sourceKey && $0.listingID == listingID && !$0.isSearch && !$0.isArtists }
         case .search:
             return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !enabledFilters.isEmpty
+        case .artists:
+            return !MCArtistShelfQuery.names(from: artistText).isEmpty
         }
     }
 
@@ -612,7 +689,7 @@ struct MCDiscoverConfiguration: View {
             VStack(spacing: 0) {
                 ForEach(Array(model.feeds.enumerated()), id: \.element.id) { index, feed in
                     HStack(spacing: 10) {
-                        Image(systemName: feed.isSearch ? "magnifyingglass" : "rectangle.stack")
+                        Image(systemName: feed.isArtists ? "person.2" : feed.isSearch ? "magnifyingglass" : "rectangle.stack")
                             .font(.system(size: 15)).foregroundStyle(Color.mdText2)
                             .frame(width: 34, height: 34).background(Color.mdS3)
                         VStack(alignment: .leading, spacing: 2) {
@@ -667,9 +744,7 @@ struct MCDiscoverConfiguration: View {
                 }
                 group("Shelf type") {
                     MDSegmented(options: Kind.allCases, selection: $kind) { $0.rawValue }
-                    Text(kind == .search
-                         ? "Reruns your term and filters each time Home refreshes. Results you haven't seen before are marked New."
-                         : "Shows a tab from the extension, like Popular or Latest.")
+                    Text(kindHelp)
                         .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
                 }
                 group("Extension") {
@@ -688,13 +763,14 @@ struct MCDiscoverConfiguration: View {
                     switch kind {
                     case .tab: tabFields
                     case .search: searchFields
+                    case .artists: artistFields
                     }
                 }
                 if let error { Text(error).font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3) }
                 if !sourceKey.isEmpty {
                     group("Name") {
                         fieldBox {
-                            TextField(kind == .tab ? "Tab name" : "Shelf name (optional)", text: $shelfName)
+                            TextField(kind == .tab ? "Tab name" : kind == .artists ? "Shelf name (optional, e.g. Artist updates)" : "Shelf name (optional)", text: $shelfName)
                                 .font(.mdSystem(size: 15)).foregroundStyle(Color.mdText)
                         }
                     }
@@ -725,6 +801,36 @@ struct MCDiscoverConfiguration: View {
                     }
                 }
             }
+        }
+    }
+
+    private var kindHelp: String {
+        switch kind {
+        case .tab: "Shows a tab from the extension, like Popular or Latest."
+        case .search: "Reruns your term and filters each time Home refreshes. Results you haven't seen before are marked New."
+        case .artists: "The newest titles by these artists from one extension, refreshed like your other shelves. Titles you haven't seen before are marked New."
+        }
+    }
+
+    @ViewBuilder private var artistFields: some View {
+        let count = MCArtistShelfQuery.names(from: artistText).count
+        group(count > 0 ? "Artists · \(count)" : "Artists") {
+            fieldBox {
+                Image(systemName: "person.2").font(.system(size: 14, weight: .medium)).foregroundStyle(Color.mdText3)
+                TextField("Artist names, separated by |", text: $artistText)
+                    .font(.mdSystem(size: 15)).foregroundStyle(Color.mdText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                if !artistText.isEmpty {
+                    Button { artistText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Color.mdText3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear artists")
+                }
+            }
+            LibraryArtistChips(text: $artistText).padding(.horizontal, -16)
         }
     }
 
@@ -789,6 +895,10 @@ struct MCDiscoverConfiguration: View {
             feed = MCDiscoverFeed(sourceKey: source.key, sourceName: source.name, listingID: "",
                                   listingName: trimmedName.isEmpty ? (trimmedQuery.isEmpty ? "Filtered search" : "“\(trimmedQuery)”") : trimmedName,
                                   query: trimmedQuery, filters: enabledFilters)
+        case .artists:
+            feed = MCDiscoverFeed(sourceKey: source.key, sourceName: source.name, listingID: "",
+                                  listingName: trimmedName.isEmpty ? "Artist updates" : trimmedName,
+                                  artistNames: MCArtistShelfQuery.names(from: artistText))
         }
         feed.layout = layout
         if let editingID {
@@ -821,6 +931,8 @@ struct MCDiscoverConfiguration: View {
                     // Filters from another extension don't apply here.
                     let ids = Set(loaded.map(\.id))
                     enabledFilters.removeAll { !ids.contains($0.id) }
+                case .artists:
+                    break
             }
         } catch is CancellationError { }
         catch { self.error = error.midokuDescription() }
@@ -856,8 +968,8 @@ private struct MCDiscoverShelf: View {
             Button { openListing(feed) } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
-                        if feed.isSearch {
-                            Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.mdText3)
+                        if feed.isArtists || feed.isSearch {
+                            Image(systemName: feed.isArtists ? "person.2" : "magnifyingglass").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.mdText3)
                         }
                         Text(feed.listingName).font(.mdDisplay(21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.mdText).lineLimit(1)
                         if let count = model.newKeys[feed.id]?.count, count > 0 {
@@ -878,9 +990,10 @@ private struct MCDiscoverShelf: View {
 
     private func optionRows() -> [MDActionRow] {
         var rows: [MDActionRow] = [
-            MDActionRow(systemImage: "puzzlepiece.extension", title: feed.isSearch ? "Open search in \(feed.sourceName)" : "Open tab in \(feed.sourceName)",
-                        detail: feed.isSearch ? "Same term and filters" : feed.listingName) { openListing(feed) },
-            MDActionRow(systemImage: "pencil", title: "Edit shelf", detail: feed.isSearch ? "Name, search term, filters, extension" : "Name, tab, extension") { editing = true },
+            MDActionRow(systemImage: "puzzlepiece.extension", title: feed.isSearch || feed.isArtists ? "Open search in \(feed.sourceName)" : "Open tab in \(feed.sourceName)",
+                        detail: feed.isArtists ? "Same artists" : feed.isSearch ? "Same term and filters" : feed.listingName) { openListing(feed) },
+            MDActionRow(systemImage: "pencil", title: "Edit shelf",
+                        detail: feed.isArtists ? "Name, artists, extension" : feed.isSearch ? "Name, search term, filters, extension" : "Name, tab, extension") { editing = true },
             MDActionRow(systemImage: "arrow.clockwise", title: "Refresh") { Task { await model.load(feed, force: true) } }
         ]
         for option in MCShelfLayout.allCases {
