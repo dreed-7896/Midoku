@@ -234,27 +234,45 @@ extension View {
     }
 }
 
-/// Long press opens a web options sheet instead of the system context menu.
+/// Long press opens the system context menu with the given options. A context menu, unlike a
+/// long-press gesture, never competes with the row's own tap or with scrolling.
 private struct MDLongPressActions: ViewModifier {
-    let title: String
     let rows: () -> [MDActionRow]
     var enabled = true
-    @State private var shown = false
 
     func body(content: Content) -> some View {
-        content
-            .onLongPressGesture(minimumDuration: 0.45) {
-                guard enabled else { return }
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                shown = true
+        content.contextMenu {
+            if enabled {
+                ForEach(rows()) { row in
+                    Button(role: row.destructive ? .destructive : nil) { row.action() } label: {
+                        Label {
+                            Text(row.title)
+                            if let detail = row.detail { Text(detail) }
+                        } icon: {
+                            Image(systemName: row.systemImage)
+                        }
+                    }
+                    .disabled(row.disabled)
+                }
             }
-            .mdActionSheet(isPresented: $shown, title: title, rows: rows)
+        }
     }
 }
 
 extension View {
     func mdLongPressActions(_ title: String, enabled: Bool = true, rows: @escaping () -> [MDActionRow]) -> some View {
-        modifier(MDLongPressActions(title: title, rows: rows, enabled: enabled))
+        modifier(MDLongPressActions(rows: rows, enabled: enabled))
+    }
+}
+
+extension MDActionRow {
+    /// The row as a context menu action.
+    var uiAction: UIAction {
+        var attributes: UIMenuElement.Attributes = []
+        if destructive { attributes.insert(.destructive) }
+        if disabled { attributes.insert(.disabled) }
+        let action = self.action
+        return UIAction(title: title, subtitle: detail, image: UIImage(systemName: systemImage), attributes: attributes) { _ in action() }
     }
 }
 

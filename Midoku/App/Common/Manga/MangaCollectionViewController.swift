@@ -51,9 +51,6 @@ class MangaCollectionViewController: BaseCollectionViewController {
             right: 0
         )
         collectionView.keyboardDismissMode = .onDrag
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleEntryLongPress(_:)))
-        longPress.minimumPressDuration = 0.45
-        collectionView.addGestureRecognizer(longPress)
 
         // pull to refresh
         refreshControl.addTarget(self, action: #selector(refresh(_:)), for: .valueChanged)
@@ -277,13 +274,18 @@ extension MangaCollectionViewController {
         navigationController?.pushViewController(viewController, animated: true)
     }
 
-    /// Long press opens the web options sheet instead of the system context menu.
-    @objc func handleEntryLongPress(_ recognizer: UILongPressGestureRecognizer) {
-        guard recognizer.state == .began,
-              let indexPath = collectionView.indexPathForItem(at: recognizer.location(in: collectionView)),
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard indexPaths.count == 1, let indexPath = indexPaths.first,
               let entry = dataSource.itemIdentifier(for: indexPath)
-        else { return }
-        presentMDActionSheet(title: entry.title, rows: entryRows(entry))
+        else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            guard let self else { return nil }
+            return UIMenu(title: "", children: self.entryRows(entry).map(\.uiAction))
+        }
     }
 
     private func entryRows(_ entry: AidokuRunner.Manga) -> [MDActionRow] {

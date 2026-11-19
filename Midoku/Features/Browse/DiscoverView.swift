@@ -12,14 +12,17 @@ struct MCDiscoverFeed: Codable, Identifiable {
     var filters: [FilterValue]?
     /// Left over from the removed multi-extension artist shelves; such shelves are dropped on load.
     var artists: [String]?
-    /// Artist shelves: the newest titles by these artists from one extension.
+    /// Artist shelves: the newest titles by these artists.
     var artistNames: [String]?
+    /// Artist shelves: the extensions searched together; `sourceKey` is the first.
+    var sourceKeys: [String]?
     /// How the shelf shows its titles; nil uses the default for its position.
     var layout: MCShelfLayout?
 
     var isLegacyArtists: Bool { artists != nil }
     var isArtists: Bool { artistNames != nil }
     var isSearch: Bool { query != nil || filters != nil }
+    var allSourceKeys: [String] { sourceKeys ?? [sourceKey] }
     var subtitle: String {
         if let artistNames {
             return "\(sourceName) · \(artistNames.count) artist\(artistNames.count == 1 ? "" : "s")"
@@ -62,6 +65,66 @@ enum MCArtistShelfQuery {
         var values: [FilterValue] = [.text(id: id, value: artists.joined(separator: "|"))]
         if let sort { values.append(.sort(sort)) }
         return values
+    }
+
+    /// The newest titles by the artists from every extension at once, newest first by upload
+    /// time. A title found in several extensions shows once, from the first one in the shelf.
+    /// Fails only when every extension fails.
+    static func load(artists: [String], sources: [AidokuRunner.Source]) async throws -> [AidokuRunner.Manga] {
+        let results = await withTaskGroup(of: (Int, Result<[AidokuRunner.Manga], Error>).self) { group in
+            for (index, source) in sources.enumerated() {
+                group.addTask {
+                    do {
+                        let values = try await Self.filters(for: artists, source: source)
+                        let result = try await source.getSearchMangaList(query: nil, page: 1, filters: values)
+                        return (index, .success(result.entries))
+                    } catch {
+                        return (index, .failure(error))
+                    }
+                }
+            }
+            var collected: [(Int, Result<[AidokuRunner.Manga], Error>)] = []
+            for await item in group { collected.append(item) }
+            return collected.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+        var lists: [[AidokuRunner.Manga]] = []
+        var firstError: Error?
+        for result in results {
+            switch result {
+                case .success(let entries): lists.append(entries)
+                case .failure(let error): firstError = firstError ?? error
+            }
+        }
+        if lists.isEmpty, let firstError { throw firstError }
+        return merge(lists)
+    }
+
+    /// Interleaves the lists by position (each is newest first), then orders by upload time
+    /// where extensions report one, dropping repeated titles.
+    static func merge(_ lists: [[AidokuRunner.Manga]]) -> [AidokuRunner.Manga] {
+        var interleaved: [AidokuRunner.Manga] = []
+        let longest = lists.map(\.count).max() ?? 0
+        for index in 0..<longest {
+            for list in lists where index < list.count { interleaved.append(list[index]) }
+        }
+        var seen = Set<String>()
+        let unique = interleaved.filter { manga in
+            let title = manga.title.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+            let key = title.isEmpty ? "\(manga.sourceKey)|\(manga.key)" : String(title)
+            return seen.insert(key).inserted && seen.insert("\(manga.sourceKey)|\(manga.key)").inserted
+        }
+        guard lists.count > 1 else { return unique }
+        let dated: [(offset: Int, manga: AidokuRunner.Manga, time: TimeInterval?)] = unique.enumerated().map { item in
+            (offset: item.offset, manga: item.element, time: item.element.nextUpdateTime.map { TimeInterval($0) })
+        }
+        return dated.sorted { lhs, rhs in
+            switch (lhs.time, rhs.time) {
+                case let (left?, right?) where left != right: return left > right
+                case (_?, nil): return true
+                case (nil, _?): return false
+                default: return lhs.offset < rhs.offset
+            }
+        }.map(\.manga)
     }
 
     /// Names typed or picked, split on `|`, without blanks or repeats.
@@ -138,7 +201,7 @@ final class MCDiscoverModel: ObservableObject {
         feeds[index] = feed
         save()
         if old.sourceKey != feed.sourceKey || old.listingID != feed.listingID || old.query != feed.query
-            || old.artistNames != feed.artistNames
+            || old.artistNames != feed.artistNames || old.sourceKeys != feed.sourceKeys
             || (try? JSONEncoder().encode(old.filters)) != (try? JSONEncoder().encode(feed.filters)) {
             entries[feed.id] = nil; errors[feed.id] = nil; newKeys[feed.id] = nil
             seen[feed.id.uuidString] = nil
@@ -188,6 +251,25 @@ final class MCDiscoverModel: ObservableObject {
         guard !loading.contains(feed.id), force || entries[feed.id] == nil else { return }
         // Sources load after launch; the shelf retries when its source appears.
         guard SourceStore.shared.hasLoaded else { return }
+        if let artists = feed.artistNames {
+            let sources = feed.allSourceKeys.compactMap { key in
+                SourceStore.shared.isDisabled(sourceKey: key) ? nil : SourceStore.shared.source(for: key)
+            }
+            guard !sources.isEmpty else {
+                errors[feed.id] = "These extensions are unavailable. Open Extensions to enable or install them."
+                return
+            }
+            loading.insert(feed.id); errors[feed.id] = nil
+            defer { loading.remove(feed.id) }
+            do {
+                let items = try await MCArtistShelfQuery.load(artists: artists, sources: sources)
+                try Task.checkCancellation()
+                entries[feed.id] = items
+                recordSeen(feed, keys: items.map(\.key))
+            } catch is CancellationError { }
+            catch { errors[feed.id] = error.midokuDescription() }
+            return
+        }
         guard let source = SourceStore.shared.source(for: feed.sourceKey), !SourceStore.shared.isDisabled(sourceKey: feed.sourceKey) else {
             errors[feed.id] = "This extension is unavailable. Open Extensions to enable or install it."
             return
@@ -196,10 +278,7 @@ final class MCDiscoverModel: ObservableObject {
         defer { loading.remove(feed.id) }
         do {
             let result: AidokuRunner.MangaPageResult
-            if let artists = feed.artistNames {
-                let filters = try await MCArtistShelfQuery.filters(for: artists, source: source)
-                result = try await source.getSearchMangaList(query: nil, page: 1, filters: filters)
-            } else if feed.isSearch {
+            if feed.isSearch {
                 let query = feed.query ?? ""
                 result = try await source.getSearchMangaList(query: query.isEmpty ? nil : query, page: 1, filters: feed.filters ?? [])
             } else {
@@ -211,7 +290,7 @@ final class MCDiscoverModel: ObservableObject {
             var unique = Set<String>()
             let items = result.entries.filter { unique.insert($0.key).inserted }
             entries[feed.id] = items
-            if feed.isSearch || feed.isArtists { recordSeen(feed, keys: items.map(\.key)) }
+            if feed.isSearch { recordSeen(feed, keys: items.map(\.key)) }
         } catch is CancellationError { }
         catch { errors[feed.id] = error.midokuDescription() }
     }
@@ -482,7 +561,8 @@ private struct MCDiscoverHero: View {
     let items: [AidokuRunner.Manga]
     let label: String
     let newKeys: Set<String>
-    let source: AidokuRunner.Source?
+    /// The extension of each title (artist shelves mix several).
+    let source: (AidokuRunner.Manga) -> AidokuRunner.Source?
     let open: (AidokuRunner.Manga) -> Void
     @State private var position: String?
 
@@ -556,7 +636,7 @@ private struct MCDiscoverHero: View {
         }
         .frame(maxWidth: .infinity, minHeight: 250, maxHeight: 250, alignment: .bottomLeading)
         .background {
-            SourceImageView(source: source, imageUrl: manga.cover ?? "", downsampleWidth: 200)
+            SourceImageView(source: source(manga), imageUrl: manga.cover ?? "", downsampleWidth: 200)
                 .scaleEffect(1.4)
                 .blur(radius: 30)
                 .saturation(1.3)
@@ -570,7 +650,7 @@ private struct MCDiscoverHero: View {
     }
 
     private func image(_ manga: AidokuRunner.Manga, width: CGFloat, height: CGFloat) -> some View {
-        SourceImageView(source: source, imageUrl: manga.cover ?? "", width: width, height: height,
+        SourceImageView(source: source(manga), imageUrl: manga.cover ?? "", width: width, height: height,
                         placeholder: "MidokuCoverPlaceholder").frame(width: width, height: height).clipped()
     }
 }
@@ -595,6 +675,8 @@ struct MCDiscoverConfiguration: View {
     @State private var shelfName = ""
     /// Artist shelves: names joined by `|`, typed or picked from the library.
     @State private var artistText = ""
+    /// Artist shelves: the extensions picked, in the order picked.
+    @State private var artistSourceKeys: [String] = []
     @State private var layout: MCShelfLayout?
     @State private var showFilters = false
     @State private var loading = false
@@ -613,6 +695,7 @@ struct MCDiscoverConfiguration: View {
             _listingID = State(initialValue: editing.listingID)
             _query = State(initialValue: editing.query ?? "")
             _artistText = State(initialValue: (editing.artistNames ?? []).joined(separator: "|"))
+            _artistSourceKeys = State(initialValue: editing.isArtists ? editing.allSourceKeys : [])
             _enabledFilters = State(initialValue: editing.filters ?? [])
             _shelfName = State(initialValue: editing.listingName)
             _layout = State(initialValue: editing.layout)
@@ -632,6 +715,7 @@ struct MCDiscoverConfiguration: View {
         listingID = feed.listingID
         query = feed.query ?? ""
         artistText = (feed.artistNames ?? []).joined(separator: "|")
+        artistSourceKeys = feed.isArtists ? feed.allSourceKeys : []
         enabledFilters = feed.filters ?? []
         shelfName = feed.listingName
         layout = feed.layout
@@ -639,7 +723,7 @@ struct MCDiscoverConfiguration: View {
 
     private func resetForm() {
         editingID = nil
-        query = ""; enabledFilters = []; shelfName = ""; artistText = ""; layout = nil
+        query = ""; enabledFilters = []; shelfName = ""; artistText = ""; artistSourceKeys = []; layout = nil
         listingID = listings.first?.id ?? ""
     }
 
@@ -747,14 +831,22 @@ struct MCDiscoverConfiguration: View {
                     Text(kindHelp)
                         .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
                 }
-                group("Extension") {
+                group(kind == .artists ? "Extensions" : "Extension") {
                     MDFlow {
                         ForEach(installed, id: \.key) { source in
-                            chip(source.name, on: sourceKey == source.key) {
-                                keepSelection = false
-                                sourceKey = source.key
+                            if kind == .artists {
+                                chip(source.name, on: pickedArtistSources.contains(source.key)) { toggleArtistSource(source.key) }
+                            } else {
+                                chip(source.name, on: sourceKey == source.key) {
+                                    keepSelection = false
+                                    sourceKey = source.key
+                                }
                             }
                         }
+                    }
+                    if kind == .artists {
+                        Text("Pick one or more. They're searched at the same time and the results are sorted by upload date.")
+                            .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
                     }
                 }
                 if loading {
@@ -804,11 +896,24 @@ struct MCDiscoverConfiguration: View {
         }
     }
 
+    /// The extensions an artist shelf searches; switching from another type keeps its extension.
+    private var pickedArtistSources: [String] {
+        artistSourceKeys.isEmpty && !sourceKey.isEmpty ? [sourceKey] : artistSourceKeys
+    }
+
+    private func toggleArtistSource(_ key: String) {
+        var keys = pickedArtistSources
+        if let index = keys.firstIndex(of: key) { keys.remove(at: index) } else { keys.append(key) }
+        artistSourceKeys = keys
+        keepSelection = true
+        sourceKey = keys.first ?? ""
+    }
+
     private var kindHelp: String {
         switch kind {
         case .tab: "Shows a tab from the extension, like Popular or Latest."
         case .search: "Reruns your term and filters each time Home refreshes. Results you haven't seen before are marked New."
-        case .artists: "The newest titles by these artists from one extension, refreshed like your other shelves. Titles you haven't seen before are marked New."
+        case .artists: "The newest titles by these artists, refreshed like your other shelves. Titles you haven't seen before are marked New."
         }
     }
 
@@ -896,9 +1001,12 @@ struct MCDiscoverConfiguration: View {
                                   listingName: trimmedName.isEmpty ? (trimmedQuery.isEmpty ? "Filtered search" : "“\(trimmedQuery)”") : trimmedName,
                                   query: trimmedQuery, filters: enabledFilters)
         case .artists:
-            feed = MCDiscoverFeed(sourceKey: source.key, sourceName: source.name, listingID: "",
+            let picked = pickedArtistSources.compactMap { sources.source(for: $0) }
+            guard let first = picked.first else { return }
+            feed = MCDiscoverFeed(sourceKey: first.key, sourceName: picked.map(\.name).joined(separator: " + "), listingID: "",
                                   listingName: trimmedName.isEmpty ? "Artist updates" : trimmedName,
-                                  artistNames: MCArtistShelfQuery.names(from: artistText))
+                                  artistNames: MCArtistShelfQuery.names(from: artistText),
+                                  sourceKeys: picked.map(\.key))
         }
         feed.layout = layout
         if let editingID {
@@ -989,11 +1097,22 @@ private struct MCDiscoverShelf: View {
     }
 
     private func optionRows() -> [MDActionRow] {
-        var rows: [MDActionRow] = [
-            MDActionRow(systemImage: "puzzlepiece.extension", title: feed.isSearch || feed.isArtists ? "Open search in \(feed.sourceName)" : "Open tab in \(feed.sourceName)",
-                        detail: feed.isArtists ? "Same artists" : feed.isSearch ? "Same term and filters" : feed.listingName) { openListing(feed) },
+        var rows: [MDActionRow] = []
+        if feed.isArtists {
+            // One row per extension the shelf searches.
+            for key in feed.allSourceKeys {
+                let name = sources.source(for: key)?.name ?? key
+                let single = MCDiscoverFeed(sourceKey: key, sourceName: name, listingID: "", listingName: feed.listingName,
+                                            artistNames: feed.artistNames)
+                rows.append(MDActionRow(systemImage: "puzzlepiece.extension", title: "Open search in \(name)", detail: "Same artists") { openListing(single) })
+            }
+        } else {
+            rows.append(MDActionRow(systemImage: "puzzlepiece.extension", title: feed.isSearch ? "Open search in \(feed.sourceName)" : "Open tab in \(feed.sourceName)",
+                                    detail: feed.isSearch ? "Same term and filters" : feed.listingName) { openListing(feed) })
+        }
+        rows += [
             MDActionRow(systemImage: "pencil", title: "Edit shelf",
-                        detail: feed.isArtists ? "Name, artists, extension" : feed.isSearch ? "Name, search term, filters, extension" : "Name, tab, extension") { editing = true },
+                        detail: feed.isArtists ? "Name, artists, extensions" : feed.isSearch ? "Name, search term, filters, extension" : "Name, tab, extension") { editing = true },
             MDActionRow(systemImage: "arrow.clockwise", title: "Refresh") { Task { await model.load(feed, force: true) } }
         ]
         for option in MCShelfLayout.allCases {
@@ -1014,7 +1133,7 @@ private struct MCDiscoverShelf: View {
             switch layout {
             case .hero:
                 MCDiscoverHero(items: Array(items.prefix(10)), label: feed.listingName, newKeys: fresh,
-                               source: sources.source(for: feed.sourceKey), open: openManga)
+                               source: { sources.source(for: $0.sourceKey) }, open: openManga)
             case .rail:
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 12) {
