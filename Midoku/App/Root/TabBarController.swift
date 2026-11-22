@@ -185,8 +185,7 @@ class TabBarController: UITabBarController {
 
         NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
             .sink { [weak self] _ in
-                guard AppSettings.general.appLock.get() else { return }
-                self?.appBackgroundedAt = Date()
+                self?.handleAppDidEnterBackground()
             }
             .store(in: &cancellables)
 
@@ -254,13 +253,22 @@ class TabBarController: UITabBarController {
 }
 
 private extension TabBarController {
+    /// Resigning active also happens for the Face ID prompt itself, Control Center and
+    /// notifications, so it only blurs; locking waits until the app is really backgrounded.
+    /// Locking here re-locked the app right after a successful Face ID check.
     func handleAppWillResignActive() {
+        guard AppSettings.general.appLock.get(), !unlockingApp, appLockOverlay == nil else { return }
+        if AppSettings.general.blurAppSwitcher.get() { showAppSwitcherBlur() }
+    }
+
+    func handleAppDidEnterBackground() {
         guard AppSettings.general.appLock.get() else { return }
+        appBackgroundedAt = Date()
+        // Covers the app before the app switcher snapshot is taken.
         if AppSettings.general.appLockDelay.get().seconds == 0 {
             hasAuthenticatedAppLock = false
             showAppLock()
         }
-        if AppSettings.general.blurAppSwitcher.get() { showAppSwitcherBlur() }
     }
 
     func prepareAppLockForForeground() {
@@ -387,6 +395,7 @@ private extension TabBarController {
                 if success {
                     self.hasAuthenticatedAppLock = true
                     self.hideAppLock()
+                    self.hideAppSwitcherBlur()
                 }
             } catch {
                 // Keep the lock screen visible so the user can retry.
