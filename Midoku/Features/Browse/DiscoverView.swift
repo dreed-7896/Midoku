@@ -18,18 +18,179 @@ struct MCDiscoverFeed: Codable, Identifiable {
     var sourceKeys: [String]?
     /// How the shelf shows its titles; nil uses the default for its position.
     var layout: MCShelfLayout?
+    /// Feed shelves: tabs from several extensions merged into one list, newest first.
+    var feedTabs: [MCFeedTab]?
+    /// Feed shelves: covers per row in the feed grid.
+    var feedColumns: Int?
 
     var isLegacyArtists: Bool { artists != nil }
     var isArtists: Bool { artistNames != nil }
     var isSearch: Bool { query != nil || filters != nil }
-    var allSourceKeys: [String] { sourceKeys ?? [sourceKey] }
+    var isFeed: Bool { feedTabs != nil }
+    var columns: Int { min(max(feedColumns ?? 3, 2), 5) }
+    var allSourceKeys: [String] {
+        if let feedTabs {
+            var seen = Set<String>()
+            return feedTabs.map(\.sourceKey).filter { seen.insert($0).inserted }
+        }
+        return sourceKeys ?? [sourceKey]
+    }
     var subtitle: String {
+        if let feedTabs {
+            let sources = allSourceKeys.count
+            return "Feed · \(feedTabs.count) tab\(feedTabs.count == 1 ? "" : "s") · \(sources) extension\(sources == 1 ? "" : "s")"
+        }
         if let artistNames {
             return "\(sourceName) · \(artistNames.count) artist\(artistNames.count == 1 ? "" : "s")"
         }
         guard isSearch else { return sourceName }
         let count = filters?.count ?? 0
         return count > 0 ? "\(sourceName) · Search · \(count) filter\(count == 1 ? "" : "s")" : "\(sourceName) · Search"
+    }
+}
+
+struct MCFeedTab: Codable, Hashable {
+    let sourceKey: String
+    let listingID: String
+    var listingName: String
+}
+
+/// Feed shelves: the first page of several extension tabs merged into one list of at most
+/// `limit` titles, newest first where extensions report an upload time. A title found in
+/// several tabs shows once, from whichever comes first.
+enum MCFeedShelfQuery {
+    static let limit = 100
+
+    /// Fails only when every tab fails.
+    static func load(tabs: [(tab: MCFeedTab, source: AidokuRunner.Source)]) async throws -> [AidokuRunner.Manga] {
+        let perTab = max(20, Int((Double(limit) / Double(max(tabs.count, 1))).rounded(.up)))
+        let results = await withTaskGroup(of: (Int, Result<[AidokuRunner.Manga], Error>).self) { group in
+            for (index, item) in tabs.enumerated() {
+                let tab = item.tab, source = item.source
+                group.addTask {
+                    do {
+                        guard let listing = try await source.getListings().first(where: { $0.id == tab.listingID }) else {
+                            throw MCFeedShelfError.missingTab(tab.listingName)
+                        }
+                        let first = try await source.getMangaList(listing: listing, page: 1)
+                        var entries = first.entries
+                        // A second page when one isn't enough to fill this tab's share of the feed.
+                        if first.hasNextPage, entries.count < perTab,
+                           let second = try? await source.getMangaList(listing: listing, page: 2) {
+                            entries += second.entries
+                        }
+                        return (index, .success(entries))
+                    } catch {
+                        return (index, .failure(error))
+                    }
+                }
+            }
+            var collected: [(Int, Result<[AidokuRunner.Manga], Error>)] = []
+            for await item in group { collected.append(item) }
+            return collected.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+        var lists: [[AidokuRunner.Manga]] = []
+        var firstError: Error?
+        for result in results {
+            switch result {
+                case .success(let entries): lists.append(entries)
+                case .failure(let error): firstError = firstError ?? error
+            }
+        }
+        if lists.isEmpty, let firstError { throw firstError }
+        return merge(lists, limit: limit)
+    }
+
+    /// When every title has an upload time the lists are sorted together by it. Otherwise
+    /// they're merged head by head (each tab is assumed newest first): dated heads by time,
+    /// the rest by position, ties going to the earlier tab. Repeats are dropped as they come.
+    static func merge(_ lists: [[AidokuRunner.Manga]], limit: Int) -> [AidokuRunner.Manga] {
+        let now = Date().timeIntervalSince1970
+        var seenIDs = Set<String>()
+        var seenTitles = Set<String>()
+        var result: [AidokuRunner.Manga] = []
+        func accept(_ manga: AidokuRunner.Manga) {
+            let id = "\(manga.sourceKey)|\(manga.key)"
+            let title = titleKey(manga.title)
+            guard !seenIDs.contains(id), title.isEmpty || !seenTitles.contains(title) else { return }
+            seenIDs.insert(id)
+            if !title.isEmpty { seenTitles.insert(title) }
+            result.append(manga)
+        }
+
+        let all = lists.flatMap { $0 }
+        if !all.isEmpty, all.allSatisfy({ uploadTime($0, now: now) != nil }) {
+            typealias Item = (tab: Int, position: Int, manga: AidokuRunner.Manga, time: TimeInterval)
+            var items: [Item] = []
+            for (tab, list) in lists.enumerated() {
+                for (position, manga) in list.enumerated() {
+                    items.append((tab: tab, position: position, manga: manga, time: uploadTime(manga, now: now) ?? 0))
+                }
+            }
+            let ordered = items.sorted { lhs, rhs in
+                if lhs.time != rhs.time { return lhs.time > rhs.time }
+                if lhs.tab != rhs.tab { return lhs.tab < rhs.tab }
+                return lhs.position < rhs.position
+            }
+            for item in ordered where result.count < limit { accept(item.manga) }
+            return result
+        }
+
+        var positions = Array(repeating: 0, count: lists.count)
+        while result.count < limit {
+            var best: Int?
+            for index in lists.indices where positions[index] < lists[index].count {
+                guard let current = best else { best = index; continue }
+                let left = uploadTime(lists[index][positions[index]], now: now)
+                let right = uploadTime(lists[current][positions[current]], now: now)
+                if let left, let right, left != right {
+                    if left > right { best = index }
+                } else if positions[index] < positions[current] {
+                    best = index
+                }
+            }
+            guard let best else { break }
+            let manga = lists[best][positions[best]]
+            positions[best] += 1
+            accept(manga)
+        }
+        return result
+    }
+
+    /// When the title was uploaded: extensions report it in `nextUpdateTime` on results, or on
+    /// chapters. Times in the future are real next-update times and are ignored.
+    static func uploadTime(_ manga: AidokuRunner.Manga, now: TimeInterval = Date().timeIntervalSince1970) -> TimeInterval? {
+        if let time = manga.nextUpdateTime, time > 0, TimeInterval(time) <= now + 86_400 {
+            return TimeInterval(time)
+        }
+        return manga.chapters?.compactMap(\.dateUploaded).max()?.timeIntervalSince1970
+    }
+
+    /// The title without artist, circle, event and language tags, so
+    /// "[Artist (Circle)] Title [English]" and "Title" match. Bracketed parts are dropped;
+    /// parenthesised ones too unless they number the work, like "(Part 2)".
+    static func titleKey(_ title: String) -> String {
+        var stripped = title.replacing(#/\[[^\]]*\]|\{[^}]*\}|【[^】]*】|［[^］]*］/#, with: " ")
+        stripped = stripped.replacing(#/\([^)]*\)|（[^）]*）/#) { match in
+            let inner = String(match.output)
+            return inner.wholeMatch(of: #/(?i)[(（]\s*(part|vol\.?|volume|ch\.?|chapter|season|book|\#)?\s*\d+\s*[)）]/#) != nil ? inner : " "
+        }
+        let core = normalized(stripped)
+        return core.isEmpty ? normalized(title) : core
+    }
+
+    private static func normalized(_ text: String) -> String {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+        return String(folded.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+    }
+}
+
+enum MCFeedShelfError: LocalizedError {
+    case missingTab(String)
+    var errorDescription: String? {
+        switch self {
+        case .missingTab(let name): "The tab “\(name)” is no longer available. Edit the shelf and pick another tab."
+        }
     }
 }
 
@@ -109,8 +270,8 @@ enum MCArtistShelfQuery {
         }
         var seen = Set<String>()
         let unique = interleaved.filter { manga in
-            let title = manga.title.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
-            let key = title.isEmpty ? "\(manga.sourceKey)|\(manga.key)" : String(title)
+            let title = MCFeedShelfQuery.titleKey(manga.title)
+            let key = title.isEmpty ? "\(manga.sourceKey)|\(manga.key)" : title
             return seen.insert(key).inserted && seen.insert("\(manga.sourceKey)|\(manga.key)").inserted
         }
         guard lists.count > 1 else { return unique }
@@ -201,7 +362,7 @@ final class MCDiscoverModel: ObservableObject {
         feeds[index] = feed
         save()
         if old.sourceKey != feed.sourceKey || old.listingID != feed.listingID || old.query != feed.query
-            || old.artistNames != feed.artistNames || old.sourceKeys != feed.sourceKeys
+            || old.artistNames != feed.artistNames || old.sourceKeys != feed.sourceKeys || old.feedTabs != feed.feedTabs
             || (try? JSONEncoder().encode(old.filters)) != (try? JSONEncoder().encode(feed.filters)) {
             entries[feed.id] = nil; errors[feed.id] = nil; newKeys[feed.id] = nil
             seen[feed.id.uuidString] = nil
@@ -247,10 +408,36 @@ final class MCDiscoverModel: ObservableObject {
         feeds[index].layout = layout
         save()
     }
+    func setColumns(_ columns: Int, for feed: MCDiscoverFeed) {
+        guard let index = feeds.firstIndex(where: { $0.id == feed.id }) else { return }
+        feeds[index].feedColumns = columns
+        save()
+    }
     func load(_ feed: MCDiscoverFeed, force: Bool = false) async {
         guard !loading.contains(feed.id), force || entries[feed.id] == nil else { return }
         // Sources load after launch; the shelf retries when its source appears.
         guard SourceStore.shared.hasLoaded else { return }
+        if let tabs = feed.feedTabs {
+            let available = tabs.compactMap { tab -> (tab: MCFeedTab, source: AidokuRunner.Source)? in
+                guard !SourceStore.shared.isDisabled(sourceKey: tab.sourceKey),
+                      let source = SourceStore.shared.source(for: tab.sourceKey) else { return nil }
+                return (tab, source)
+            }
+            guard !available.isEmpty else {
+                errors[feed.id] = "These extensions are unavailable. Open Extensions to enable or install them."
+                return
+            }
+            loading.insert(feed.id); errors[feed.id] = nil
+            defer { loading.remove(feed.id) }
+            do {
+                let items = try await MCFeedShelfQuery.load(tabs: available)
+                try Task.checkCancellation()
+                entries[feed.id] = items
+                recordSeen(feed, keys: items.map(\.key))
+            } catch is CancellationError { }
+            catch { errors[feed.id] = error.midokuDescription() }
+            return
+        }
         if let artists = feed.artistNames {
             let sources = feed.allSourceKeys.compactMap { key in
                 SourceStore.shared.isDisabled(sourceKey: key) ? nil : SourceStore.shared.source(for: key)
@@ -325,6 +512,10 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
         }
         rootView.openListing = { [weak self] feed in
             guard let self else { return }
+            if let tab = feed.feedTabs?.first {
+                self.openFeedTab(tab)
+                return
+            }
             guard let source = SourceStore.shared.source(for: feed.sourceKey) else { return }
             // Opens the extension's own page: on the shelf's tab, or searching with the shelf's term and filters.
             if let artists = feed.artistNames {
@@ -363,6 +554,14 @@ final class DiscoverViewController: UIHostingController<MCDiscoverView> {
         navigationItem.largeTitleDisplayMode = .always
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func openFeedTab(_ tab: MCFeedTab) {
+        guard let source = SourceStore.shared.source(for: tab.sourceKey) else { return }
+        Task { @MainActor in
+            let index = (try? await source.getListings())?.firstIndex { $0.id == tab.listingID }
+            self.navigationController?.pushViewController(NewSourceViewController(source: source, initialListingIndex: index), animated: true)
+        }
+    }
 
     private func showShelves(kind: MCDiscoverConfiguration.Kind = .tab) {
         guard presentedViewController == nil else { return }
@@ -505,7 +704,7 @@ struct MCDiscoverView: View {
         promptCard(
             symbol: "rectangle.stack.badge.plus",
             title: "Build your feed",
-            message: "Shelves show a tab from an extension, like Popular or Latest, rerun a search with filters, or follow artists from your library. Add a few to see everything new in one place.",
+            message: "Shelves show a tab from an extension, like Popular or Latest, rerun a search with filters, follow artists from your library, or merge tabs from several extensions into one feed. Add a few to see everything new in one place.",
             button: "Add a shelf",
             action: openShelves
         )
@@ -656,7 +855,7 @@ private struct MCDiscoverHero: View {
 }
 
 struct MCDiscoverConfiguration: View {
-    enum Kind: String, CaseIterable { case tab = "Tab", search = "Search", artists = "Artists" }
+    enum Kind: String, CaseIterable { case tab = "Tab", search = "Search", artists = "Artists", feed = "Feed" }
 
     @ObservedObject var model: MCDiscoverModel
     @ObservedObject private var sources = SourceStore.shared
@@ -678,6 +877,11 @@ struct MCDiscoverConfiguration: View {
     /// Artist shelves: the extensions picked, in the order picked.
     @State private var artistSourceKeys: [String] = []
     @State private var layout: MCShelfLayout?
+    /// Feed shelves: the extensions picked, the tabs picked from them, each extension's tabs.
+    @State private var feedSourceKeys: [String] = []
+    @State private var feedTabs: [MCFeedTab] = []
+    @State private var feedListings: [String: [AidokuRunner.Listing]] = [:]
+    @State private var feedColumns = 3
     @State private var showFilters = false
     @State private var loading = false
     @State private var error: String?
@@ -699,12 +903,15 @@ struct MCDiscoverConfiguration: View {
             _enabledFilters = State(initialValue: editing.filters ?? [])
             _shelfName = State(initialValue: editing.listingName)
             _layout = State(initialValue: editing.layout)
+            _feedSourceKeys = State(initialValue: editing.isFeed ? editing.allSourceKeys : [])
+            _feedTabs = State(initialValue: editing.feedTabs ?? [])
+            _feedColumns = State(initialValue: editing.columns)
         }
         _keepSelection = State(initialValue: editing != nil)
     }
 
     private static func kind(of feed: MCDiscoverFeed) -> Kind {
-        feed.isArtists ? .artists : feed.isSearch ? .search : .tab
+        feed.isFeed ? .feed : feed.isArtists ? .artists : feed.isSearch ? .search : .tab
     }
 
     private func startEditing(_ feed: MCDiscoverFeed) {
@@ -719,11 +926,15 @@ struct MCDiscoverConfiguration: View {
         enabledFilters = feed.filters ?? []
         shelfName = feed.listingName
         layout = feed.layout
+        feedSourceKeys = feed.isFeed ? feed.allSourceKeys : []
+        feedTabs = feed.feedTabs ?? []
+        feedColumns = feed.columns
     }
 
     private func resetForm() {
         editingID = nil
         query = ""; enabledFilters = []; shelfName = ""; artistText = ""; artistSourceKeys = []; layout = nil
+        feedSourceKeys = []; feedTabs = []; feedColumns = 3
         listingID = listings.first?.id ?? ""
     }
 
@@ -741,6 +952,8 @@ struct MCDiscoverConfiguration: View {
             return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !enabledFilters.isEmpty
         case .artists:
             return !MCArtistShelfQuery.names(from: artistText).isEmpty
+        case .feed:
+            return !pickedFeedTabs.isEmpty
         }
     }
 
@@ -762,6 +975,7 @@ struct MCDiscoverConfiguration: View {
                 FilterListSheetView(filters: searchFilters, search: $query, enabledFilters: $enabledFilters)
             }
             .task(id: "\(sourceKey)-\(kind.rawValue)") { await loadOptions() }
+            .task(id: kind == .feed ? pickedFeedSources.joined(separator: ",") : "") { await loadFeedListings() }
         }
         .midokuAccent()
     }
@@ -773,12 +987,12 @@ struct MCDiscoverConfiguration: View {
             VStack(spacing: 0) {
                 ForEach(Array(model.feeds.enumerated()), id: \.element.id) { index, feed in
                     HStack(spacing: 10) {
-                        Image(systemName: feed.isArtists ? "person.2" : feed.isSearch ? "magnifyingglass" : "rectangle.stack")
+                        Image(systemName: feed.isFeed ? "square.grid.3x3" : feed.isArtists ? "person.2" : feed.isSearch ? "magnifyingglass" : "rectangle.stack")
                             .font(.system(size: 15)).foregroundStyle(Color.mdText2)
                             .frame(width: 34, height: 34).background(Color.mdS3)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(feed.listingName).font(.mdSystem(size: 15, weight: .medium)).foregroundStyle(Color.mdText).lineLimit(1)
-                            Text("\(feed.subtitle) · \(model.layout(of: feed).title)").font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3).lineLimit(1)
+                            Text("\(feed.subtitle) · \(feed.isFeed ? "\(feed.columns) per row" : model.layout(of: feed).title)").font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3).lineLimit(1)
                         }
                         Spacer(minLength: 0)
                         smallSquare("arrow.up", label: "Move up", disabled: index == 0) { model.move(feed, by: -1) }
@@ -831,10 +1045,12 @@ struct MCDiscoverConfiguration: View {
                     Text(kindHelp)
                         .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
                 }
-                group(kind == .artists ? "Extensions" : "Extension") {
+                group(kind == .artists || kind == .feed ? "Extensions" : "Extension") {
                     MDFlow {
                         ForEach(installed, id: \.key) { source in
-                            if kind == .artists {
+                            if kind == .feed {
+                                chip(source.name, on: pickedFeedSources.contains(source.key)) { toggleFeedSource(source.key) }
+                            } else if kind == .artists {
                                 chip(source.name, on: pickedArtistSources.contains(source.key)) { toggleArtistSource(source.key) }
                             } else {
                                 chip(source.name, on: sourceKey == source.key) {
@@ -847,6 +1063,9 @@ struct MCDiscoverConfiguration: View {
                     if kind == .artists {
                         Text("Pick one or more. They're searched at the same time and the results are sorted by upload date.")
                             .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
+                    } else if kind == .feed {
+                        Text("Pick one or more, then the tabs to merge. Each tab's first page is combined and repeats are shown once.")
+                            .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
                     }
                 }
                 if loading {
@@ -856,21 +1075,34 @@ struct MCDiscoverConfiguration: View {
                     case .tab: tabFields
                     case .search: searchFields
                     case .artists: artistFields
+                    case .feed: feedFields
                     }
                 }
                 if let error { Text(error).font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3) }
                 if !sourceKey.isEmpty {
                     group("Name") {
                         fieldBox {
-                            TextField(kind == .tab ? "Tab name" : kind == .artists ? "Shelf name (optional, e.g. Artist updates)" : "Shelf name (optional)", text: $shelfName)
+                            TextField(kind == .tab ? "Tab name" : kind == .artists ? "Shelf name (optional, e.g. Artist updates)" : kind == .feed ? "Shelf name (optional, e.g. Latest)" : "Shelf name (optional)", text: $shelfName)
                                 .font(.mdSystem(size: 15)).foregroundStyle(Color.mdText)
                         }
                     }
-                    group("Layout") {
-                        MDFlow {
-                            chip("Automatic", on: layout == nil) { layout = nil }
-                            ForEach(MCShelfLayout.allCases, id: \.self) { option in
-                                chip(option.title, on: layout == option, systemImage: option.systemImage) { layout = option }
+                    if kind == .feed {
+                        group("Items per row") {
+                            MDFlow {
+                                ForEach(2...5, id: \.self) { count in
+                                    chip("\(count)", on: feedColumns == count, systemImage: "square.grid.3x3") { feedColumns = count }
+                                }
+                            }
+                            Text("Shows up to \(MCFeedShelfQuery.limit) titles, newest first when the extensions give upload dates.")
+                                .font(.mdSystem(size: 12)).foregroundStyle(Color.mdText3)
+                        }
+                    } else {
+                        group("Layout") {
+                            MDFlow {
+                                chip("Automatic", on: layout == nil) { layout = nil }
+                                ForEach(MCShelfLayout.allCases, id: \.self) { option in
+                                    chip(option.title, on: layout == option, systemImage: option.systemImage) { layout = option }
+                                }
                             }
                         }
                     }
@@ -909,11 +1141,76 @@ struct MCDiscoverConfiguration: View {
         sourceKey = keys.first ?? ""
     }
 
+    /// The extensions a feed shelf merges; switching from another type keeps its extension.
+    private var pickedFeedSources: [String] {
+        feedSourceKeys.isEmpty && !sourceKey.isEmpty ? [sourceKey] : feedSourceKeys
+    }
+
+    /// Picked tabs whose extension is still picked, in the order picked.
+    private var pickedFeedTabs: [MCFeedTab] {
+        let keys = Set(pickedFeedSources)
+        return feedTabs.filter { keys.contains($0.sourceKey) }
+    }
+
+    private func toggleFeedSource(_ key: String) {
+        var keys = pickedFeedSources
+        if let index = keys.firstIndex(of: key) {
+            keys.remove(at: index)
+            feedTabs.removeAll { $0.sourceKey == key }
+        } else {
+            keys.append(key)
+        }
+        feedSourceKeys = keys
+        keepSelection = true
+        sourceKey = keys.first ?? ""
+    }
+
+    private func toggleFeedTab(_ tab: MCFeedTab) {
+        if let index = feedTabs.firstIndex(where: { $0.sourceKey == tab.sourceKey && $0.listingID == tab.listingID }) {
+            feedTabs.remove(at: index)
+        } else {
+            feedTabs.append(tab)
+        }
+    }
+
+    @ViewBuilder private var feedFields: some View {
+        ForEach(pickedFeedSources, id: \.self) { key in
+            let name = sources.source(for: key)?.name ?? key
+            let picked = pickedFeedTabs.filter { $0.sourceKey == key }.count
+            group(picked > 0 ? "\(name) tabs · \(picked)" : "\(name) tabs") {
+                if let listings = feedListings[key] {
+                    if listings.isEmpty {
+                        Text("This extension does not provide discovery tabs.").font(.mdSystem(size: 13)).foregroundStyle(Color.mdText3)
+                    } else {
+                        MDFlow {
+                            ForEach(listings, id: \.id) { listing in
+                                let tab = MCFeedTab(sourceKey: key, listingID: listing.id, listingName: listing.name)
+                                chip(listing.name, on: feedTabs.contains { $0.sourceKey == key && $0.listingID == listing.id }) { toggleFeedTab(tab) }
+                            }
+                        }
+                    }
+                } else {
+                    MDLoading(label: "Loading tabs", shape: .rows, count: 1)
+                }
+            }
+        }
+    }
+
+    private func loadFeedListings() async {
+        for key in pickedFeedSources where feedListings[key] == nil {
+            guard let source = sources.source(for: key) else { continue }
+            let loaded = (try? await source.getListings()) ?? []
+            if Task.isCancelled { return }
+            feedListings[key] = loaded
+        }
+    }
+
     private var kindHelp: String {
         switch kind {
         case .tab: "Shows a tab from the extension, like Popular or Latest."
         case .search: "Reruns your term and filters each time Home refreshes. Results you haven't seen before are marked New."
         case .artists: "The newest titles by these artists, refreshed like your other shelves. Titles you haven't seen before are marked New."
+        case .feed: "Merges tabs from several extensions into one grid of the latest titles, sorted by upload date where possible. Titles you haven't seen before are marked New."
         }
     }
 
@@ -1007,6 +1304,14 @@ struct MCDiscoverConfiguration: View {
                                   listingName: trimmedName.isEmpty ? "Artist updates" : trimmedName,
                                   artistNames: MCArtistShelfQuery.names(from: artistText),
                                   sourceKeys: picked.map(\.key))
+        case .feed:
+            let tabs = pickedFeedTabs
+            guard let first = tabs.first else { return }
+            var seen = Set<String>()
+            let names = tabs.map(\.sourceKey).filter { seen.insert($0).inserted }.map { sources.source(for: $0)?.name ?? $0 }
+            feed = MCDiscoverFeed(sourceKey: first.sourceKey, sourceName: names.joined(separator: " + "), listingID: "",
+                                  listingName: trimmedName.isEmpty ? "Feed" : trimmedName,
+                                  feedTabs: tabs, feedColumns: feedColumns)
         }
         feed.layout = layout
         if let editingID {
@@ -1039,7 +1344,7 @@ struct MCDiscoverConfiguration: View {
                     // Filters from another extension don't apply here.
                     let ids = Set(loaded.map(\.id))
                     enabledFilters.removeAll { !ids.contains($0.id) }
-                case .artists:
+                case .artists, .feed:
                     break
             }
         } catch is CancellationError { }
@@ -1076,8 +1381,8 @@ private struct MCDiscoverShelf: View {
             Button { openListing(feed) } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
-                        if feed.isArtists || feed.isSearch {
-                            Image(systemName: feed.isArtists ? "person.2" : "magnifyingglass").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.mdText3)
+                        if feed.isFeed || feed.isArtists || feed.isSearch {
+                            Image(systemName: feed.isFeed ? "square.grid.3x3" : feed.isArtists ? "person.2" : "magnifyingglass").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.mdText3)
                         }
                         Text(feed.listingName).font(.mdDisplay(21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.mdText).lineLimit(1)
                         if let count = model.newKeys[feed.id]?.count, count > 0 {
@@ -1098,6 +1403,27 @@ private struct MCDiscoverShelf: View {
 
     private func optionRows() -> [MDActionRow] {
         var rows: [MDActionRow] = []
+        if let tabs = feed.feedTabs {
+            for tab in tabs {
+                let name = sources.source(for: tab.sourceKey)?.name ?? tab.sourceKey
+                let single = MCDiscoverFeed(sourceKey: tab.sourceKey, sourceName: name, listingID: tab.listingID, listingName: tab.listingName)
+                rows.append(MDActionRow(systemImage: "puzzlepiece.extension", title: "Open tab in \(name)", detail: tab.listingName) { openListing(single) })
+            }
+            rows += [
+                MDActionRow(systemImage: "pencil", title: "Edit shelf", detail: "Name, tabs, extensions, items per row") { editing = true },
+                MDActionRow(systemImage: "arrow.clockwise", title: "Refresh") { Task { await model.load(feed, force: true) } }
+            ]
+            for count in 2...5 {
+                rows.append(MDActionRow(systemImage: feed.columns == count ? "checkmark" : "square.grid.3x3", title: "\(count) per row",
+                                        detail: feed.columns == count ? "Current layout" : "Layout", keepsOpen: true) {
+                    model.setColumns(count, for: feed)
+                })
+            }
+            rows.append(MDActionRow(systemImage: "arrow.up", title: "Move up", disabled: index == 0) { model.move(feed, by: -1) })
+            rows.append(MDActionRow(systemImage: "arrow.down", title: "Move down", disabled: index == model.feeds.count - 1) { model.move(feed, by: 1) })
+            rows.append(MDActionRow(systemImage: "trash", title: "Remove shelf", destructive: true) { model.remove(feed) })
+            return rows
+        }
         if feed.isArtists {
             // One row per extension the shelf searches.
             for key in feed.allSourceKeys {
@@ -1130,35 +1456,39 @@ private struct MCDiscoverShelf: View {
     @ViewBuilder private var content: some View {
         if let items = model.entries[feed.id], !items.isEmpty {
             let fresh = model.newKeys[feed.id] ?? []
-            switch layout {
-            case .hero:
-                MCDiscoverHero(items: Array(items.prefix(10)), label: feed.listingName, newKeys: fresh,
-                               source: { sources.source(for: $0.sourceKey) }, open: openManga)
-            case .rail:
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(items.prefix(30), id: \.key) { manga in
-                            Button { openManga(manga) } label: { railCard(manga, isNew: fresh.contains(manga.key)) }
-                                .buttonStyle(.plain)
+            if feed.isFeed {
+                feedGrid(items, fresh: fresh)
+            } else {
+                switch layout {
+                case .hero:
+                    MCDiscoverHero(items: Array(items.prefix(10)), label: feed.listingName, newKeys: fresh,
+                                   source: { sources.source(for: $0.sourceKey) }, open: openManga)
+                case .rail:
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(items.prefix(30), id: \.key) { manga in
+                                Button { openManga(manga) } label: { railCard(manga, isNew: fresh.contains(manga.key)) }
+                                    .buttonStyle(.plain)
+                            }
                         }
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 16)
                     }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 16)
-                }
-                .scrollTargetBehavior(.viewAligned)
-            case .grid:
-                // Two rows of small covers that scroll sideways together.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHGrid(rows: [GridItem(.fixed(150), spacing: 14, alignment: .top), GridItem(.fixed(150), alignment: .top)], spacing: 10) {
-                        ForEach(items.prefix(40), id: \.key) { manga in
-                            Button { openManga(manga) } label: { gridCard(manga, isNew: fresh.contains(manga.key)) }
-                                .buttonStyle(.plain)
+                    .scrollTargetBehavior(.viewAligned)
+                case .grid:
+                    // Two rows of small covers that scroll sideways together.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHGrid(rows: [GridItem(.fixed(150), spacing: 14, alignment: .top), GridItem(.fixed(150), alignment: .top)], spacing: 10) {
+                            ForEach(items.prefix(40), id: \.key) { manga in
+                                Button { openManga(manga) } label: { gridCard(manga, isNew: fresh.contains(manga.key)) }
+                                    .buttonStyle(.plain)
+                            }
                         }
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 16)
                     }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 16)
+                    .scrollTargetBehavior(.viewAligned)
                 }
-                .scrollTargetBehavior(.viewAligned)
             }
         } else if let error = model.errors[feed.id] {
             MDEmpty(systemImage: "exclamationmark.triangle", title: "Couldn’t load \(feed.listingName)",
@@ -1167,12 +1497,50 @@ private struct MCDiscoverShelf: View {
                     tone: .error, compact: true)
                 .padding(.horizontal, 16)
         } else if model.loading.contains(feed.id) || model.entries[feed.id] == nil {
-            MDLoading(label: "Loading", shape: layout == .hero ? .rows : .rail,
-                      count: layout == .hero ? 1 : 4)
+            MDLoading(label: "Loading", shape: feed.isFeed ? .grid : layout == .hero ? .rows : .rail,
+                      count: feed.isFeed ? 6 : layout == .hero ? 1 : 4)
                 .padding(.horizontal, 16)
         } else {
             MDEmpty(systemImage: "info.circle", title: "Nothing here yet", compact: true).padding(.horizontal, 16)
         }
+    }
+
+    /// Feed shelves: a vertical grid of up to 100 covers, with each title's extension and age.
+    private func feedGrid(_ items: [AidokuRunner.Manga], fresh: Set<String>) -> some View {
+        let count = feed.columns
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: count)
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+            ForEach(items.prefix(MCFeedShelfQuery.limit), id: \.feedID) { manga in
+                Button { openManga(manga) } label: { feedCard(manga, isNew: fresh.contains(manga.key), columns: count) }
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func feedCard(_ manga: AidokuRunner.Manga, isNew: Bool, columns: Int) -> some View {
+        let sourceName = sources.source(for: manga.sourceKey)?.name
+        let age = MCFeedShelfQuery.uploadTime(manga).map {
+            Date(timeIntervalSince1970: $0).formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated))
+        }
+        let meta = [columns <= 3 ? sourceName : nil, age].compactMap { $0 }.joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 4) {
+            Color.clear
+                .aspectRatio(2 / 3, contentMode: .fit)
+                .overlay { cover(manga) }
+                .clipped()
+                .overlay(alignment: .topLeading) { if isNew { MCDiscoverNewBadge().padding(4) } }
+            Text(manga.title)
+                .font(.mdSystem(size: columns <= 2 ? 14 : columns == 3 ? 12 : 11, weight: .semibold))
+                .foregroundStyle(Color.mdText)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !meta.isEmpty {
+                Text(meta).font(.mdSystem(size: columns <= 3 ? 11 : 10)).foregroundStyle(Color.mdText3).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([isNew ? "New: \(manga.title)" : manga.title, sourceName, age].compactMap { $0 }.joined(separator: ", "))
     }
 
     private func railCard(_ manga: AidokuRunner.Manga, isNew: Bool) -> some View {
@@ -1208,4 +1576,9 @@ private struct MCDiscoverShelf: View {
                 .clipped()
         }
     }
+}
+
+private extension AidokuRunner.Manga {
+    /// Unique across extensions, for lists that mix several.
+    var feedID: String { "\(sourceKey)|\(key)" }
 }
