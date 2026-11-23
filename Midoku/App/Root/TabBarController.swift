@@ -25,6 +25,10 @@ class TabBarController: UITabBarController {
     private let searchController = SearchViewController()
     private var appLockOverlay: UIView?
     private var appLockButton: UIButton?
+    private var appLockDetail: UILabel?
+    /// The Face ID check in progress; replaced when the user taps Unlock again.
+    private var appLockContext: LAContext?
+    private static let appLockOverlayTag = 0x4D4C4F43
     private var appSwitcherBlurOverlay: UIVisualEffectView?
     private var appBackgroundedAt: Date?
     private var hasAuthenticatedAppLock = false
@@ -313,6 +317,7 @@ private extension TabBarController {
         overlay.translatesAutoresizingMaskIntoConstraints = false
         overlay.backgroundColor = .systemBackground
         overlay.accessibilityViewIsModal = true
+        overlay.tag = Self.appLockOverlayTag
 
         let symbol = UIImage.SymbolConfiguration(pointSize: 54, weight: .medium)
         let icon = UIImageView(image: UIImage(systemName: "lock.fill", withConfiguration: symbol))
@@ -340,10 +345,12 @@ private extension TabBarController {
         configuration.cornerStyle = .large
         let button = UIButton(configuration: configuration)
         button.addAction(UIAction { [weak self] _ in
-            Task { @MainActor in self?.unlockAppIfNeeded() }
+            // Always starts a fresh check, so a check that never answered can't trap the user.
+            Task { @MainActor in self?.unlockAppIfNeeded(restart: true) }
         }, for: .touchUpInside)
         button.accessibilityHint = "Uses Face ID, Touch ID, or your device passcode"
         appLockButton = button
+        appLockDetail = detail
 
         let stack = UIStackView(arrangedSubviews: [icon, title, detail, button])
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -372,33 +379,57 @@ private extension TabBarController {
 
     func hideAppLock() {
         appLockOverlay?.removeFromSuperview()
+        // Also clears any stray lock screen left on a window.
+        for window in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
+            window.subviews.filter { $0.tag == Self.appLockOverlayTag }.forEach { $0.removeFromSuperview() }
+        }
         appLockOverlay = nil
         appLockButton = nil
+        appLockDetail = nil
+        appLockContext?.invalidate()
+        appLockContext = nil
         unlockingApp = false
     }
 
-    func unlockAppIfNeeded() {
-        guard AppSettings.general.appLock.get(), appLockOverlay != nil, !unlockingApp else { return }
+    func unlockAppIfNeeded(restart: Bool = false) {
+        guard AppSettings.general.appLock.get(), appLockOverlay != nil else { return }
+        // Face ID can't be shown before the app is active; becoming active asks again.
+        guard UIApplication.shared.applicationState == .active else { return }
+        if unlockingApp {
+            guard restart else { return }
+            appLockContext?.invalidate()
+        }
+        let context = LAContext()
+        appLockContext = context
         unlockingApp = true
-        appLockButton?.isEnabled = false
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer {
-                self.unlockingApp = false
-                self.appLockButton?.isEnabled = true
-            }
-            do {
-                let success = try await LAContext().evaluatePolicy(
-                    .defaultPolicy,
-                    localizedReason: "Unlock Midoku"
-                )
+        appLockDetail?.text = "Authenticate to continue."
+
+        var error: NSError?
+        guard context.canEvaluatePolicy(.defaultPolicy, error: &error) else {
+            // No passcode set, so there's nothing to authenticate with.
+            unlockingApp = false
+            appLockDetail?.text = error?.localizedDescription ?? "Face ID and passcode are unavailable."
+            return
+        }
+
+        context.evaluatePolicy(.defaultPolicy, localizedReason: "Unlock Midoku") { success, error in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 if success {
                     self.hasAuthenticatedAppLock = true
                     self.hideAppLock()
                     self.hideAppSwitcherBlur()
+                    return
                 }
-            } catch {
-                // Keep the lock screen visible so the user can retry.
+                // A replaced check reports its cancellation; only the current one updates the screen.
+                guard self.appLockContext === context else { return }
+                self.unlockingApp = false
+                self.appLockContext = nil
+                if let error = error as? LAError, [.userCancel, .systemCancel, .appCancel].contains(error.code) {
+                    self.appLockDetail?.text = "Authenticate to continue."
+                } else {
+                    self.appLockDetail?.text = error?.localizedDescription ?? "Authentication failed. Try again."
+                }
             }
         }
     }
