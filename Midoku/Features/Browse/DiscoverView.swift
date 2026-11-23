@@ -55,38 +55,62 @@ struct MCFeedTab: Codable, Hashable {
     var listingName: String
 }
 
-/// Feed shelves: the first page of several extension tabs merged into one list of at most
+/// Feed shelves: the first page of each of several extension tabs merged into one list of at most
 /// `limit` titles, newest first where extensions report an upload time. A title found in
 /// several tabs shows once, from whichever comes first.
 enum MCFeedShelfQuery {
     static let limit = 100
 
-    /// Fails only when every tab fails.
+    /// Fails only when every tab fails. Each extension gets one task that loads its tabs one
+    /// after another (an extension runs one call at a time anyway), and every call goes through
+    /// `MCSourceCallLimiter` so a big feed can't starve the app's other extension calls.
     static func load(tabs: [(tab: MCFeedTab, source: AidokuRunner.Source)]) async throws -> [AidokuRunner.Manga] {
-        let perTab = max(20, Int((Double(limit) / Double(max(tabs.count, 1))).rounded(.up)))
-        let results = await withTaskGroup(of: (Int, Result<[AidokuRunner.Manga], Error>).self) { group in
-            for (index, item) in tabs.enumerated() {
-                let tab = item.tab, source = item.source
+        var order: [String] = []
+        var grouped: [String: (source: AidokuRunner.Source, tabs: [(index: Int, tab: MCFeedTab)])] = [:]
+        for (index, item) in tabs.enumerated() {
+            if grouped[item.tab.sourceKey] == nil {
+                order.append(item.tab.sourceKey)
+                grouped[item.tab.sourceKey] = (item.source, [])
+            }
+            grouped[item.tab.sourceKey]?.tabs.append((index, item.tab))
+        }
+        let results = await withTaskGroup(of: [(Int, Result<[AidokuRunner.Manga], Error>)].self) { group in
+            for key in order {
+                guard let entry = grouped[key] else { continue }
+                let source = entry.source, sourceTabs = entry.tabs
                 group.addTask {
+                    var listings: [AidokuRunner.Listing] = []
+                    var listingsError: Error?
                     do {
-                        guard let listing = try await source.getListings().first(where: { $0.id == tab.listingID }) else {
-                            throw MCFeedShelfError.missingTab(tab.listingName)
-                        }
-                        let first = try await source.getMangaList(listing: listing, page: 1)
-                        var entries = first.entries
-                        // A second page when one isn't enough to fill this tab's share of the feed.
-                        if first.hasNextPage, entries.count < perTab,
-                           let second = try? await source.getMangaList(listing: listing, page: 2) {
-                            entries += second.entries
-                        }
-                        return (index, .success(entries))
+                        listings = try await MCSourceCallLimiter.shared.run { try await source.getListings() }
                     } catch {
-                        return (index, .failure(error))
+                        listingsError = error
                     }
+                    var out: [(Int, Result<[AidokuRunner.Manga], Error>)] = []
+                    for (index, tab) in sourceTabs {
+                        if Task.isCancelled { break }
+                        if let listingsError {
+                            out.append((index, .failure(listingsError)))
+                            continue
+                        }
+                        guard let listing = listings.first(where: { $0.id == tab.listingID }) else {
+                            out.append((index, .failure(MCFeedShelfError.missingTab(tab.listingName))))
+                            continue
+                        }
+                        do {
+                            let page = try await MCSourceCallLimiter.shared.run {
+                                try await source.getMangaList(listing: listing, page: 1)
+                            }
+                            out.append((index, .success(page.entries)))
+                        } catch {
+                            out.append((index, .failure(error)))
+                        }
+                    }
+                    return out
                 }
             }
             var collected: [(Int, Result<[AidokuRunner.Manga], Error>)] = []
-            for await item in group { collected.append(item) }
+            for await part in group { collected += part }
             return collected.sorted { $0.0 < $1.0 }.map(\.1)
         }
         var lists: [[AidokuRunner.Manga]] = []
@@ -194,6 +218,40 @@ enum MCFeedShelfError: LocalizedError {
     }
 }
 
+/// Home's extension calls run at most `limit` at a time. An extension holds a Swift
+/// concurrency thread while its network requests run, so many calls at once use up the shared
+/// thread pool and every extension in the app stops loading. Waiting here holds no thread.
+actor MCSourceCallLimiter {
+    static let shared = MCSourceCallLimiter(limit: 2)
+    private let limit: Int
+    private var running = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func run<T>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        await acquire()
+        defer { release() }
+        return try await operation()
+    }
+
+    private func acquire() async {
+        if running < limit {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    private func release() {
+        if waiters.isEmpty {
+            running -= 1
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 /// How an artist shelf asks its extension for the artists' newest titles: the extension's
 /// Artist field with the names joined by `|`, sorted by latest when it offers that.
 enum MCArtistShelfQuery {
@@ -236,8 +294,10 @@ enum MCArtistShelfQuery {
             for (index, source) in sources.enumerated() {
                 group.addTask {
                     do {
-                        let values = try await Self.filters(for: artists, source: source)
-                        let result = try await source.getSearchMangaList(query: nil, page: 1, filters: values)
+                        let result = try await MCSourceCallLimiter.shared.run {
+                            let values = try await Self.filters(for: artists, source: source)
+                            return try await source.getSearchMangaList(query: nil, page: 1, filters: values)
+                        }
                         return (index, .success(result.entries))
                     } catch {
                         return (index, .failure(error))
@@ -478,14 +538,17 @@ final class MCDiscoverModel: ObservableObject {
         loading.insert(feed.id); errors[feed.id] = nil
         defer { loading.remove(feed.id) }
         do {
-            let result: AidokuRunner.MangaPageResult
-            if feed.isSearch {
-                let query = feed.query ?? ""
-                result = try await source.getSearchMangaList(query: query.isEmpty ? nil : query, page: 1, filters: feed.filters ?? [])
-            } else {
-                let listing = try await source.getListings().first { $0.id == feed.listingID }
-                guard let listing else { errors[feed.id] = "This tab is no longer available. Remove this shelf and add another tab."; return }
-                result = try await source.getMangaList(listing: listing, page: 1)
+            let isSearch = feed.isSearch, query = feed.query ?? "", filters = feed.filters ?? [], listingID = feed.listingID
+            let fetched: AidokuRunner.MangaPageResult? = try await MCSourceCallLimiter.shared.run {
+                if isSearch {
+                    return try await source.getSearchMangaList(query: query.isEmpty ? nil : query, page: 1, filters: filters)
+                }
+                guard let listing = try await source.getListings().first(where: { $0.id == listingID }) else { return nil }
+                return try await source.getMangaList(listing: listing, page: 1)
+            }
+            guard let result = fetched else {
+                errors[feed.id] = "This tab is no longer available. Remove this shelf and add another tab."
+                return
             }
             try Task.checkCancellation()
             var unique = Set<String>()
@@ -1213,7 +1276,7 @@ struct MCDiscoverConfiguration: View {
     private func loadFeedListings() async {
         for key in pickedFeedSources where feedListings[key] == nil {
             guard let source = sources.source(for: key) else { continue }
-            let loaded = (try? await source.getListings()) ?? []
+            let loaded = (try? await MCSourceCallLimiter.shared.run { try await source.getListings() }) ?? []
             if Task.isCancelled { return }
             feedListings[key] = loaded
         }
@@ -1347,12 +1410,12 @@ struct MCDiscoverConfiguration: View {
         do {
             switch kind {
                 case .tab:
-                    let loaded = try await source.getListings()
+                    let loaded = try await MCSourceCallLimiter.shared.run { try await source.getListings() }
                     try Task.checkCancellation()
                     listings = loaded
                     if !loaded.contains(where: { $0.id == listingID }) { listingID = loaded.first?.id ?? "" }
                 case .search:
-                    let loaded = try await source.getSearchFilters()
+                    let loaded = try await MCSourceCallLimiter.shared.run { try await source.getSearchFilters() }
                     try Task.checkCancellation()
                     searchFilters = loaded
                     // Filters from another extension don't apply here.
