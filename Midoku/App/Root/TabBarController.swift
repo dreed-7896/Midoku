@@ -414,7 +414,7 @@ private extension TabBarController {
             return
         }
 
-        context.evaluatePolicy(.defaultPolicy, localizedReason: "Unlock Midoku") { success, error in
+        context.evaluatePolicy(.defaultPolicy, localizedReason: "Unlock Midoku") { [weak self] success, error in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if success {

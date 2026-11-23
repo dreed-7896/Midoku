@@ -64,7 +64,7 @@ actor BackupManager {
 
     private func restoreAppState(from backup: Backup) async {
         guard let data = backup.appState,
-              let values = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+              let values = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
         else { return }
         for (key, value) in values where key.hasPrefix("Midoku.") && !Self.excludedAppStateKeys.contains(key) {
             UserDefaults.standard.set(value, forKey: key)
