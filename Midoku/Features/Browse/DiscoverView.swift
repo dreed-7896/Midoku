@@ -337,7 +337,21 @@ final class MCDiscoverModel: ObservableObject {
     @Published var errors: [UUID: String] = [:]
     @Published var loading = Set<UUID>()
 
+    private var restoreObserver: NSObjectProtocol?
+
     init() {
+        loadSaved()
+        restoreObserver = NotificationCenter.default.addObserver(forName: .midokuAppStateRestored, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.entries = [:]; self.errors = [:]; self.newKeys = [:]
+                self.loadSaved()
+                Task { await self.reload() }
+            }
+        }
+    }
+
+    private func loadSaved() {
         if let data = UserDefaults.standard.data(forKey: Self.key), let feeds = try? JSONDecoder().decode([MCDiscoverFeed].self, from: data) {
             self.feeds = feeds.filter { !$0.isLegacyArtists }
             if self.feeds.count != feeds.count { save() }

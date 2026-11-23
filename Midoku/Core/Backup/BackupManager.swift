@@ -47,6 +47,33 @@ actor BackupManager {
         "Dictionary"
     ]
 
+    /// `Midoku.` keys that only describe this device's session, not the user's setup.
+    private static let excludedAppStateKeys: Set<String> = [
+        "Midoku.webDesignApplied",
+        "Midoku.miniDismissedAt"
+    ]
+
+    /// Every `Midoku.`-prefixed user default, so shelves and library layout survive a restore.
+    private nonisolated static func exportAppState() -> Data? {
+        let values = UserDefaults.standard.dictionaryRepresentation().filter { key, value in
+            key.hasPrefix("Midoku.") && !excludedAppStateKeys.contains(key) && PropertyListSerialization.propertyList(value, isValidFor: .binary)
+        }
+        guard !values.isEmpty else { return nil }
+        return try? PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0)
+    }
+
+    private func restoreAppState(from backup: Backup) async {
+        guard let data = backup.appState,
+              let values = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return }
+        for (key, value) in values where key.hasPrefix("Midoku.") && !Self.excludedAppStateKeys.contains(key) {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .midokuAppStateRestored, object: nil)
+        }
+    }
+
     func save(backup: Backup, url: URL? = nil) throws {
         try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         let encoder = PropertyListEncoder()
@@ -209,7 +236,8 @@ actor BackupManager {
                 date: Date.now,
                 name: name.isEmpty ? nil : name,
                 automatic: options.automatic,
-                version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+                version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown",
+                appState: Self.exportAppState()
             )
         }
     }
@@ -600,6 +628,7 @@ extension BackupManager {
 
         // Restore application and currently installed source settings as part of the initial restore.
         await restoreSettings(from: backup)
+        await restoreAppState(from: backup)
 
         await Task { @MainActor in
             await UIApplication.shared.appDelegate?.hideLoadingIndicator()
@@ -777,4 +806,9 @@ extension BackupManager {
             LogManager.logger.error("Could not save automatic backup: \(error)")
         }
     }
+}
+
+extension Notification.Name {
+    /// Posted after a backup restored Midoku's app state (Home shelves, library layout).
+    static let midokuAppStateRestored = Notification.Name("Midoku.appStateRestored")
 }

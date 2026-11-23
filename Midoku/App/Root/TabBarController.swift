@@ -389,6 +389,8 @@ private extension TabBarController {
         appLockContext?.invalidate()
         appLockContext = nil
         unlockingApp = false
+        // The system Face ID sheet can leave another window key, which stops the keyboard and paste.
+        if let window = view.window, !window.isKeyWindow { window.makeKey() }
     }
 
     func unlockAppIfNeeded(restart: Bool = false) {

@@ -12,6 +12,8 @@ struct SourceListsView: View {
     @State private var sourceLists: [URL: SourceList] = [:]
     @State private var missingSourceLists: Set<URL> = []
     @State private var showAddListFailAlert = false
+    @State private var showAddAlert = false
+    @State private var newListURL = ""
 
     private var activeSourceListURLs: [URL] {
         sourceListsURLs.filter {
@@ -21,6 +23,23 @@ struct SourceListsView: View {
 
     var body: some View {
         List {
+            if sourceListsURLs.isEmpty {
+                Section {
+                    Text("No source lists yet. Add one to install extensions.")
+                        .foregroundStyle(.secondary)
+                    Button {
+                        addFromClipboard()
+                    } label: {
+                        Label("Add from clipboard", systemImage: "doc.on.clipboard")
+                    }
+                    Button {
+                        newListURL = ""
+                        showAddAlert = true
+                    } label: {
+                        Label(NSLocalizedString("SOURCE_LIST_ADD"), systemImage: "plus")
+                    }
+                }
+            }
             Section {
                 ForEach(activeSourceListURLs, id: \.self) { url in
                     if let sourceList = sourceLists[url] {
@@ -49,13 +68,37 @@ struct SourceListsView: View {
         .navigationTitle(NSLocalizedString("SOURCE_LISTS"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showAlert()
+                Menu {
+                    Button {
+                        newListURL = ""
+                        showAddAlert = true
+                    } label: {
+                        Label("Enter URL", systemImage: "keyboard")
+                    }
+                    Button {
+                        addFromClipboard()
+                    } label: {
+                        Label("Add from clipboard", systemImage: "doc.on.clipboard")
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
+                .accessibilityLabel(NSLocalizedString("SOURCE_LIST_ADD"))
             }
             .sharedBackgroundVisibility(.hidden)
+        }
+        .alert(NSLocalizedString("SOURCE_LIST_ADD"), isPresented: $showAddAlert) {
+            TextField(NSLocalizedString("SOURCE_LIST_URL"), text: $newListURL)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button(NSLocalizedString("CANCEL"), role: .cancel) {}
+            Button("Paste and add") { addFromClipboard() }
+            Button(NSLocalizedString("OK")) {
+                addSourceList(url: newListURL.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        } message: {
+            Text(NSLocalizedString("SOURCE_LIST_ADD_TEXT"))
         }
         .alert(NSLocalizedString("SOURCE_LIST_ADD_FAIL"), isPresented: $showAddListFailAlert) {
             Button(NSLocalizedString("OK"), role: .cancel) {}
@@ -183,29 +226,15 @@ struct SourceListsView: View {
         }
     }
 
-    func showAlert() {
-        var alertTextField: UITextField?
-        UIApplication.shared.appDelegate?.presentAlert(
-            title: NSLocalizedString("SOURCE_LIST_ADD"),
-            message: NSLocalizedString("SOURCE_LIST_ADD_TEXT"),
-            actions: [
-                UIAlertAction(title: NSLocalizedString("CANCEL"), style: .cancel),
-                UIAlertAction(title: NSLocalizedString("OK"), style: .default) { _ in
-                    guard let text = alertTextField?.text, !text.isEmpty else { return }
-                    addSourceList(url: text)
-                }
-            ],
-            textFieldHandlers: [
-                { textField in
-                    textField.placeholder = NSLocalizedString("SOURCE_LIST_URL")
-                    textField.keyboardType = .URL
-                    textField.autocorrectionType = .no
-                    textField.autocapitalizationType = .none
-                    textField.returnKeyType = .done
-                    alertTextField = textField
-                }
-            ]
-        )
+    /// Adds the link on the clipboard, for when typing into the prompt isn't possible.
+    func addFromClipboard() {
+        let text = (UIPasteboard.general.url?.absoluteString ?? UIPasteboard.general.string ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            showAddListFailAlert = true
+            return
+        }
+        addSourceList(url: text)
     }
 }
 

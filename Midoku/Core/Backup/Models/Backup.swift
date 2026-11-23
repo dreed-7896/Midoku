@@ -28,6 +28,9 @@ struct Backup: Codable, Hashable, Identifiable, Sendable {
     var name: String?
     var automatic: Bool?
     var version: String?
+    /// Midoku's own app state kept in user defaults (Home shelves, library grouping, sorts,
+    /// subgroups, smart tabs and similar), as a property list of `Midoku.`-prefixed keys.
+    var appState: Data? = nil
 
     static func load(from url: URL) -> Backup? {
         guard let json = try? Data(contentsOf: url) else { return nil }
