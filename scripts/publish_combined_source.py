@@ -66,8 +66,8 @@ def combine(sources, previous, source_url):
         "name": "Raahat's Apps",
         "identifier": "com.raahat.source",
         "sourceURL": source_url,
-        "subtitle": "Midoku and Stash",
-        "description": "Midoku, the manga and webtoon reader, and Stash, the video, file and torrent downloader. "
+        "subtitle": "Midoku and Drift",
+        "description": "Midoku, the manga and webtoon reader, and Drift, the browser that saves videos, files and torrents. "
                        "Both update here after every successful build.",
         "website": "https://github.com/dreed-7896",
         "iconURL": next((app.get("iconURL") for app in ordered if app.get("iconURL")), None),
